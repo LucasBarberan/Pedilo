@@ -1,75 +1,41 @@
-"use client"
+// components/category-menu.tsx
+"use client";
+import Image from "next/image";
 
-import { ShoppingCart } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { useCart } from "@/components/cart-context"
+export type Category = {
+  id: string | number;
+  name: string;
+  code?: number | string;
+  imageUrl?: string;
+};
 
-interface CategoryMenuProps {
-  onCategorySelect: (category: string) => void
-  onCartClick: () => void
+export type CategoryMenuProps = {
+  categories: Category[];
+  onCategorySelect: (slugOrCode: string) => void;
+  onCartClick?: () => void; // opcional
+};
+
+function slugify(s: string) {
+  return s
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z0-9\s-]/g, "")
+    .trim().replace(/\s+/g, "-");
 }
 
-export function CategoryMenu({ onCategorySelect, onCartClick }: CategoryMenuProps) {
-  const { getTotalItems } = useCart()
-
-  const categories = [
-    {
-      id: "hamburguesas-completas",
-      name: "HAMBURGUESAS CON PAPAS",
-      image: "/rewards/free-burger.png",
-    },
-    {
-      id: "hamburguesas-sin-papas",
-      name: "HAMBURGUESAS SIN PAPAS",
-      image: "/gourmet-burger-without-fries.png",
-    },
-    {
-      id: "bebidas",
-      name: "BEBIDAS",
-      image: "/refreshing-drinks-and-sodas.png",
-    },
-    {
-      id: "extras",
-      name: "EXTRAS",
-      image: "/burger-extras-and-sides.png",
-    },
-  ]
-
+function CategoryMenu({ categories, onCategorySelect }: CategoryMenuProps) {
   return (
-    <div className="relative">
-      {/* Header */}
-      <div className="bg-primary text-primary-foreground p-4 flex justify-between items-center">
-        <h1 className="text-xl font-bold">Categorías</h1>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onCartClick}
-          className="relative text-primary-foreground hover:bg-primary-foreground/20"
+    <div className="mx-auto w-full max-w-6xl px-4 py-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+      {categories.map((c) => (
+        <button
+          key={String(c.id)}
+          onClick={() => onCategorySelect(slugify(c.name))}
+          className="rounded-2xl bg-white/60 ring-1 ring-black/5 shadow-sm p-4 h-48 flex items-center justify-center"
         >
-          <ShoppingCart className="h-6 w-6" />
-          {getTotalItems() > 0 && (
-            <span className="absolute -top-2 -right-2 bg-accent text-accent-foreground text-xs rounded-full h-5 w-5 flex items-center justify-center font-bold">
-              {getTotalItems()}
-            </span>
-          )}
-        </Button>
-      </div>
-
-      {/* Categories Grid */}
-      <div className="p-4 space-y-4">
-        {categories.map((category) => (
-          <div
-            key={category.id}
-            onClick={() => onCategorySelect(category.id)}
-            className="relative overflow-hidden rounded-xl cursor-pointer transform transition-transform active:scale-95"
-          >
-            <img src={category.image || "/placeholder.svg"} alt={category.name} className="w-full h-32 object-cover" />
-            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-              <h2 className="text-white text-lg font-bold text-center px-4">{category.name}</h2>
-            </div>
-          </div>
-        ))}
-      </div>
+          <span className="text-xl font-extrabold uppercase">{c.name}</span>
+        </button>
+      ))}
     </div>
-  )
+  );
 }
+
+export default CategoryMenu; // <<--- IMPORTANTE
