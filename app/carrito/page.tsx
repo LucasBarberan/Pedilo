@@ -3,9 +3,9 @@
 
 import { useCart } from "@/components/cart-context";
 import SiteHeader from "@/components/site-header";
+import { Button } from "@/components/ui/button";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
 
 const fmt = (n: number) => `$${n.toLocaleString("es-AR")}`;
 
@@ -102,7 +102,7 @@ export default function CartPage() {
             </div>
 
             <div className="flex gap-3">
-              <Button className="flex-1">Realizar Pedido</Button>
+              <Button className="w-full" onClick={() => router.push("/checkout")}>Realizar Pedido</Button>
               <Button variant="outline" onClick={clearCart}>
                 Vaciar
               </Button>

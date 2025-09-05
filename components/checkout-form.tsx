@@ -1,213 +1,345 @@
-"use client"
+"use client";
 
-import type React from "react"
+import { useCart } from "@/components/cart-context";
+import { Button } from "@/components/ui/button";
+import { useEffect, useMemo, useState } from "react";
 
-import { useState } from "react"
-import { ArrowLeft } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Textarea } from "@/components/ui/textarea"
-import { useCart } from "@/components/cart-context"
+type Customer = {
+  name: string;
+  phone: string;
+  address: string;
+};
 
-interface CheckoutFormProps {
-  onBack: () => void
-  onClose: () => void
-}
+type Props = {
+  onCancel?: () => void;
+  onSuccess?: () => void;
+};
 
-export function CheckoutForm({ onBack, onClose }: CheckoutFormProps) {
-  const { items, getTotalPrice, clearCart } = useCart()
-  const [formData, setFormData] = useState({
-    firstName: "",
-    lastName: "",
+const fmt = (n: number) => `$${n.toLocaleString("es-AR")}`;
+
+export default function CheckoutForm({ onCancel, onSuccess }: Props) {
+  const { items, getTotalPrice, clearCart } = useCart();
+
+  const [customer, setCustomer] = useState<Customer>({
+    name: "",
     phone: "",
-    deliveryType: "pickup", // pickup or delivery
     address: "",
-    paymentMethod: "transfer", // transfer or cash
-  })
+  });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+  const [deliveryMethod, setDeliveryMethod] =
+    useState<"delivery" | "pickup">("delivery");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "mp">("cash");
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
 
-    // Validate required fields
-    if (!formData.firstName || !formData.lastName || !formData.phone) {
-      alert("Por favor completa todos los campos obligatorios")
-      return
+  // Cargar / guardar datos del cliente en localStorage
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("checkout.customer");
+      if (raw) setCustomer(JSON.parse(raw));
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem("checkout.customer", JSON.stringify(customer));
+    } catch {}
+  }, [customer]);
+
+  const BASE = process.env.NEXT_PUBLIC_API_URL;
+  const STORE_NAME = process.env.NEXT_PUBLIC_STORE_NAME || "SRA. BURGA";
+
+  /** 🔹 Arma el texto de WhatsApp (incluye tamaño + observaciones) */
+  function buildWhatsAppText() {
+    const lines: string[] = [];
+
+    // Encabezado con nombre de la tienda
+    lines.push(`*${STORE_NAME} – Nuevo pedido*`);
+    lines.push("");
+    lines.push(`*Cliente:* ${customer.name}`);
+    if (customer.phone?.trim()) lines.push(`*Tel:* ${customer.phone}`);
+    if (deliveryMethod === "delivery" && customer.address?.trim()) {
+      lines.push(`*Dirección:* ${customer.address}`);
+    }
+    lines.push(
+      `*Entrega:* ${deliveryMethod === "delivery" ? "Delivery" : "Retiro"}`
+    );
+    lines.push(
+      `*Pago:* ${paymentMethod === "cash" ? "Efectivo" : "Mercado Pago"}`
+    );
+    if (notes?.trim()) lines.push(`*Obs generales:* ${notes.trim()}`);
+    lines.push("");
+    lines.push("*Items:*");
+
+    items.forEach((it) => {
+      const unit = it.finalPrice / it.quantity || it.price;
+      lines.push(
+        `• ${it.quantity} x ${it.name}${it.size ? ` (tamaño: ${it.size})` : ""} – ${fmt(
+          unit
+        )} c/u`
+      );
+      if (it.observations?.trim()) {
+        lines.push(`   Obs: ${it.observations.trim()}`);
+      }
+    });
+
+    lines.push("");
+    lines.push(`*Total:* ${fmt(total)}`);
+
+    return lines.join("\n");
+  }
+
+  async function submitOrder() {
+    if (!customer.name.trim() || !customer.phone.trim()) {
+      alert("Completá al menos nombre y teléfono.");
+      return;
+    }
+    if (items.length === 0) {
+      alert("Tu carrito está vacío.");
+      return;
     }
 
-    if (formData.deliveryType === "delivery" && !formData.address) {
-      alert("Por favor ingresa la dirección para el delivery")
-      return
+    setSubmitting(true);
+
+    // payload por si querés guardarlo cuando tengas backend
+    const payload = {
+      createdAt: new Date().toISOString(),
+      customer,
+      deliveryMethod,
+      paymentMethod,
+      notes,
+      total,
+      items: items.map((it) => ({
+        id: it.id,
+        name: it.name,
+        quantity: it.quantity,
+        unitPrice: it.finalPrice / it.quantity || it.price,
+        finalPrice: it.finalPrice,
+        size: it.size,
+        image: it.image,
+        observations: it.observations ?? "",
+      })),
+      status: "pending",
+    };
+
+    // 1) WhatsApp (siempre)
+    const businessPhone = process.env.NEXT_PUBLIC_WA_NUMBER || ""; // ej: 5491122334455
+    const waText = encodeURIComponent(buildWhatsAppText());
+
+    if (businessPhone) {
+      // tip anti-bloqueador: abrimos primero y luego seteamos href
+      const win = window.open("about:blank", "_blank");
+      const url = `https://wa.me/${businessPhone}?text=${waText}`;
+      if (win) win.location.href = url;
+      else window.open(url, "_blank");
+    } else {
+      try {
+        await navigator.clipboard.writeText(buildWhatsAppText());
+        alert(
+          "Configurá NEXT_PUBLIC_WA_NUMBER. El detalle del pedido fue copiado al portapapeles."
+        );
+      } catch {
+        alert(
+          "Configurá NEXT_PUBLIC_WA_NUMBER. Copiá y pegá este mensaje:\n\n" +
+            buildWhatsAppText()
+        );
+      }
     }
 
-    // Process order
-    const orderSummary = `
-¡Pedido confirmado!
+    // 2) (Opcional) Enviar al backend cuando esté listo
+    const SEND_TO_API =
+      (process.env.NEXT_PUBLIC_SEND_ORDERS || "").toLowerCase() === "true"; // por defecto false
 
-Cliente: ${formData.firstName} ${formData.lastName}
-Teléfono: ${formData.phone}
-Entrega: ${formData.deliveryType === "pickup" ? "Retiro en local" : "Delivery"}
-${formData.deliveryType === "delivery" ? `Dirección: ${formData.address}` : ""}
-Pago: ${formData.paymentMethod === "transfer" ? "Transferencia" : "Efectivo"}
+    if (SEND_TO_API) {
+      try {
+        const base = BASE; // tu backend real
+        if (!base) throw new Error("Falta NEXT_PUBLIC_API_URL");
+        await fetch(`${base}/orders`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        // Si falla, no frenamos: WhatsApp ya salió
+      } catch (e) {
+        console.warn(
+          "No se pudo enviar al backend (ignorado hasta que esté listo):",
+          e
+        );
+      }
+    }
 
-Total: $${getTotalPrice().toLocaleString()}
+    // 3) Limpiar carrito y cerrar
+    clearCart();
+    onSuccess?.();
+    setSubmitting(false);
+  }
 
-¡Gracias por tu pedido!
-    `
-
-    alert(orderSummary)
-    clearCart()
-    onClose()
+  if (items.length === 0) {
+    return (
+      <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-6 text-center">
+        Tu carrito está vacío.
+      </div>
+    );
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end">
-      <div className="bg-background w-full max-h-[90vh] rounded-t-xl overflow-hidden">
-        {/* Header */}
-        <div className="bg-primary text-primary-foreground p-4 flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onBack}
-            className="text-primary-foreground hover:bg-primary-foreground/20 p-1"
-          >
-            <ArrowLeft className="h-6 w-6" />
-          </Button>
-          <h2 className="text-xl font-bold">Datos del Cliente</h2>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Columna izquierda: Datos del cliente */}
+      <div className="space-y-4">
+        <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
+          <div className="text-sm font-semibold mb-3">Datos del cliente</div>
+
+          <label className="block text-sm mb-1">Nombre y Apellido</label>
+          <input
+            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#ea562f] mb-3"
+            value={customer.name}
+            onChange={(e) =>
+              setCustomer({ ...customer, name: e.target.value })
+            }
+            placeholder="Tu nombre"
+          />
+
+          <label className="block text-sm mb-1">Teléfono</label>
+          <input
+            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#ea562f] mb-3"
+            value={customer.phone}
+            onChange={(e) =>
+              setCustomer({ ...customer, phone: e.target.value })
+            }
+            placeholder="Ej: 11 5555 5555"
+          />
+
+          <label className="block text-sm mb-1">Dirección</label>
+          <input
+            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#ea562f]"
+            value={customer.address}
+            onChange={(e) =>
+              setCustomer({ ...customer, address: e.target.value })
+            }
+            placeholder="Calle 123, Piso/Depto"
+          />
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
-          <div className="p-4 space-y-6">
-            {/* Personal Info */}
-            <div className="space-y-4">
-              <h3 className="font-bold text-lg">Información Personal</h3>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label htmlFor="firstName">Nombre *</Label>
-                  <Input
-                    id="firstName"
-                    value={formData.firstName}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, firstName: e.target.value }))}
-                    placeholder="Tu nombre"
-                    required
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="lastName">Apellido *</Label>
-                  <Input
-                    id="lastName"
-                    value={formData.lastName}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, lastName: e.target.value }))}
-                    placeholder="Tu apellido"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="phone">Teléfono *</Label>
-                <Input
-                  id="phone"
-                  type="tel"
-                  value={formData.phone}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, phone: e.target.value }))}
-                  placeholder="Ej: +56 9 1234 5678"
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Delivery Type */}
-            <div className="space-y-4">
-              <h3 className="font-bold text-lg">Tipo de Entrega</h3>
-              <RadioGroup
-                value={formData.deliveryType}
-                onValueChange={(value) => setFormData((prev) => ({ ...prev, deliveryType: value }))}
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="pickup" id="pickup" />
-                  <Label htmlFor="pickup">Retiro en local</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="delivery" id="delivery" />
-                  <Label htmlFor="delivery">Delivery</Label>
-                </div>
-              </RadioGroup>
-
-              {formData.deliveryType === "delivery" && (
-                <div>
-                  <Label htmlFor="address">Dirección *</Label>
-                  <Textarea
-                    id="address"
-                    value={formData.address}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, address: e.target.value }))}
-                    placeholder="Ingresa tu dirección completa"
-                    rows={3}
-                    required
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Payment Method */}
-            <div className="space-y-4">
-              <h3 className="font-bold text-lg">Método de Pago</h3>
-              <RadioGroup
-                value={formData.paymentMethod}
-                onValueChange={(value) => setFormData((prev) => ({ ...prev, paymentMethod: value }))}
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="transfer" id="transfer" />
-                  <Label htmlFor="transfer">Transferencia</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="cash" id="cash" />
-                  <Label htmlFor="cash">Efectivo</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            {/* Order Summary */}
-            <div className="bg-card rounded-xl p-4">
-              <h3 className="font-bold text-lg mb-3">Resumen del Pedido</h3>
-              <div className="space-y-3">
-                {items.map((item) => (
-                  <div key={item.uniqueId} className="space-y-1">
-                    <div className="flex justify-between text-sm">
-                      <span>
-                        {item.name} {item.size && `(${item.size})`} x{item.quantity}
-                      </span>
-                      <span>${item.finalPrice.toLocaleString()}</span>
-                    </div>
-                    {item.observation && (
-                      <div className="text-xs text-muted-foreground pl-2 border-l-2 border-muted">
-                        Obs: {item.observation}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <div className="border-t mt-3 pt-3 flex justify-between font-bold">
-                <span>Total:</span>
-                <span className="text-primary">${getTotalPrice().toLocaleString()}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className="border-t bg-card p-4">
-            <Button
-              type="submit"
-              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold py-3"
+        <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
+          <div className="text-sm font-semibold mb-3">Entrega</div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setDeliveryMethod("delivery")}
+              className={`px-3 py-2 rounded-lg border ${
+                deliveryMethod === "delivery"
+                  ? "border-[#ea562f] bg-[#fff5f2]"
+                  : "border-transparent hover:bg-black/5"
+              }`}
             >
-              Confirmar Pedido
-            </Button>
+              Delivery
+            </button>
+            <button
+              onClick={() => setDeliveryMethod("pickup")}
+              className={`px-3 py-2 rounded-lg border ${
+                deliveryMethod === "pickup"
+                  ? "border-[#ea562f] bg-[#fff5f2]"
+                  : "border-transparent hover:bg-black/5"
+              }`}
+            >
+              Retiro
+            </button>
           </div>
-        </form>
+        </div>
+
+        <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
+          <div className="text-sm font-semibold mb-3">Pago</div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPaymentMethod("cash")}
+              className={`px-3 py-2 rounded-lg border ${
+                paymentMethod === "cash"
+                  ? "border-[#ea562f] bg-[#fff5f2]"
+                  : "border-transparent hover:bg-black/5"
+              }`}
+            >
+              Efectivo
+            </button>
+            <button
+              onClick={() => setPaymentMethod("mp")}
+              className={`px-3 py-2 rounded-lg border ${
+                paymentMethod === "mp"
+                  ? "border-[#ea562f] bg-[#fff5f2]"
+                  : "border-transparent hover:bg-black/5"
+              }`}
+            >
+              Mercado Pago
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
+          <div className="text-sm font-semibold mb-2">Observaciones</div>
+          <textarea
+            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#ea562f]"
+            rows={3}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Ej: timbre roto, sin cebolla, etc."
+          />
+        </div>
+      </div>
+
+      {/* Columna derecha: Resumen */}
+      <div className="space-y-4">
+        <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
+          <div className="text-sm font-semibold mb-3">Resumen</div>
+          <div className="space-y-2">
+            {items.map((it) => {
+              const unit = it.finalPrice / it.quantity || it.price;
+              return (
+                <div
+                  key={it.uniqueId}
+                  className="flex items-start justify-between"
+                >
+                  <div className="text-sm">
+                    <div className="font-semibold">{it.name}</div>
+                    <div className="text-muted-foreground">
+                      {it.quantity} x {fmt(unit)}
+                      {it.size ? ` · Tamaño: ${it.size}` : ""}
+                    </div>
+                    {/* Observaciones del ítem si hay */}
+                    {it.observations?.trim() ? (
+                      <div className="text-muted-foreground">
+                        Obs: {it.observations.trim()}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="text-sm font-semibold">
+                    {fmt(it.finalPrice || it.price * it.quantity)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-between border-t mt-3 pt-3">
+            <div className="text-sm font-semibold">Total:</div>
+            <div className="text-xl font-extrabold text-[#ea562f]">
+              {fmt(total)}
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4 space-y-2">
+          {/* Un solo botón hace POST (opcional) + WhatsApp */}
+          <Button className="w-full" onClick={submitOrder} disabled={submitting}>
+            {submitting ? "Enviando..." : "Enviar Pedido"}
+          </Button>
+          <Button
+            className="w-full"
+            variant="outline"
+            onClick={onCancel}
+            disabled={submitting}
+          >
+            Cancelar
+          </Button>
+        </div>
       </div>
     </div>
-  )
+  );
 }
