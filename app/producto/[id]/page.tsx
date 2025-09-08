@@ -1,10 +1,10 @@
 // app/producto/[id]/page.tsx
 "use client";
 
+import SiteHeader from "@/components/site-header";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import SiteHeader from "@/components/site-header";
 // Si ya tenés un CartContext y querés agregar al carrito, descomentá la línea de abajo
 import { useCart } from "@/components/cart-context";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,8 @@ export default function ProductDetailPage() {
   const router = useRouter();
   const { addToCart } = useCart(); // <- si usás tu CartContext
 
+  // arriba, junto a otros useState:
+  const [justAdded, setJustAdded] = useState(false);
   const [prod, setProd] = useState<Product | null>(null);
   const [selectedOptId, setSelectedOptId] = useState<string | number | null>(
     null
@@ -81,20 +83,26 @@ export default function ProductDetailPage() {
     // Si usás CartContext, podés descomentar y adaptar a tu CartItem:
     
     addToCart({
-      uniqueId: `${prod?.id}-${selectedOptId}-${Date.now()}`,
-      id: Number(prod?.id) || 0,
-      name: prod?.name || "",
-      description: prod?.description || "",
-      price: base + extra,
-      finalPrice: (base + extra) * qty,
-      image: prod?.imageUrl || "",
-      category: "", // si querés guardar categoría
-      quantity: qty,
-      size: selectedOption?.option?.name?.toLowerCase() as any, // "simple" | "doble" | "triple"
-      observations: notes,
-    });
+    uniqueId: `${prod?.id}-${selectedOptId}-${Date.now()}`,
+    id: Number(prod?.id) || 0,
+    name: prod?.name || "",
+    description: prod?.description || "",
+    price: base + extra,
+    finalPrice: (base + extra) * qty,
+    image: prod?.imageUrl || "",
+    category: "",
+    quantity: qty,
+    size: selectedOption?.option?.name?.toLowerCase() as any, // "simple" | "doble" | "triple"
+    observations: notes,
+  });
     
-    router.push("/carrito");
+    setJustAdded(true);
+    setTimeout(() => setJustAdded(false), 1500);
+    //router.push("/carrito");
+
+    // 🔄 reset de campos para el próximo agregado
+    setNotes("");
+    setQty(1);
   };
 
   if (loading) {
@@ -222,7 +230,7 @@ export default function ProductDetailPage() {
               <div className="text-xl font-extrabold text-[#ea562f]">{fmt(total)}</div>
             </div>
             <Button className="w-full" onClick={handleAdd}>
-              Agregar al Carrito
+              {justAdded ? "Agregado ✔" : "Agregar al Carrito"}
             </Button>
           </div>
         </div>

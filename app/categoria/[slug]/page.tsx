@@ -1,9 +1,9 @@
 "use client";
 
+import SiteHeader from "@/components/site-header";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import SiteHeader from "@/components/site-header";
 
 type Product = {
   id: string | number;
