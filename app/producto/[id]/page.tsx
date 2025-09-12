@@ -5,13 +5,12 @@ import SiteHeader from "@/components/site-header";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-// Si ya tenés un CartContext y querés agregar al carrito, descomentá la línea de abajo
 import { useCart } from "@/components/cart-context";
 import { Button } from "@/components/ui/button";
 
 type ProductOption = {
   id: string | number;
-  precio_extra?: number | null;
+  precio_extra?: number | string | null; // acepta string (Decimal)
   option?: { id: string | number; name: string };
   isDefault?: boolean;
 };
@@ -20,25 +19,29 @@ type Product = {
   id: string | number;
   name: string;
   description?: string;
-  price?: number;
+  price?: number | string; // acepta string (Decimal)
   imageUrl?: string;
   productOptions?: ProductOption[];
 };
 
-const fmt = (n?: number) =>
-  typeof n === "number" ? `$${n.toLocaleString("es-AR")}` : "-";
+// helpers arriba del archivo (ya los tenías, pero úsalos)
+const fmt = (n?: number | string) => {
+  const v = typeof n === "string" ? Number(n) : n;
+  return typeof v === "number" && Number.isFinite(v)
+    ? `$${v.toLocaleString("es-AR")}`
+    : "-";
+};
+const toNum = (v: unknown) =>
+  typeof v === "string" ? Number(v) : typeof v === "number" ? v : 0;
 
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { addToCart } = useCart(); // <- si usás tu CartContext
+  const { addToCart } = useCart();
 
-  // arriba, junto a otros useState:
   const [justAdded, setJustAdded] = useState(false);
   const [prod, setProd] = useState<Product | null>(null);
-  const [selectedOptId, setSelectedOptId] = useState<string | number | null>(
-    null
-  );
+  const [selectedOptId, setSelectedOptId] = useState<string | number | null>(null);
   const [qty, setQty] = useState(1);
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(true);
@@ -55,13 +58,20 @@ export default function ProductDetailPage() {
         setLoading(false);
         return;
       }
-      const json: Product = await res.json();
-      setProd(json || null);
 
-      // preselecciono opción default si existe
-      const defs = json?.productOptions?.filter((o) => o.isDefault);
+      const raw = await res.json();
+      // ✅ Desempaquetar por si viene como {success, data} o {success, data: {data}}
+      const product: Product =
+        (raw && raw.data && !Array.isArray(raw.data)) ? raw.data :
+        (raw && raw.data && raw.data?.data && !Array.isArray(raw.data.data)) ? raw.data.data :
+        raw;
+
+      setProd(product || null);
+
+      // Preseleccionar opción default si existe
+      const defs = product?.productOptions?.filter((o) => o.isDefault);
       if (defs && defs.length) setSelectedOptId(defs[0].id);
-      else if (json?.productOptions?.length) setSelectedOptId(json.productOptions[0].id);
+      else if (product?.productOptions?.length) setSelectedOptId(product.productOptions[0].id);
 
       setLoading(false);
     })().catch(() => {
@@ -75,14 +85,21 @@ export default function ProductDetailPage() {
     return prod.productOptions.find((o) => o.id === selectedOptId);
   }, [prod, selectedOptId]);
 
-  const base = prod?.price ?? 0;
-  const extra = selectedOption?.precio_extra ?? 0;
+  // ✅ Totales en número (precio puede venir string)
+  const base = toNum(prod?.price);
+  const extra = toNum(selectedOption?.precio_extra);
   const total = (base + extra) * qty;
 
+  
   const handleAdd = () => {
-    // Si usás CartContext, podés descomentar y adaptar a tu CartItem:
-    
-    addToCart({
+  const base =
+    typeof prod?.price === "string" ? Number(prod?.price) : (prod?.price ?? 0);
+  const extra =
+    typeof selectedOption?.precio_extra === "string"
+      ? Number(selectedOption?.precio_extra)
+      : (selectedOption?.precio_extra ?? 0);
+
+  addToCart({
     uniqueId: `${prod?.id}-${selectedOptId}-${Date.now()}`,
     id: Number(prod?.id) || 0,
     name: prod?.name || "",
@@ -92,18 +109,28 @@ export default function ProductDetailPage() {
     image: prod?.imageUrl || "",
     category: "",
     quantity: qty,
-    size: selectedOption?.option?.name?.toLowerCase() as any, // "simple" | "doble" | "triple"
-    observations: notes,
-  });
-    
-    setJustAdded(true);
-    setTimeout(() => setJustAdded(false), 1500);
-    //router.push("/carrito");
 
-    // 🔄 reset de campos para el próximo agregado
-    setNotes("");
-    setQty(1);
-  };
+    // info “visual”
+    size: selectedOption?.option?.name?.toLowerCase() as any,
+    observations: notes,
+
+    // 🔴 CLAVE: este es el que quiere el backend
+    productOptionId: typeof selectedOptId === "string" || typeof selectedOptId === "number"
+      ? Number(selectedOptId)
+      : undefined,
+
+    // opcional: por si querés mostrarlo en UI/WA
+    optionId: Number(selectedOption?.option?.id) || undefined,
+    optionName: selectedOption?.option?.name || undefined,
+    priceExtra: extra,
+  });
+
+  setJustAdded(true);
+  setTimeout(() => setJustAdded(false), 1500);
+  setNotes("");
+  setQty(1);
+};
+
 
   if (loading) {
     return (
@@ -133,7 +160,8 @@ export default function ProductDetailPage() {
     );
   }
 
-  const hasOptions = Array.isArray(prod.productOptions) && prod.productOptions.length > 0;
+  const hasOptions =
+    Array.isArray(prod.productOptions) && prod.productOptions.length > 0;
 
   return (
     <div className="min-h-screen bg-background">
@@ -178,7 +206,7 @@ export default function ProductDetailPage() {
               <div className="text-sm font-semibold mb-2">Tamaño:</div>
               {prod.productOptions!.map((o) => {
                 const active = selectedOptId === o.id;
-                const plus = o.precio_extra ?? 0;
+                const plus = toNum(o.precio_extra); // ✅ para mostrar correctamente
                 return (
                   <button
                     key={String(o.id)}

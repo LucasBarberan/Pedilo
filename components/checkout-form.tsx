@@ -53,7 +53,6 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   function buildWhatsAppText() {
     const lines: string[] = [];
 
-    // Encabezado con nombre de la tienda
     lines.push(`*${STORE_NAME} – Nuevo pedido*`);
     lines.push("");
     lines.push(`*Cliente:* ${customer.name}`);
@@ -101,77 +100,105 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
     setSubmitting(true);
 
-    // payload por si querés guardarlo cuando tengas backend
-    const payload = {
-      createdAt: new Date().toISOString(),
-      customer,
-      deliveryMethod,
-      paymentMethod,
-      notes,
-      total,
-      items: items.map((it) => ({
-        id: it.id,
-        name: it.name,
-        quantity: it.quantity,
-        unitPrice: it.finalPrice / it.quantity || it.price,
-        finalPrice: it.finalPrice,
-        size: it.size,
-        image: it.image,
-        observations: it.observations ?? "",
-      })),
-      status: "pending",
-    };
+    try {
+      // 👉 Enviar al backend sólo si está habilitado por env
+      const SEND_TO_API =
+        (process.env.NEXT_PUBLIC_SEND_ORDERS || "").toLowerCase() === "true";
 
-    // 1) WhatsApp (siempre)
-    const businessPhone = process.env.NEXT_PUBLIC_WA_NUMBER || ""; // ej: 5491122334455
-    const waText = encodeURIComponent(buildWhatsAppText());
+      if (SEND_TO_API) {
+        if (!BASE) throw new Error("Falta NEXT_PUBLIC_API_URL");
 
-    if (businessPhone) {
-      // tip anti-bloqueador: abrimos primero y luego seteamos href
-      const win = window.open("about:blank", "_blank");
-      const url = `https://wa.me/${businessPhone}?text=${waText}`;
-      if (win) win.location.href = url;
-      else window.open(url, "_blank");
-    } else {
-      try {
-        await navigator.clipboard.writeText(buildWhatsAppText());
-        alert(
-          "Configurá NEXT_PUBLIC_WA_NUMBER. El detalle del pedido fue copiado al portapapeles."
+        // 1) Armar items SIN 'options' y con 'option_ids' si aplica
+        const itemsForApi = items.map((it) => {
+  const unit = Math.round(
+    Number(it.finalPrice ?? it.price * it.quantity) / it.quantity
+  );
+
+  const item: any = {
+    product_id: it.id,
+    quantity: it.quantity,
+    unit_price: unit,
+  };
+
+  if (it.observations?.trim()) item.comment = it.observations.trim();
+
+  // ✅ lo que valida y consume tu back:
+  if (it.productOptionId) item.option_ids = [Number(it.productOptionId)];
+
+  // por si quedara algo colgado
+  delete (item as any).options;
+
+  return item;
+});
+
+
+        // 2) Body base
+        const apiBodyRaw: any = {
+          items: itemsForApi,
+          payment_method:
+            paymentMethod === "cash"
+              ? "CASH"
+              : paymentMethod === "mp"
+              ? "MERCADOPAGO"
+              : "CARD",
+          amount_paid: Math.round(Number(total)),
+        };
+
+        // 3) Red de seguridad: eliminar cualquier 'options' en cualquier nivel
+        const apiBody = JSON.parse(
+          JSON.stringify(apiBodyRaw, (k, v) => (k === "options" ? undefined : v))
         );
-      } catch {
-        alert(
-          "Configurá NEXT_PUBLIC_WA_NUMBER. Copiá y pegá este mensaje:\n\n" +
-            buildWhatsAppText()
-        );
-      }
-    }
 
-    // 2) (Opcional) Enviar al backend cuando esté listo
-    const SEND_TO_API =
-      (process.env.NEXT_PUBLIC_SEND_ORDERS || "").toLowerCase() === "true"; // por defecto false
+        console.log("POST /orders body =>\n", JSON.stringify(apiBody, null, 2));
 
-    if (SEND_TO_API) {
-      try {
-        const base = BASE; // tu backend real
-        if (!base) throw new Error("Falta NEXT_PUBLIC_API_URL");
-        await fetch(`${base}/orders`, {
+        // 4) Enviar
+        const res = await fetch(`${BASE}/orders`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(apiBody),
         });
-        // Si falla, no frenamos: WhatsApp ya salió
-      } catch (e) {
-        console.warn(
-          "No se pudo enviar al backend (ignorado hasta que esté listo):",
-          e
-        );
-      }
-    }
 
-    // 3) Limpiar carrito y cerrar
-    clearCart();
-    onSuccess?.();
-    setSubmitting(false);
+        const text = await res.text();
+        if (!res.ok) {
+          console.error("❌ POST /orders failed", res.status, text);
+          alert(`No se pudo guardar el pedido (HTTP ${res.status}).\n${text}`);
+          return; // no abrir WhatsApp si falló
+        }
+        console.log("✅ Orden creada:", text);
+      }
+
+      // 5) WhatsApp (si POST ok o desactivado)
+      const businessPhone = process.env.NEXT_PUBLIC_WA_NUMBER || ""; // ej: 5491122334455
+      const waText = encodeURIComponent(buildWhatsAppText());
+
+      if (businessPhone) {
+        const win = window.open("about:blank", "_blank");
+        const url = `https://wa.me/${businessPhone}?text=${waText}`;
+        if (win) win.location.href = url;
+        else window.open(url, "_blank");
+      } else {
+        try {
+          await navigator.clipboard.writeText(buildWhatsAppText());
+          alert(
+            "Configurá NEXT_PUBLIC_WA_NUMBER. El detalle del pedido fue copiado al portapapeles."
+          );
+        } catch {
+          alert(
+            "Configurá NEXT_PUBLIC_WA_NUMBER. Copiá y pegá este mensaje:\n\n" +
+              buildWhatsAppText()
+          );
+        }
+      }
+
+      // 6) Limpiar carrito y cerrar
+      clearCart();
+      onSuccess?.();
+    } catch (e) {
+      console.error("❌ Error en submitOrder:", e);
+      alert("Ocurrió un error al procesar el pedido. Revisá consola.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (items.length === 0) {
@@ -302,7 +329,6 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                       {it.quantity} x {fmt(unit)}
                       {it.size ? ` · Tamaño: ${it.size}` : ""}
                     </div>
-                    {/* Observaciones del ítem si hay */}
                     {it.observations?.trim() ? (
                       <div className="text-muted-foreground">
                         Obs: {it.observations.trim()}
@@ -326,7 +352,6 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         </div>
 
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4 space-y-2">
-          {/* Un solo botón hace POST (opcional) + WhatsApp */}
           <Button className="w-full" onClick={submitOrder} disabled={submitting}>
             {submitting ? "Enviando..." : "Enviar Pedido"}
           </Button>

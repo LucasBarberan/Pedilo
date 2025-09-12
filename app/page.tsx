@@ -18,7 +18,18 @@ export default function Home() {
       try {
         const res = await fetch(`${BASE}/categories`, { cache: "no-store" });
         const json = await res.json();
-        setCategories(Array.isArray(json) ? json : []);
+
+        // ✅ extrae array ya sea {data: []} o {data: {data: []}}
+        const cats =
+          Array.isArray(json)
+            ? json
+            : Array.isArray(json?.data)
+            ? json.data
+            : Array.isArray(json?.data?.data)
+            ? json.data.data
+            : [];
+
+        setCategories(cats as Category[]);
       } catch {
         setCategories([]);
       } finally {
@@ -28,9 +39,8 @@ export default function Home() {
   }, []);
 
   const handleCategorySelect = (slug: string) => {
-  router.push(`/categoria/${encodeURIComponent(slug)}`);
-};
-
+    router.push(`/categoria/${encodeURIComponent(slug)}`);
+  };
 
   const handleCartClick = () => {
     router.push("/carrito");
@@ -40,11 +50,8 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header (sin back en Home) */}
       <SiteHeader onCartClick={handleCartClick} />
       <div className="h-[6px] w-full bg-white" />
-
-      {/* Tu grilla original */}
       <CategoryMenu
         categories={categories}
         onCategorySelect={handleCategorySelect}

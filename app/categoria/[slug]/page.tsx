@@ -9,7 +9,7 @@ type Product = {
   id: string | number;
   name: string;
   description?: string;
-  price?: number;
+  price?: number | string;
   imageUrl?: string;
   categoryId?: string | number;
   code?: string | number;
@@ -21,8 +21,15 @@ type Category = {
   name: string;
 };
 
-const fmtPrice = (n?: number) =>
-  typeof n === "number" ? `$${n.toLocaleString("es-AR")}` : "-";
+// reemplazá tu fmtPrice por éste
+const fmtPrice = (n?: number | string) => {
+  const v =
+    typeof n === "string" ? Number(n) :
+    typeof n === "number" ? n : undefined;
+  return typeof v === "number" && Number.isFinite(v)
+    ? `$${v.toLocaleString("es-AR")}`
+    : "-";
+};
 
 const slugify = (s: string) =>
   s
@@ -48,9 +55,17 @@ export default function CategoryPage() {
     (async () => {
       setLoading(true);
 
-      // 1) Traigo todas las categorías y resuelvo la que corresponde al slug
+      // --- CATEGORÍAS (extrae array desde json.data o json.data.data) ---
       const catsRes = await fetch(`${BASE}/categories`, { cache: "no-store" });
-      const cats: Category[] = await catsRes.json();
+      const catsJson = await catsRes.json();
+      const cats: Category[] =
+        Array.isArray(catsJson)
+          ? catsJson
+          : Array.isArray(catsJson?.data)
+          ? catsJson.data
+          : Array.isArray(catsJson?.data?.data)
+          ? catsJson.data.data
+          : [];
 
       const cat =
         cats.find((c) => slugify(c.name) === slug) ||
@@ -58,29 +73,42 @@ export default function CategoryPage() {
 
       setCategory(cat ?? null);
 
-      let prods: Product[] = [];
-
+      // --- PRODUCTOS por categoría (usa ?category=<id>) ---
       if (cat) {
-        // 2) Primero intento por categoryId = cat.id
-        const resById = await fetch(
-          `${BASE}/products?categoryId=${encodeURIComponent(String(cat.id))}`,
+        const res = await fetch(
+          `${BASE}/products?category=${encodeURIComponent(String(cat.id))}&page=1&limit=50`,
           { cache: "no-store" }
         );
-        const byId: Product[] = await resById.json();
-        prods = Array.isArray(byId) ? byId : [];
+        const json = await res.json();
+        const prods: Product[] =
+          Array.isArray(json)
+            ? json
+            : Array.isArray(json?.data)
+            ? json.data
+            : Array.isArray(json?.data?.data)
+            ? json.data.data
+            : [];
 
-        // 3) Si vino vacío, intento por code = cat.code (por si esa es tu relación)
-        if (prods.length === 0 && cat.code != null) {
-          const resByCode = await fetch(
-            `${BASE}/products?code=${encodeURIComponent(String(cat.code))}`,
-            { cache: "no-store" }
-          );
-          const byCode: Product[] = await resByCode.json();
-          prods = Array.isArray(byCode) ? byCode : [];
-        }
+            // dentro del useEffect, luego de obtener `prods`
+            const normalize = (arr: any[]) =>
+              arr.map((p) => {
+              const raw =
+              p.price ?? p.basePrice ?? p.finalPrice ?? p.unitPrice; // por si tu back usa otro nombre
+              const n =
+              typeof raw === "string" ? Number(raw) :
+            typeof raw === "number" ? raw : undefined;
+            return { ...p, price: n };
+          });
+
+          setProducts(normalize(prods));
+        setProducts(prods);
+      } else {
+        setProducts([]);
       }
+      
+      
 
-      setProducts(prods);
+
       setLoading(false);
     })().catch(() => {
       setCategory(null);
@@ -105,12 +133,12 @@ export default function CategoryPage() {
       />
       <div className="h-[6px] w-full bg-white" />
 
-      {/* Título debajo del header (no tocamos tu CSS global) */}
+      {/* Título debajo del header (sin cambios de CSS) */}
       <div className="mx-auto w-full max-w-6xl px-4 pt-3 pb-2">
         <h2 className="text-2xl font-extrabold uppercase">{title}</h2>
       </div>
 
-      {/* Lista de productos: 1 col mobile / 2 col desktop */}
+      {/* Lista de productos: 1 col mobile / 2 col desktop (sin cambios de CSS) */}
       <div className="mx-auto w-full max-w-6xl px-4 py-4 grid grid-cols-1 gap-4 md:grid-cols-2">
         {loading && (
           <div className="col-span-full p-8 text-center opacity-70">

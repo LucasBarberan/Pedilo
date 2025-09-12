@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, type ReactNode } from "react"
 
-interface CartItem {
+export interface CartItem {
   uniqueId: string
   id: number
   name: string
@@ -14,6 +14,13 @@ interface CartItem {
   size?: "simple" | "doble" | "triple"
   observations?: string
   finalPrice: number
+  isDefaultCategory?: boolean
+
+  // 👇 NUEVO: datos de la opción elegida
+  productOptionId?: number      // id del productOptions (productOptions.id)
+  optionId?: number             // id de Option (option.id)
+  optionName?: string           // "Simple" | "Doble" | "Triple"
+  priceExtra?: number | string  // extra aplicado a esa opción
 }
 
 interface CartContextType {
