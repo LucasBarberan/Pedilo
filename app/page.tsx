@@ -19,17 +19,18 @@ export default function Home() {
         const res = await fetch(`${BASE}/categories`, { cache: "no-store" });
         const json = await res.json();
 
-        // ✅ extrae array ya sea {data: []} o {data: {data: []}}
-        const cats =
-          Array.isArray(json)
-            ? json
-            : Array.isArray(json?.data)
-            ? json.data
-            : Array.isArray(json?.data?.data)
-            ? json.data.data
-            : [];
+        // Soportamos { data: [...] } o un array plano
+      const raw = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
 
-        setCategories(cats as Category[]);
+      // Orden: isDefault true primero; luego por nombre (opcional)
+      const sorted = [...raw].sort((a, b) => {
+        if (!!a.isDefault === !!b.isDefault) {
+          return String(a.name || "").localeCompare(String(b.name || ""), "es");
+        }
+        return a.isDefault ? -1 : 1; // true va primero
+      });
+
+        setCategories(sorted as Category[]);
       } catch {
         setCategories([]);
       } finally {

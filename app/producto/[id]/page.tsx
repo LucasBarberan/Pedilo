@@ -22,9 +22,10 @@ type Product = {
   price?: number | string; // acepta string (Decimal)
   imageUrl?: string;
   productOptions?: ProductOption[];
+  category?: { isDefault?: boolean };   // 👈 NUEVO
 };
 
-// helpers arriba del archivo (ya los tenías, pero úsalos)
+// helpers
 const fmt = (n?: number | string) => {
   const v = typeof n === "string" ? Number(n) : n;
   return typeof v === "number" && Number.isFinite(v)
@@ -33,6 +34,31 @@ const fmt = (n?: number | string) => {
 };
 const toNum = (v: unknown) =>
   typeof v === "string" ? Number(v) : typeof v === "number" ? v : 0;
+
+// orden por nombre: simple -> doble -> triple (tolerante a acentos/mayúsculas)
+const normalize = (s?: string) =>
+  (s || "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+
+const rankByName = (o: ProductOption) => {
+  const n = normalize(o.option?.name);
+  if (n.includes("simple")) return 0;
+  if (n.includes("doble")) return 1;
+  if (n.includes("triple")) return 2;
+  return 99;
+};
+
+const optionSorter = (a: ProductOption, b: ProductOption) => {
+  const ra = rankByName(a);
+  const rb = rankByName(b);
+  if (ra !== rb) return ra - rb;
+  if (!!a.isDefault !== !!b.isDefault) return a.isDefault ? -1 : 1;
+  const ea = Number(a.precio_extra || 0);
+  const eb = Number(b.precio_extra || 0);
+  return ea - eb;
+};
 
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -60,18 +86,25 @@ export default function ProductDetailPage() {
       }
 
       const raw = await res.json();
-      // ✅ Desempaquetar por si viene como {success, data} o {success, data: {data}}
       const product: Product =
-        (raw && raw.data && !Array.isArray(raw.data)) ? raw.data :
-        (raw && raw.data && raw.data?.data && !Array.isArray(raw.data.data)) ? raw.data.data :
-        raw;
+        raw && raw.data && !Array.isArray(raw.data)
+          ? raw.data
+          : raw && raw.data && raw.data?.data && !Array.isArray(raw.data.data)
+          ? raw.data.data
+          : raw;
 
-      setProd(product || null);
+      // ✅ ordenar opciones apenas llega
+      const ordered =
+        product.productOptions?.length
+          ? [...product.productOptions].sort(optionSorter)
+          : [];
 
-      // Preseleccionar opción default si existe
-      const defs = product?.productOptions?.filter((o) => o.isDefault);
-      if (defs && defs.length) setSelectedOptId(defs[0].id);
-      else if (product?.productOptions?.length) setSelectedOptId(product.productOptions[0].id);
+      const productOrdered: Product = { ...product, productOptions: ordered };
+      setProd(productOrdered || null);
+
+      // ✅ preselección: default si hay; sino primera por orden
+      const def = ordered.find(o => o.isDefault);
+      setSelectedOptId((def ?? ordered[0])?.id ?? null);
 
       setLoading(false);
     })().catch(() => {
@@ -80,57 +113,55 @@ export default function ProductDetailPage() {
     });
   }, [id]);
 
+  // opción seleccionada
   const selectedOption = useMemo(() => {
     if (!prod?.productOptions?.length) return undefined;
     return prod.productOptions.find((o) => o.id === selectedOptId);
   }, [prod, selectedOptId]);
 
-  // ✅ Totales en número (precio puede venir string)
+  // Totales (precio puede venir como string)
   const base = toNum(prod?.price);
   const extra = toNum(selectedOption?.precio_extra);
   const total = (base + extra) * qty;
 
-  
   const handleAdd = () => {
-  const base =
-    typeof prod?.price === "string" ? Number(prod?.price) : (prod?.price ?? 0);
-  const extra =
-    typeof selectedOption?.precio_extra === "string"
-      ? Number(selectedOption?.precio_extra)
-      : (selectedOption?.precio_extra ?? 0);
+    const base =
+      typeof prod?.price === "string" ? Number(prod?.price) : (prod?.price ?? 0);
+    const extra =
+      typeof selectedOption?.precio_extra === "string"
+        ? Number(selectedOption?.precio_extra)
+        : (selectedOption?.precio_extra ?? 0);
 
-  addToCart({
-    uniqueId: `${prod?.id}-${selectedOptId}-${Date.now()}`,
-    id: Number(prod?.id) || 0,
-    name: prod?.name || "",
-    description: prod?.description || "",
-    price: base + extra,
-    finalPrice: (base + extra) * qty,
-    image: prod?.imageUrl || "",
-    category: "",
-    quantity: qty,
+    addToCart({
+      uniqueId: `${prod?.id}-${selectedOptId}-${Date.now()}`,
+      id: Number(prod?.id) || 0,
+      name: prod?.name || "",
+      description: prod?.description || "",
+      price: base + extra,
+      finalPrice: (base + extra) * qty,
+      image: prod?.imageUrl || "",
+      category: "",
+      quantity: qty,
 
-    // info “visual”
-    size: selectedOption?.option?.name?.toLowerCase() as any,
-    observations: notes,
+      // info “visual”
+      size: selectedOption?.option?.name?.toLowerCase() as any,
+      observations: notes,
 
-    // 🔴 CLAVE: este es el que quiere el backend
-    productOptionId: typeof selectedOptId === "string" || typeof selectedOptId === "number"
-      ? Number(selectedOptId)
-      : undefined,
+      // 👉 el que usa el backend para option_ids
+      productOptionId: Number(selectedOption?.id) || undefined,
 
-    // opcional: por si querés mostrarlo en UI/WA
-    optionId: Number(selectedOption?.option?.id) || undefined,
-    optionName: selectedOption?.option?.name || undefined,
-    priceExtra: extra,
-  });
+      // opcional/visual
+      optionId: Number(selectedOption?.option?.id) || undefined,
+      optionName: selectedOption?.option?.name || undefined,
+      priceExtra: extra,
+      isDefaultCategory: !!prod?.category?.isDefault,
+    });
 
-  setJustAdded(true);
-  setTimeout(() => setJustAdded(false), 1500);
-  setNotes("");
-  setQty(1);
-};
-
+    setJustAdded(true);
+    setTimeout(() => setJustAdded(false), 1500);
+    setNotes("");
+    setQty(1);
+  };
 
   if (loading) {
     return (
@@ -160,8 +191,7 @@ export default function ProductDetailPage() {
     );
   }
 
-  const hasOptions =
-    Array.isArray(prod.productOptions) && prod.productOptions.length > 0;
+  const hasOptions = Array.isArray(prod.productOptions) && prod.productOptions.length > 0;
 
   return (
     <div className="min-h-screen bg-background">
@@ -178,11 +208,7 @@ export default function ProductDetailPage() {
           <div className="rounded-2xl overflow-hidden ring-1 ring-black/5 bg-white/60">
             <div className="relative w-full aspect-[4/3]">
               <Image
-                src={
-                  prod.imageUrl && prod.imageUrl.trim()
-                    ? prod.imageUrl
-                    : "/placeholder.svg"
-                }
+                src={prod.imageUrl && prod.imageUrl.trim() ? prod.imageUrl : "/placeholder.svg"}
                 alt={prod.name}
                 fill
                 className="object-cover"
@@ -206,22 +232,18 @@ export default function ProductDetailPage() {
               <div className="text-sm font-semibold mb-2">Tamaño:</div>
               {prod.productOptions!.map((o) => {
                 const active = selectedOptId === o.id;
-                const plus = toNum(o.precio_extra); // ✅ para mostrar correctamente
+                const plus = toNum(o.precio_extra);
                 return (
                   <button
                     key={String(o.id)}
                     onClick={() => setSelectedOptId(o.id)}
                     className={[
                       "w-full rounded-lg border px-3 py-2 text-left flex items-center justify-between",
-                      active
-                        ? "border-[#ea562f] bg-[#fff5f2]"
-                        : "border-transparent hover:bg-black/5",
+                      active ? "border-[#ea562f] bg-[#fff5f2]" : "border-transparent hover:bg-black/5",
                     ].join(" ")}
                   >
                     <span className="text-sm">{o.option?.name || "Opción"}</span>
-                    <span className="text-sm font-semibold">
-                      {plus ? `+${fmt(plus)}` : ""}
-                    </span>
+                    <span className="text-sm font-semibold">{plus ? `+${fmt(plus)}` : ""}</span>
                   </button>
                 );
               })}

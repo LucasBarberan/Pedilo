@@ -7,6 +7,7 @@ export type Category = {
   name: string;
   code?: number | string;
   imageUrl?: string;
+  isDefault?: boolean; // 👈 nuevo (opcional)
 };
 
 export type CategoryMenuProps = {

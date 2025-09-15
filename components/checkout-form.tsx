@@ -17,8 +17,29 @@ type Props = {
 
 const fmt = (n: number) => `$${n.toLocaleString("es-AR")}`;
 
+// ranking de tamaños: triple -> doble -> simple
+const SIZE_RANK: Record<string, number> = { triple: 0, doble: 1, simple: 2 };
+
 export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const { items, getTotalPrice, clearCart } = useCart();
+
+  // ORDEN a usar en Resumen + WhatsApp
+  const sortedItems = useMemo(() => {
+    return [...items].sort((a, b) => {
+      // 1) Categorías default primero
+      const da = a.isDefaultCategory ? 0 : 1;
+      const db = b.isDefaultCategory ? 0 : 1;
+      if (da !== db) return da - db;
+
+      // 2) Tamaño: triple -> doble -> simple (sin tamaño al final)
+      const ra = SIZE_RANK[String(a.size || "").toLowerCase()] ?? 99;
+      const rb = SIZE_RANK[String(b.size || "").toLowerCase()] ?? 99;
+      if (ra !== rb) return ra - rb;
+
+      // 3) Desempate por nombre
+      return (a.name || "").localeCompare(b.name || "");
+    });
+  }, [items]);
 
   const [customer, setCustomer] = useState<Customer>({
     name: "",
@@ -49,7 +70,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const BASE = process.env.NEXT_PUBLIC_API_URL;
   const STORE_NAME = process.env.NEXT_PUBLIC_STORE_NAME || "SRA. BURGA";
 
-  /** 🔹 Arma el texto de WhatsApp (incluye tamaño + observaciones) */
+  /** 🔹 Arma el texto de WhatsApp (usa el mismo orden del resumen) */
   function buildWhatsAppText() {
     const lines: string[] = [];
 
@@ -70,12 +91,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     lines.push("");
     lines.push("*Items:*");
 
-    items.forEach((it) => {
+    // 👇 usar el ordenamiento
+    sortedItems.forEach((it) => {
       const unit = it.finalPrice / it.quantity || it.price;
       lines.push(
-        `• ${it.quantity} x ${it.name}${it.size ? ` (tamaño: ${it.size})` : ""} – ${fmt(
-          unit
-        )} c/u`
+        `• ${it.quantity} x ${it.name}${
+          it.size ? ` (tamaño: ${it.size})` : ""
+        } – ${fmt(unit)} c/u`
       );
       if (it.observations?.trim()) {
         lines.push(`   Obs: ${it.observations.trim()}`);
@@ -110,27 +132,22 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
         // 1) Armar items SIN 'options' y con 'option_ids' si aplica
         const itemsForApi = items.map((it) => {
-  const unit = Math.round(
-    Number(it.finalPrice ?? it.price * it.quantity) / it.quantity
-  );
+          const unit = Math.round(
+            (it.finalPrice || it.price * it.quantity) / it.quantity
+          );
+          const payload: any = {
+            product_id: it.id,
+            quantity: it.quantity,
+            unit_price: unit,
+          };
+          if (it.observations?.trim())
+            payload.comment = it.observations.trim();
 
-  const item: any = {
-    product_id: it.id,
-    quantity: it.quantity,
-    unit_price: unit,
-  };
+          // Enviar ProductOption.id (lo que espera tu back)
+          if (it.productOptionId) payload.option_ids = [Number(it.productOptionId)];
 
-  if (it.observations?.trim()) item.comment = it.observations.trim();
-
-  // ✅ lo que valida y consume tu back:
-  if (it.productOptionId) item.option_ids = [Number(it.productOptionId)];
-
-  // por si quedara algo colgado
-  delete (item as any).options;
-
-  return item;
-});
-
+          return payload;
+        });
 
         // 2) Body base
         const apiBodyRaw: any = {
@@ -316,7 +333,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-3">Resumen</div>
           <div className="space-y-2">
-            {items.map((it) => {
+            {sortedItems.map((it) => {   {/* 👈 usar sortedItems */}
               const unit = it.finalPrice / it.quantity || it.price;
               return (
                 <div
