@@ -1,3 +1,4 @@
+// components/checkout-form.tsx
 "use client";
 
 import { useCart } from "@/components/cart-context";
@@ -20,20 +21,34 @@ const fmt = (n: number) => `$${n.toLocaleString("es-AR")}`;
 // ranking de tamaños: triple -> doble -> simple
 const SIZE_RANK: Record<string, number> = { triple: 0, doble: 1, simple: 2 };
 
+// Tipo auxiliar para reconocer combos sin romper tipos existentes
+type MaybeCombo = {
+  kind?: string;
+  comboItems?: Array<{
+    productId?: number;
+    isMain?: boolean;
+    qty?: number;
+    name?: string;
+  }>;
+  optionName?: string; // alias de size si lo preferís
+};
+
 export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const { items, getTotalPrice, clearCart } = useCart();
 
-  // ORDEN a usar en Resumen + WhatsApp
+  // ORDEN a usar en Resumen + WhatsApp (considera size u optionName)
   const sortedItems = useMemo(() => {
-    return [...items].sort((a, b) => {
+    return [...items].sort((a: any, b: any) => {
       // 1) Categorías default primero
       const da = a.isDefaultCategory ? 0 : 1;
       const db = b.isDefaultCategory ? 0 : 1;
       if (da !== db) return da - db;
 
       // 2) Tamaño: triple -> doble -> simple (sin tamaño al final)
-      const ra = SIZE_RANK[String(a.size || "").toLowerCase()] ?? 99;
-      const rb = SIZE_RANK[String(b.size || "").toLowerCase()] ?? 99;
+      const sa = String((a.size || (a as MaybeCombo).optionName || "")).toLowerCase();
+      const sb = String((b.size || (b as MaybeCombo).optionName || "")).toLowerCase();
+      const ra = SIZE_RANK[sa] ?? 99;
+      const rb = SIZE_RANK[sb] ?? 99;
       if (ra !== rb) return ra - rb;
 
       // 3) Desempate por nombre
@@ -91,16 +106,53 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     lines.push("");
     lines.push("*Items:*");
 
-    // 👇 usar el ordenamiento
-    sortedItems.forEach((it) => {
+    // 👇 usar el ordenamiento y desglosar combos
+    sortedItems.forEach((it: any) => {
       const unit = it.finalPrice / it.quantity || it.price;
-      lines.push(
-        `• ${it.quantity} x ${it.name}${
-          it.size ? ` (tamaño: ${it.size})` : ""
-        } – ${fmt(unit)} c/u`
-      );
-      if (it.observations?.trim()) {
-        lines.push(`   Obs: ${it.observations.trim()}`);
+      const comboData = it as MaybeCombo;
+      const isCombo =
+        comboData.kind === "combo" || Array.isArray(comboData.comboItems);
+
+      const sizeLabel =
+        (it.size as string) ||
+        (comboData.optionName as string) ||
+        undefined;
+
+      if (!isCombo) {
+        lines.push(
+          `• ${it.quantity} x ${it.name}${
+            sizeLabel ? ` (tamaño: ${sizeLabel})` : ""
+          } – ${fmt(unit)} c/u`
+        );
+        if (it.observations?.trim()) {
+          lines.push(`   Obs: ${it.observations.trim()}`);
+        }
+      } else {
+        lines.push(
+          `• ${it.quantity} x ${it.name} – ${fmt(unit)} c/u`
+        );
+        if (it.observations?.trim()) {
+          lines.push(`   Obs: ${it.observations.trim()}`);
+        }
+
+        const main = comboData.comboItems?.find((x) => x.isMain);
+        const extras = comboData.comboItems?.filter((x) => !x.isMain) || [];
+
+        if (main) {
+          lines.push(
+            `   · Principal: ${main.name || "Producto"}${
+              sizeLabel ? ` (tamaño: ${sizeLabel})` : ""
+            }${main.qty && main.qty > 1 ? ` x${main.qty}` : ""}`
+          );
+        }
+        if (extras.length > 0) {
+          lines.push(`   · Incluye:`);
+          extras.forEach((e) => {
+            lines.push(
+              `     - ${e.name || "Ítem"}${e.qty && e.qty > 1 ? ` x${e.qty}` : ""}`
+            );
+          });
+        }
       }
     });
 
@@ -131,7 +183,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         if (!BASE) throw new Error("Falta NEXT_PUBLIC_API_URL");
 
         // 1) Armar items SIN 'options' y con 'option_ids' si aplica
-        const itemsForApi = items.map((it) => {
+        //    (Más adelante adaptamos combos para tu API; por ahora lo dejamos lineal)
+        const itemsForApi = items.map((it: any) => {
           const unit = Math.round(
             (it.finalPrice || it.price * it.quantity) / it.quantity
           );
@@ -145,6 +198,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
           // Enviar ProductOption.id (lo que espera tu back)
           if (it.productOptionId) payload.option_ids = [Number(it.productOptionId)];
+
+          // TODO: Si tu API quiere el combo desglosado, lo adaptamos acá.
+          // Por ejemplo: payload.combo_items = it.comboItems?.map(...)
 
           return payload;
         });
@@ -333,25 +389,88 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-3">Resumen</div>
           <div className="space-y-2">
-            {sortedItems.map((it) => {   {/* 👈 usar sortedItems */}
+            {sortedItems.map((it: any) => {
               const unit = it.finalPrice / it.quantity || it.price;
+
+              const comboData = it as MaybeCombo;
+              const isCombo =
+                comboData.kind === "combo" ||
+                Array.isArray(comboData.comboItems);
+
+              const sizeLabel =
+                (it.size as string) ||
+                (comboData.optionName as string) ||
+                undefined;
+
+              if (!isCombo) {
+                return (
+                  <div
+                    key={it.uniqueId}
+                    className="flex items-start justify-between"
+                  >
+                    <div className="text-sm">
+                      <div className="font-semibold">{it.name}</div>
+                      <div className="text-muted-foreground">
+                        {it.quantity} x {fmt(unit)}
+                        {sizeLabel ? ` · Tamaño: ${sizeLabel}` : ""}
+                      </div>
+                      {it.observations?.trim() ? (
+                        <div className="text-muted-foreground">
+                          Obs: {it.observations.trim()}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="text-sm font-semibold">
+                      {fmt(it.finalPrice || it.price * it.quantity)}
+                    </div>
+                  </div>
+                );
+              }
+
+              // Render para COMBO
+              const main = comboData.comboItems?.find((x) => x.isMain);
+              const extras = comboData.comboItems?.filter((x) => !x.isMain) || [];
               return (
                 <div
                   key={it.uniqueId}
                   className="flex items-start justify-between"
                 >
                   <div className="text-sm">
-                    <div className="font-semibold">{it.name}</div>
+                    <div className="font-semibold">
+                      {it.name} <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#fff5f2] border border-[#ea562f]/30 text-[#ea562f] font-semibold align-middle">COMBO</span>
+                    </div>
                     <div className="text-muted-foreground">
                       {it.quantity} x {fmt(unit)}
-                      {it.size ? ` · Tamaño: ${it.size}` : ""}
                     </div>
-                    {it.observations?.trim() ? (
-                      <div className="text-muted-foreground">
-                        Obs: {it.observations.trim()}
-                      </div>
-                    ) : null}
+
+                    <div className="mt-1 text-xs text-muted-foreground space-y-1">
+                      {main && (
+                        <div>
+                          <span className="font-medium">Principal:</span>{" "}
+                          {main.name || "Producto"}
+                          {sizeLabel ? ` · Tamaño: ${sizeLabel}` : ""}
+                          {main.qty && main.qty > 1 ? ` x${main.qty}` : ""}
+                        </div>
+                      )}
+                      {extras.length > 0 && (
+                        <div>
+                          <span className="font-medium">Incluye:</span>
+                          <ul className="list-disc pl-5">
+                            {extras.map((e, idx) => (
+                              <li key={idx}>
+                                {e.name || "Ítem"}
+                                {e.qty && e.qty > 1 ? ` x${e.qty}` : ""}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {it.observations?.trim() ? (
+                        <div>Obs: {it.observations.trim()}</div>
+                      ) : null}
+                    </div>
                   </div>
+
                   <div className="text-sm font-semibold">
                     {fmt(it.finalPrice || it.price * it.quantity)}
                   </div>

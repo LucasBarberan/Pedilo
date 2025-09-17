@@ -21,6 +21,14 @@ type Category = {
   name: string;
 };
 
+type ApiCombo = {
+  id: number | string;
+  name: string;
+  imageUrl?: string | null;
+  effectivePrice?: number | string | null;
+  basePrice?: number | string | null;
+};
+
 // reemplazá tu fmtPrice por éste
 const fmtPrice = (n?: number | string) => {
   const v =
@@ -55,61 +63,65 @@ export default function CategoryPage() {
     (async () => {
       setLoading(true);
 
+      const isCombos = String(slug).toLowerCase() === "combos";
+if (isCombos) {
+  router.replace("/combos");
+  return; // cortamos el efecto
+}
+
       // --- CATEGORÍAS (extrae array desde json.data o json.data.data) ---
-      const catsRes = await fetch(`${BASE}/categories`, { cache: "no-store" });
-      const catsJson = await catsRes.json();
-      const cats: Category[] =
-        Array.isArray(catsJson)
-          ? catsJson
-          : Array.isArray(catsJson?.data)
-          ? catsJson.data
-          : Array.isArray(catsJson?.data?.data)
-          ? catsJson.data.data
-          : [];
-
-      const cat =
-        cats.find((c) => slugify(c.name) === slug) ||
-        cats.find((c) => String(c.code) === String(slug));
-
-      setCategory(cat ?? null);
-
-      // --- PRODUCTOS por categoría (usa ?category=<id>) ---
-      if (cat) {
-        const res = await fetch(
-          `${BASE}/products?category=${encodeURIComponent(String(cat.id))}&page=1&limit=50`,
-          { cache: "no-store" }
-        );
-        const json = await res.json();
-        const prods: Product[] =
-          Array.isArray(json)
-            ? json
-            : Array.isArray(json?.data)
-            ? json.data
-            : Array.isArray(json?.data?.data)
-            ? json.data.data
+      try {
+        const catsRes = await fetch(`${BASE}/categories`, { cache: "no-store" });
+        const catsJson = await catsRes.json();
+        const cats: Category[] =
+          Array.isArray(catsJson)
+            ? catsJson
+            : Array.isArray(catsJson?.data)
+            ? catsJson.data
+            : Array.isArray(catsJson?.data?.data)
+            ? catsJson.data.data
             : [];
 
-            // dentro del useEffect, luego de obtener `prods`
-            const normalize = (arr: any[]) =>
-              arr.map((p) => {
-              const raw =
-              p.price ?? p.basePrice ?? p.finalPrice ?? p.unitPrice; // por si tu back usa otro nombre
-              const n =
+        const cat =
+          cats.find((c) => slugify(c.name) === slug) ||
+          cats.find((c) => String(c.code) === String(slug));
+
+        setCategory(cat ?? null);
+
+        // --- PRODUCTOS por categoría (usa ?category=<id>) ---
+        if (cat) {
+          const res = await fetch(
+            `${BASE}/products?category=${encodeURIComponent(String(cat.id))}&page=1&limit=50`,
+            { cache: "no-store" }
+          );
+          const json = await res.json();
+          const prodsRaw: any[] =
+            Array.isArray(json)
+              ? json
+              : Array.isArray(json?.data)
+              ? json.data
+              : Array.isArray(json?.data?.data)
+              ? json.data.data
+              : [];
+
+          const prods: Product[] = prodsRaw.map((p) => {
+            const raw = p.price ?? p.basePrice ?? p.finalPrice ?? p.unitPrice;
+            const price =
               typeof raw === "string" ? Number(raw) :
-            typeof raw === "number" ? raw : undefined;
-            return { ...p, price: n };
+              typeof raw === "number" ? raw : undefined;
+            return { ...p, price };
           });
 
-          setProducts(normalize(prods));
-        setProducts(prods);
-      } else {
+          setProducts(prods);
+        } else {
+          setProducts([]);
+        }
+      } catch {
+        setCategory(null);
         setProducts([]);
+      } finally {
+        setLoading(false);
       }
-      
-      
-
-
-      setLoading(false);
     })().catch(() => {
       setCategory(null);
       setProducts([]);
@@ -125,7 +137,7 @@ export default function CategoryPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header con back y carrito como tenías */}
+      {/* Header con back y carrito */}
       <SiteHeader
         showBack
         onBack={() => router.back()}
@@ -133,12 +145,12 @@ export default function CategoryPage() {
       />
       <div className="h-[6px] w-full bg-white" />
 
-      {/* Título debajo del header (sin cambios de CSS) */}
+      {/* Título */}
       <div className="mx-auto w-full max-w-6xl px-4 pt-3 pb-2">
         <h2 className="text-2xl font-extrabold uppercase">{title}</h2>
       </div>
 
-      {/* Lista de productos: 1 col mobile / 2 col desktop (sin cambios de CSS) */}
+      {/* Lista */}
       <div className="mx-auto w-full max-w-6xl px-4 py-4 grid grid-cols-1 gap-4 md:grid-cols-2">
         {loading && (
           <div className="col-span-full p-8 text-center opacity-70">
@@ -150,13 +162,20 @@ export default function CategoryPage() {
           products.map((p) => (
             <div
               key={String(p.id)}
-              onClick={() => router.push(`/producto/${p.id}`)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) =>
-                (e.key === "Enter" || e.key === " ") &&
-                router.push(`/producto/${p.id}`)
-              }
+              onClick={() => {
+                const goTo = (category?.code === "COMBOS" || category?.id === "combos" || p.code === "COMBO")
+                  ? `/combos/${p.id}`
+                  : `/producto/${p.id}`;
+                router.push(goTo);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  const goTo = (category?.code === "COMBOS" || category?.id === "combos" || p.code === "COMBO")
+                    ? `/combos/${p.id}`
+                    : `/producto/${p.id}`;
+                  router.push(goTo);
+                }
+              }}
               className="rounded-2xl bg-white/60 ring-1 ring-black/5 shadow-sm p-4 flex gap-3 cursor-pointer hover:shadow-md transition"
             >
               <div className="relative h-20 w-24 rounded-lg overflow-hidden flex-shrink-0">

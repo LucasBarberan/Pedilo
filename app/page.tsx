@@ -20,19 +20,49 @@ export default function Home() {
         const json = await res.json();
 
         // Soportamos { data: [...] } o un array plano
-      const raw = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
+        const raw: Category[] = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
 
-      // Orden: isDefault true primero; luego por nombre (opcional)
-      const sorted = [...raw].sort((a, b) => {
-        if (!!a.isDefault === !!b.isDefault) {
-          return String(a.name || "").localeCompare(String(b.name || ""), "es");
-        }
-        return a.isDefault ? -1 : 1; // true va primero
-      });
+        // Orden: isDefault true primero; luego por nombre (opcional)
+        const sorted = [...raw].sort((a: any, b: any) => {
+          if (!!a.isDefault === !!b.isDefault) {
+            return String(a.name || "").localeCompare(String(b.name || ""), "es");
+          }
+          return a.isDefault ? -1 : 1; // true va primero
+        });
 
-        setCategories(sorted as Category[]);
+        // Agregamos item virtual "COMBOS" que navega a /categoria/combos
+        const hasCombos = sorted.some(
+          (c: any) =>
+            String(c.id).toLowerCase() === "combos" ||
+            String(c.code ?? "").toLowerCase() === "combos" ||
+            String(c.name ?? "").toLowerCase() === "combos"
+        );
+
+        const withCombos: Category[] = hasCombos
+          ? sorted as Category[]
+          : [
+              ...sorted,
+              {
+                id: "combos",
+                // @ts-ignore (si tu tipo Category no tiene code, no pasa nada)
+                code: "COMBOS",
+                name: "COMBOS",
+                // @ts-ignore (si tu tipo no define imageUrl, se ignora)
+                imageUrl: "/combos-placeholder.png",
+              } as Category,
+            ];
+
+        setCategories(withCombos);
       } catch {
-        setCategories([]);
+        // fallback mínimo con sólo COMBOS
+        setCategories([
+          {
+            id: "combos",
+            // @ts-ignore
+            code: "COMBOS",
+            name: "COMBOS",
+          } as Category,
+        ]);
       } finally {
         setLoading(false);
       }
@@ -40,8 +70,12 @@ export default function Home() {
   }, []);
 
   const handleCategorySelect = (slug: string) => {
+  if (slug.toLowerCase() === "combos") {
+    router.push("/combos");
+  } else {
     router.push(`/categoria/${encodeURIComponent(slug)}`);
-  };
+  }
+};
 
   const handleCartClick = () => {
     router.push("/carrito");
