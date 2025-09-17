@@ -4,12 +4,17 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 
 // Detalle de cada ítem dentro de un combo
-export interface CartComboItem {
-  name: string;          // nombre del producto (p.ej. "Hamburguesa Crispy", "Papas Fritas")
-  quantity: number;      // cuántos trae dentro del combo (p.ej. 1, 2)
-  isMain?: boolean;      // true si es el producto principal del combo
-  optionName?: string;   // sólo para el principal (p.ej. "Simple", "Doble", "Triple")
-}
+export type CartComboItem = {
+  productId: number;             // requerido por el back
+  name: string;
+  qty: number;
+  isMain?: boolean;
+  option?: {                     // solo si el item es el principal y hay opción
+    id: number;                  // ProductOption.id (REQUIRED si viene option)
+    name: string;                // "Simple" | "Doble" | "Triple"
+    extraPrice: number;          // 0 si no hay
+  };
+};
 
 export interface CartItem {
   uniqueId: string;

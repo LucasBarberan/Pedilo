@@ -170,69 +170,81 @@ export default function ComboDetailPage() {
  const handleAdd = () => {
   if (!combo) return;
 
-  // opción seleccionada del principal (si existe)
-  const sizeLabelRaw = (selectedOption?.option?.name || "").trim();
-  const sizeLabel = sizeLabelRaw.toLowerCase();
+ const sizeLabelRaw = (selectedOption?.option?.name || "").trim();
+const hasSelected =
+  selectedOption != null &&
+  selectedOption.id != null &&
+  !Number.isNaN(Number(selectedOption.id));
 
-  // precios (forzamos number siempre)
-  const base = toNum(combo?.effectivePrice ?? combo?.basePrice);
-  const extra = toNum(selectedOption?.precio_extra);
-  const unit = base + extra;
-  const final = unit * qty;
+const base  = toNum(combo?.effectivePrice ?? combo?.basePrice);
+const extra = toNum(selectedOption?.precio_extra);
+const unit  = base + extra;
+const final = unit * qty;
 
-  // imagen: combo -> principal -> vacío
-  const img =
-    (combo.imageUrl && combo.imageUrl.trim() ? combo.imageUrl : "") ||
-    (mainProduct?.imageUrl && mainProduct.imageUrl.trim() ? mainProduct.imageUrl : "") ||
-    "";
+const img =
+  (combo.imageUrl && combo.imageUrl.trim() ? combo.imageUrl : "") ||
+  (mainProduct?.imageUrl && mainProduct.imageUrl.trim() ? mainProduct.imageUrl : "") ||
+  "";
 
-  // detalle de lo que incluye el combo (principal primero, luego agregados)
-  const comboItems = (combo.items ?? [])
-    .slice()
-    .sort((a, b) => (a.isMain === b.isMain ? 0 : a.isMain ? -1 : 1))
-    .map((i) => ({
+// ✅ construir comboItems SIN undefineds en tipos estrictos
+const comboItems = (combo.items ?? [])
+  .slice()
+  .sort((a, b) => (a.isMain === b.isMain ? 0 : a.isMain ? -1 : 1))
+  .map((i) => {
+    const item: {
+      productId: number;
+      name: string;
+      qty: number;
+      isMain?: boolean;
+      option?: { id: number; name: string; extraPrice: number };
+    } = {
+      productId: Number(i.productId),
       name: i.product?.name ?? "Ítem",
-      quantity: i.quantity ?? 1,
+      qty: Number(i.quantity ?? 1),
       isMain: !!i.isMain,
-      // sólo el principal muestra la opción elegida (Simple/Doble/Triple)
-      optionName: i.isMain ? (sizeLabelRaw || undefined) : undefined,
-    }));
+    };
 
-  addToCart({
-    uniqueId: `${combo.id}-${selectedOptId ?? "noopt"}-${Date.now()}`,
-    id: Number(combo.id) || 0,               // id del COMBO
-    name: combo.name || "Combo",             // nombre del combo
-    description: mainProduct?.description || combo.description || "",
-    price: unit,                             // unitario
-    finalPrice: final,                       // unit * qty
-    image: img,
-    category: "combo",
-    quantity: qty,
+    if (i.isMain && hasSelected) {
+      item.option = {
+        id: Number(selectedOption!.id),
+        name: sizeLabelRaw || "Simple",
+        extraPrice: toNum(selectedOption!.precio_extra) || 0,
+      };
+    }
 
-    // visual/orden
-    size: sizeLabel || undefined,            // ahora tu CartItem acepta string
-    observations: notes,
-
-    // metadatos de combo
-    kind: "combo",
-    comboName: combo.name,
-    comboItems,
-
-    // para backend (option_ids)
-    productOptionId: Number(selectedOption?.id) || undefined,
-    optionId: Number(selectedOption?.option?.id) || undefined,
-    optionName: sizeLabelRaw || undefined,
-    priceExtra: extra,
-
-    // combos no son “default category”
-    isDefaultCategory: false,
+    return item;
   });
+
+addToCart({
+  uniqueId: `${combo.id}-${selectedOptId ?? "noopt"}-${Date.now()}`,
+  id: Number(combo.id) || 0,
+  name: combo.name || "Combo",
+  description: mainProduct?.description || combo.description || "",
+  price: unit,
+  finalPrice: final,
+  image: img,
+  category: "combo",
+  quantity: qty,
+
+  size: sizeLabelRaw ? sizeLabelRaw.toLowerCase() : undefined,
+  observations: notes,
+
+  kind: "combo",
+  comboName: combo.name,
+  comboItems, // <- ahora tipa perfecto
+
+  productOptionId: hasSelected ? Number(selectedOption!.id) : undefined,
+  optionId: hasSelected ? Number((selectedOption as any).option?.id) : undefined,
+  optionName: hasSelected ? sizeLabelRaw : undefined,
+  priceExtra: extra,
+
+  isDefaultCategory: false,
+});
 
   setJustAdded(true);
   setTimeout(() => setJustAdded(false), 1200);
   setNotes("");
   setQty(1);
-  // router.push("/carrito"); // si querés redirigir
 };
 
   // ===== Render =====

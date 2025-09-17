@@ -1,7 +1,7 @@
 // components/checkout-form.tsx
 "use client";
 
-import { useCart } from "@/components/cart-context";
+import { useCart,CartComboItem  } from "@/components/cart-context";
 import { Button } from "@/components/ui/button";
 import { useEffect, useMemo, useState } from "react";
 
@@ -86,10 +86,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const STORE_NAME = process.env.NEXT_PUBLIC_STORE_NAME || "SRA. BURGA";
 
   /** 🔹 Arma el texto de WhatsApp (usa el mismo orden del resumen) */
-  function buildWhatsAppText() {
+  function buildWhatsAppText(orderNumber?: number | string) {
     const lines: string[] = [];
 
-    lines.push(`*${STORE_NAME} – Nuevo pedido*`);
+    const headerSuffix = orderNumber ? ` – Pedido #${orderNumber}` : "";
+    lines.push(`*${STORE_NAME}${headerSuffix}*`);
     lines.push("");
     lines.push(`*Cliente:* ${customer.name}`);
     if (customer.phone?.trim()) lines.push(`*Tel:* ${customer.phone}`);
@@ -163,116 +164,176 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   }
 
   async function submitOrder() {
-    if (!customer.name.trim() || !customer.phone.trim()) {
-      alert("Completá al menos nombre y teléfono.");
-      return;
-    }
-    if (items.length === 0) {
-      alert("Tu carrito está vacío.");
-      return;
-    }
+  if (!customer.name.trim() || !customer.phone.trim()) {
+    alert("Completá al menos nombre y teléfono.");
+    return;
+  }
+  if (items.length === 0) {
+    alert("Tu carrito está vacío.");
+    return;
+  }
+  // si es delivery, pedimos dirección
+  if (deliveryMethod === "delivery" && !customer.address.trim()) {
+    alert("Ingresá la dirección para el delivery.");
+    return;
+  }
 
-    setSubmitting(true);
+  setSubmitting(true);
 
-    try {
-      // 👉 Enviar al backend sólo si está habilitado por env
-      const SEND_TO_API =
-        (process.env.NEXT_PUBLIC_SEND_ORDERS || "").toLowerCase() === "true";
+  try {
+    const SEND_TO_API =
+      (process.env.NEXT_PUBLIC_SEND_ORDERS || "").toLowerCase() === "true";
 
-      if (SEND_TO_API) {
-        if (!BASE) throw new Error("Falta NEXT_PUBLIC_API_URL");
+    let createdOrderNumber: number | string | undefined;
 
-        // 1) Armar items SIN 'options' y con 'option_ids' si aplica
-        //    (Más adelante adaptamos combos para tu API; por ahora lo dejamos lineal)
-        const itemsForApi = items.map((it: any) => {
+    if (SEND_TO_API) {
+      if (!BASE) throw new Error("Falta NEXT_PUBLIC_API_URL");
+
+      const itemsForApi: any[] = [];
+      const combosForApi: any[] = [];
+
+      for (const it of items) {
+        if (it.kind === "combo") {
+          // precio unitario del combo (el back prorratea internamente)
+          const unitCombo = Math.round(Number(it.price));
+
+          combosForApi.push({
+            combo_id: Number(it.id),
+            name: it.comboName || it.name,
+            quantity: Number(it.quantity),
+            unit_price: unitCombo,
+            comment: it.observations?.trim() || null,
+            items: (it.comboItems || []).map((ci: any) => ({
+              product_id: Number(ci.productId),
+              quantity: Number(ci.qty) || 1,
+              ...(ci.option?.id ? { option_ids: [Number(ci.option.id)] } : {}),
+            })),
+          });
+        } else {
+          // producto normal
           const unit = Math.round(
-            (it.finalPrice || it.price * it.quantity) / it.quantity
+            (Number(it.finalPrice) || Number(it.price) * Number(it.quantity)) /
+              Number(it.quantity)
           );
           const payload: any = {
-            product_id: it.id,
-            quantity: it.quantity,
+            product_id: Number(it.id),
+            quantity: Number(it.quantity),
             unit_price: unit,
           };
-          if (it.observations?.trim())
-            payload.comment = it.observations.trim();
-
-          // Enviar ProductOption.id (lo que espera tu back)
+          if (it.observations?.trim()) payload.comment = it.observations.trim();
           if (it.productOptionId) payload.option_ids = [Number(it.productOptionId)];
-
-          // TODO: Si tu API quiere el combo desglosado, lo adaptamos acá.
-          // Por ejemplo: payload.combo_items = it.comboItems?.map(...)
-
-          return payload;
-        });
-
-        // 2) Body base
-        const apiBodyRaw: any = {
-          items: itemsForApi,
-          payment_method:
-            paymentMethod === "cash"
-              ? "CASH"
-              : paymentMethod === "mp"
-              ? "MERCADOPAGO"
-              : "CARD",
-          amount_paid: Math.round(Number(total)),
-        };
-
-        // 3) Red de seguridad: eliminar cualquier 'options' en cualquier nivel
-        const apiBody = JSON.parse(
-          JSON.stringify(apiBodyRaw, (k, v) => (k === "options" ? undefined : v))
-        );
-
-        console.log("POST /orders body =>\n", JSON.stringify(apiBody, null, 2));
-
-        // 4) Enviar
-        const res = await fetch(`${BASE}/orders`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(apiBody),
-        });
-
-        const text = await res.text();
-        if (!res.ok) {
-          console.error("❌ POST /orders failed", res.status, text);
-          alert(`No se pudo guardar el pedido (HTTP ${res.status}).\n${text}`);
-          return; // no abrir WhatsApp si falló
-        }
-        console.log("✅ Orden creada:", text);
-      }
-
-      // 5) WhatsApp (si POST ok o desactivado)
-      const businessPhone = process.env.NEXT_PUBLIC_WA_NUMBER || ""; // ej: 5491122334455
-      const waText = encodeURIComponent(buildWhatsAppText());
-
-      if (businessPhone) {
-        const win = window.open("about:blank", "_blank");
-        const url = `https://wa.me/${businessPhone}?text=${waText}`;
-        if (win) win.location.href = url;
-        else window.open(url, "_blank");
-      } else {
-        try {
-          await navigator.clipboard.writeText(buildWhatsAppText());
-          alert(
-            "Configurá NEXT_PUBLIC_WA_NUMBER. El detalle del pedido fue copiado al portapapeles."
-          );
-        } catch {
-          alert(
-            "Configurá NEXT_PUBLIC_WA_NUMBER. Copiá y pegá este mensaje:\n\n" +
-              buildWhatsAppText()
-          );
+          itemsForApi.push(payload);
         }
       }
 
-      // 6) Limpiar carrito y cerrar
-      clearCart();
-      onSuccess?.();
-    } catch (e) {
-      console.error("❌ Error en submitOrder:", e);
-      alert("Ocurrió un error al procesar el pedido. Revisá consola.");
-    } finally {
-      setSubmitting(false);
+      // 4) Delivery info (siempre provider WEB)
+      const delivery_info =
+        deliveryMethod === "delivery"
+          ? {
+              customerName: customer.name.trim(),
+              customerPhone: customer.phone.trim(),
+              addressText: customer.address.trim(),
+              notes: notes?.trim() || null,
+              scheduledAt: null,
+              provider: "WEB",
+              mapUrl: null,
+            }
+          : {
+              customerName: customer.name.trim(),
+              customerPhone: customer.phone.trim(),
+              addressText: "", // vacío en retiro
+              notes: notes?.trim() || null,
+              scheduledAt: null,
+              provider: "WEB",
+              mapUrl: null,
+            };
+
+      // body
+      const apiBodyRaw: any = {
+        items: itemsForApi,
+        combos: combosForApi,
+        payment_method:
+          paymentMethod === "cash"
+            ? "CASH"
+            : paymentMethod === "mp"
+            ? "MERCADOPAGO"
+            : "CARD",
+        amount_paid: Math.round(Number(total)),
+        delivery_info,
+      };
+
+      // limpieza defensiva (sin 'options' y sin undefined)
+      const apiBody = JSON.parse(
+        JSON.stringify(apiBodyRaw, (k, v) =>
+          k === "options" || v === undefined ? undefined : v
+        )
+      );
+
+      console.log("POST /orders body =>\n", JSON.stringify(apiBody, null, 2));
+
+      const res = await fetch(`${BASE}/orders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(apiBody),
+      });
+
+      const text = await res.text();
+      if (!res.ok) {
+        console.error("❌ POST /orders failed", res.status, text);
+        alert(`No se pudo guardar el pedido (HTTP ${res.status}).\n${text}`);
+        return;
+      }
+      console.log("✅ Orden creada:", text);
+
+      // intentar extraer el número de pedido para WhatsApp
+      try {
+        const parsed = JSON.parse(text);
+        createdOrderNumber =
+          parsed?.data?.orderNumber ??
+          parsed?.orderNumber ??
+          parsed?.data?.order?.orderNumber ??
+          undefined;
+      } catch {
+        // si no es JSON, dejamos undefined
+      }
     }
+
+    // WhatsApp (con número si lo tenemos)
+    const businessPhone = process.env.NEXT_PUBLIC_WA_NUMBER || "";
+    const waText = encodeURIComponent(buildWhatsAppText(createdOrderNumber));
+
+    if (businessPhone) {
+      const win = window.open("about:blank", "_blank");
+      const url = `https://wa.me/${businessPhone}?text=${waText}`;
+      if (win) win.location.href = url;
+      else window.open(url, "_blank");
+    } else {
+      try {
+        await navigator.clipboard.writeText(buildWhatsAppText(createdOrderNumber));
+        alert(
+          "Configurá NEXT_PUBLIC_WA_NUMBER. El detalle del pedido fue copiado al portapapeles."
+        );
+      } catch {
+        alert(
+          "Configurá NEXT_PUBLIC_WA_NUMBER. Copiá y pegá este mensaje:\n\n" +
+            buildWhatsAppText(createdOrderNumber)
+        );
+      }
+    }
+
+    clearCart();
+    onSuccess?.();
+  } catch (e) {
+    console.error("❌ Error en submitOrder:", e);
+    alert("Ocurrió un error al procesar el pedido. Revisá consola.");
+  } finally {
+    setSubmitting(false);
   }
+}
+
+
+
+
 
   if (items.length === 0) {
     return (
