@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import SiteHeader from "@/components/site-header";
 import CategoryMenu, { type Category } from "@/components/category-menu";
+import ClosedBanner from "@/components/closed-banner";
 
 export default function Home() {
   const router = useRouter();
@@ -87,6 +88,10 @@ export default function Home() {
     <div className="min-h-screen bg-background">
       <SiteHeader onCartClick={handleCartClick} />
       <div className="h-[6px] w-full bg-white" />
+
+      {/* Banner “local cerrado” debajo del header (área roja que marcaste) */}
+      <ClosedBanner />
+      
       <CategoryMenu
         categories={categories}
         onCategorySelect={handleCategorySelect}

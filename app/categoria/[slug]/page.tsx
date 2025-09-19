@@ -4,6 +4,10 @@ import SiteHeader from "@/components/site-header";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import ClosedBanner from "@/components/closed-banner";
+import type { Viewport } from "next";
+
+
 
 type Product = {
   id: string | number;
@@ -51,7 +55,8 @@ const slugify = (s: string) =>
 export default function CategoryPage() {
   const { slug } = useParams<{ slug: string }>();
   const router = useRouter();
-
+  
+ 
   const [category, setCategory] = useState<Category | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -145,6 +150,9 @@ if (isCombos) {
       />
       <div className="h-[6px] w-full bg-white" />
 
+      {/* Banner “local cerrado” debajo del header (área roja que marcaste) */}
+            <ClosedBanner />
+
       {/* Título */}
       <div className="mx-auto w-full max-w-6xl px-4 pt-3 pb-2">
         <h2 className="text-2xl font-extrabold uppercase">{title}</h2>
@@ -198,7 +206,7 @@ if (isCombos) {
                 <div className="text-sm text-muted-foreground line-clamp-2">
                   {p.description || ""}
                 </div>
-                <div className="mt-2 text-lg font-extrabold text-[#ea562f]">
+                <div className="mt-2 text-lg font-extrabold text-[var(--brand-color)]">
                   {fmtPrice(p.price)}
                 </div>
               </div>

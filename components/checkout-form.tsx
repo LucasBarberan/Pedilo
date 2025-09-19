@@ -4,6 +4,7 @@
 import { useCart,CartComboItem  } from "@/components/cart-context";
 import { Button } from "@/components/ui/button";
 import { useEffect, useMemo, useState } from "react";
+import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
 
 type Customer = {
   name: string;
@@ -299,27 +300,41 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     }
 
     // WhatsApp (con número si lo tenemos)
-    const businessPhone = process.env.NEXT_PUBLIC_WA_NUMBER || "";
-    const waText = encodeURIComponent(buildWhatsAppText(createdOrderNumber));
-
-    if (businessPhone) {
-      const win = window.open("about:blank", "_blank");
-      const url = `https://wa.me/${businessPhone}?text=${waText}`;
-      if (win) win.location.href = url;
-      else window.open(url, "_blank");
-    } else {
-      try {
-        await navigator.clipboard.writeText(buildWhatsAppText(createdOrderNumber));
-        alert(
-          "Configurá NEXT_PUBLIC_WA_NUMBER. El detalle del pedido fue copiado al portapapeles."
-        );
-      } catch {
-        alert(
-          "Configurá NEXT_PUBLIC_WA_NUMBER. Copiá y pegá este mensaje:\n\n" +
-            buildWhatsAppText(createdOrderNumber)
-        );
+      const businessPhone = process.env.NEXT_PUBLIC_WA_NUMBER || "";
+      const textRaw = buildWhatsAppText(createdOrderNumber);
+      const phone = businessPhone.replace(/[^\d]/g, "");             // E.164 sin +
+      const msg   = encodeURIComponent(textRaw);
+        
+      if (phone) {
+        // Deep link (app) + fallback a wa.me SOLO si la app no abre
+        const schemeUrl = `whatsapp://send?phone=${phone}&text=${msg}`;
+        const webUrl    = `https://wa.me/${phone}?text=${msg}`;
+      
+        let launched = false;
+        const onHide = () => { launched = true; };
+        // Si la app abre, la página pasa a hidden/pagehide: cancelamos fallback
+        window.addEventListener("pagehide", onHide, { once: true });
+        document.addEventListener("visibilitychange", () => {
+          if (document.hidden) launched = true;
+        }, { once: true });
+      
+        // Abrir en la MISMA pestaña (sin window.open)
+        window.location.assign(schemeUrl);
+      
+        // Fallback después de ~900 ms SOLO si no se ocultó la página
+        setTimeout(() => {
+          if (!launched) window.location.assign(webUrl);
+        }, 900);
+      } else {
+        // Sin número configurado: copiar mensaje y avisar
+        try {
+          await navigator.clipboard.writeText(textRaw);
+          alert("Configurá NEXT_PUBLIC_WA_NUMBER. El detalle del pedido fue copiado al portapapeles.");
+        } catch {
+          alert("Configurá NEXT_PUBLIC_WA_NUMBER. Copiá y pegá este mensaje:\n\n" + textRaw);
+        }
       }
-    }
+
 
     clearCart();
     onSuccess?.();
@@ -352,7 +367,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
           <label className="block text-sm mb-1">Nombre y Apellido</label>
           <input
-            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#ea562f] mb-3"
+            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)] mb-3"
             value={customer.name}
             onChange={(e) =>
               setCustomer({ ...customer, name: e.target.value })
@@ -362,7 +377,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
           <label className="block text-sm mb-1">Teléfono</label>
           <input
-            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#ea562f] mb-3"
+            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)] mb-3"
             value={customer.phone}
             onChange={(e) =>
               setCustomer({ ...customer, phone: e.target.value })
@@ -372,7 +387,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
           <label className="block text-sm mb-1">Dirección</label>
           <input
-            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#ea562f]"
+            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
             value={customer.address}
             onChange={(e) =>
               setCustomer({ ...customer, address: e.target.value })
@@ -388,7 +403,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               onClick={() => setDeliveryMethod("delivery")}
               className={`px-3 py-2 rounded-lg border ${
                 deliveryMethod === "delivery"
-                  ? "border-[#ea562f] bg-[#fff5f2]"
+                  ? "border-[var(--brand-color)] bg-[#fff5f2]"
                   : "border-transparent hover:bg-black/5"
               }`}
             >
@@ -398,7 +413,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               onClick={() => setDeliveryMethod("pickup")}
               className={`px-3 py-2 rounded-lg border ${
                 deliveryMethod === "pickup"
-                  ? "border-[#ea562f] bg-[#fff5f2]"
+                  ? "border-[var(--brand-color)] bg-[#fff5f2]"
                   : "border-transparent hover:bg-black/5"
               }`}
             >
@@ -414,7 +429,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               onClick={() => setPaymentMethod("cash")}
               className={`px-3 py-2 rounded-lg border ${
                 paymentMethod === "cash"
-                  ? "border-[#ea562f] bg-[#fff5f2]"
+                  ? "border-[var(--brand-color)] bg-[#fff5f2]"
                   : "border-transparent hover:bg-black/5"
               }`}
             >
@@ -424,7 +439,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               onClick={() => setPaymentMethod("mp")}
               className={`px-3 py-2 rounded-lg border ${
                 paymentMethod === "mp"
-                  ? "border-[#ea562f] bg-[#fff5f2]"
+                  ? "border-[var(--brand-color)] bg-[#fff5f2]"
                   : "border-transparent hover:bg-black/5"
               }`}
             >
@@ -436,11 +451,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-2">Observaciones</div>
           <textarea
-            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#ea562f]"
+            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
             rows={3}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="Ej: timbre roto, sin cebolla, etc."
+            placeholder="Usá este campo para indicar timbre roto, forma de pago, referencias del domicilio, etc."
           />
         </div>
       </div>
@@ -498,7 +513,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                 >
                   <div className="text-sm">
                     <div className="font-semibold">
-                      {it.name} <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#fff5f2] border border-[#ea562f]/30 text-[#ea562f] font-semibold align-middle">COMBO</span>
+                      {it.name} <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#fff5f2] border border-[var(--brand-color)]/30 text-[var(--brand-color)] font-semibold align-middle">COMBO</span>
                     </div>
                     <div className="text-muted-foreground">
                       {it.quantity} x {fmt(unit)}
@@ -542,14 +557,21 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
           <div className="flex items-center justify-between border-t mt-3 pt-3">
             <div className="text-sm font-semibold">Total:</div>
-            <div className="text-xl font-extrabold text-[#ea562f]">
+            <div className="text-xl font-extrabold text-[var(--brand-color)]">
               {fmt(total)}
             </div>
           </div>
         </div>
 
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4 space-y-2">
-          <Button className="w-full" onClick={submitOrder} disabled={submitting}>
+          <Button className={`w-full text-white transition-colors
+                                    bg-[var(--brand-color)]
+                                    hover:bg-[color-mix(in_srgb,var(--brand-color),#000_12%)]
+                                    active:bg-[color-mix(in_srgb,var(--brand-color),#000_18%)]
+                                    hover:brightness-95 active:brightness-90
+                                    disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none
+                                    ${!STORE_OPEN ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`
+                                  } onClick={submitOrder} disabled={submitting}>
             {submitting ? "Enviando..." : "Enviar Pedido"}
           </Button>
           <Button

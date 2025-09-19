@@ -7,6 +7,8 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useCart } from "@/components/cart-context";
+import ClosedBanner from "@/components/closed-banner";
+import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
 
 // ===== Tipos =====
 type ApiProductOption = {
@@ -275,7 +277,8 @@ addToCart({
     <div className="min-h-screen bg-background">
       <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
       <div className="h-[6px] w-full bg-white" />
-
+      {/* Banner “local cerrado” debajo del header (área roja que marcaste) */}
+            <ClosedBanner />
       <div className="mx-auto w-full max-w-6xl p-4 grid grid-cols-1 gap-4 md:grid-cols-2">
         {/* Izquierda: Título del combo (arriba) + imagen + nombre del producto principal */}
         <div className="space-y-3">
@@ -317,7 +320,7 @@ addToCart({
                     onClick={() => setSelectedOptId(o.id)}
                     className={[
                       "w-full rounded-lg border px-3 py-2 text-left flex items-center justify-between",
-                      active ? "border-[#ea562f] bg-[#fff5f2]" : "border-transparent hover:bg-black/5",
+                      active ? "border-[var(--brand-color)] bg-[#fff5f2]" : "border-transparent hover:bg-black/5",
                     ].join(" ")}
                   >
                     <span className="text-sm">{o.option?.name || "Opción"}</span>
@@ -328,7 +331,7 @@ addToCart({
             </div>
           )}
 
-          <div className="rounded-2xl ring-1 ring-[#ea562f]/40 bg-white/60 p-3">
+          <div className="rounded-2xl ring-1 ring-[var(--brand-color)]/40 bg-white/60 p-3">
             <div className="text-sm font-semibold mb-2">Incluye:</div>
             {extras.length === 0 ? (
               <div className="text-sm text-muted-foreground">— Sin agregados —</div>
@@ -363,17 +366,34 @@ addToCart({
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
               placeholder="Escribe aquí cualquier observación especial para tu pedido..."
-              className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#ea562f]"
+              className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
             />
           </div>
 
           <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
             <div className="flex items-center justify-between mb-3">
               <div className="text-sm font-semibold">Total:</div>
-              <div className="text-xl font-extrabold text-[#ea562f]">{fmt(total)}</div>
+              <div className="text-xl font-extrabold text-[var(--brand-color)]">{fmt(total)}</div>
             </div>
-            <Button className="w-full" onClick={handleAdd}>
-              {justAdded ? "Agregado ✔" : "Agregar al carrito"}
+            <Button
+              className={`w-full text-white transition-colors
+                          bg-[var(--brand-color)]
+                          hover:bg-[color-mix(in_srgb,var(--brand-color),#000_12%)]
+                          active:bg-[color-mix(in_srgb,var(--brand-color),#000_18%)]
+                          hover:brightness-95 active:brightness-90
+                          disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none
+                          ${!STORE_OPEN ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`
+                        }
+              onClick={STORE_OPEN ? handleAdd : undefined}
+              disabled={!STORE_OPEN}
+              title={!STORE_OPEN ? STORE_CLOSED_MSG : undefined}
+              aria-disabled={!STORE_OPEN}
+            >
+              {!STORE_OPEN
+                ? "Local cerrado"
+                : justAdded
+                ? "Agregado ✔"
+                : "Agregar al Carrito"}
             </Button>
           </div>
         </div>

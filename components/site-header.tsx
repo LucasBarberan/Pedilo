@@ -20,7 +20,8 @@ export default function SiteHeader({
   const { getTotalItems } = useCart();
 
   return (
-    <div className="bg-primary text-primary-foreground p-4 flex items-center justify-between">
+    //<div className="bg-primary text-primary-foreground p-4 flex items-center justify-between">
+    <div className="bg-[var(--brand-color)] text-primary-foreground p-4 flex items-center justify-between">
       {/* back */}
       <button
         onClick={onBack}

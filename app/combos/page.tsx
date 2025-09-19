@@ -4,6 +4,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import SiteHeader from "@/components/site-header";
+import ClosedBanner from "@/components/closed-banner";
+import type { Viewport } from "next";
 
 type ApiCombo = {
   id: number | string;
@@ -51,6 +53,8 @@ export default function CombosListPage() {
     <div className="min-h-screen bg-background">
       <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
       <div className="h-[6px] w-full bg-white" />
+      {/* Banner “local cerrado” debajo del header (área roja que marcaste) */}
+            <ClosedBanner />
 
       <div className="mx-auto w-full max-w-6xl px-4 pt-3 pb-2">
         <h2 className="text-2xl font-extrabold uppercase">COMBOS</h2>
@@ -78,7 +82,7 @@ export default function CombosListPage() {
                 {c.description ? (
                   <div className="text-sm text-muted-foreground line-clamp-2">{c.description}</div>
                 ) : null}
-                <div className="mt-2 text-lg font-extrabold text-[#ea562f]">{fmtPrice(price)}</div>
+                <div className="mt-2 text-lg font-extrabold text-[var(--brand-color)]">{fmtPrice(price)}</div>
               </div>
             </div>
           );
