@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useCart } from "@/components/cart-context";
 import ClosedBanner from "@/components/closed-banner";
 import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
+import { fixImageUrl } from "@/lib/img";
 
 // ===== Tipos =====
 type ApiProductOption = {
@@ -80,6 +81,7 @@ const optionSorter = (a: ApiProductOption, b: ApiProductOption) => {
   const eb = Number(b.precio_extra || 0);
   return ea - eb;
 };
+
 
 export default function ComboDetailPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -169,6 +171,16 @@ export default function ComboDetailPage() {
   const mainItem = useMemo(() => combo?.items?.find((i) => i.isMain), [combo]);
   const extras = useMemo(() => (combo?.items ?? []).filter((i) => !i.isMain), [combo]);
 
+  // Imagen principal del detalle: combo -> producto principal -> producto del mainItem -> placeholder
+  const heroImg =
+  fixImageUrl(
+    (combo?.imageUrl && combo.imageUrl.trim() ? combo.imageUrl : "") ||
+    (mainProduct?.imageUrl && mainProduct.imageUrl.trim() ? mainProduct.imageUrl : "") ||
+    (mainItem?.product?.imageUrl && mainItem.product.imageUrl.trim() ? mainItem.product.imageUrl : "") ||
+    ""
+  ) || "/placeholder.svg";
+
+
  const handleAdd = () => {
   if (!combo) return;
 
@@ -183,10 +195,7 @@ const extra = toNum(selectedOption?.precio_extra);
 const unit  = base + extra;
 const final = unit * qty;
 
-const img =
-  (combo.imageUrl && combo.imageUrl.trim() ? combo.imageUrl : "") ||
-  (mainProduct?.imageUrl && mainProduct.imageUrl.trim() ? mainProduct.imageUrl : "") ||
-  "";
+  const img = heroImg !== "/placeholder.svg" ? heroImg : "";
 
 // ✅ construir comboItems SIN undefineds en tipos estrictos
 const comboItems = (combo.items ?? [])
@@ -287,10 +296,11 @@ addToCart({
           <div className="rounded-2xl overflow-hidden ring-1 ring-black/5 bg-white/60">
             <div className="relative w-full aspect-[4/3]">
               <Image
-                src={combo.imageUrl && combo.imageUrl.trim() ? combo.imageUrl : "/placeholder.svg"}
+                src={heroImg}
                 alt={combo.name}
                 fill
                 className="object-cover"
+                unoptimized  // en LAN; en prod podés quitarlo si ya configuraste images.remotePatterns
               />
             </div>
           </div>

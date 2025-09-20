@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import ClosedBanner from "@/components/closed-banner";
 import type { Viewport } from "next";
+import { fixImageUrl } from "@/lib/img";
 
 
 
@@ -188,11 +189,7 @@ if (isCombos) {
             >
               <div className="relative h-20 w-24 rounded-lg overflow-hidden flex-shrink-0">
                 <Image
-                  src={
-                    p.imageUrl && p.imageUrl.trim()
-                      ? p.imageUrl
-                      : "/placeholder.svg"
-                  }
+                  src={fixImageUrl(p.imageUrl) || "/placeholder.svg"}
                   alt={p.name}
                   fill
                   className="object-cover"

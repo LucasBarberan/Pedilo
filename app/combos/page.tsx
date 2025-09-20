@@ -1,11 +1,11 @@
-// app/combos/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import SiteHeader from "@/components/site-header";
 import ClosedBanner from "@/components/closed-banner";
-import type { Viewport } from "next";
+import Image from "next/image";
+import { fixImageUrl } from "@/lib/img"; // 👈 importar helper
 
 type ApiCombo = {
   id: number | string;
@@ -14,6 +14,18 @@ type ApiCombo = {
   effectivePrice?: number | string | null;
   basePrice?: number | string | null;
   description?: string | null;
+
+  // campos flexibles para items del combo
+  items?: Array<{
+    isMain?: boolean;
+    imageUrl?: string | null;
+    product?: { imageUrl?: string | null; name?: string | null };
+  }>;
+  comboItems?: Array<{
+    isMain?: boolean;
+    imageUrl?: string | null;
+    product?: { imageUrl?: string | null; name?: string | null };
+  }>;
 };
 
 const fmtPrice = (n?: number | string | null) => {
@@ -34,8 +46,11 @@ export default function CombosListPage() {
     (async () => {
       setLoading(true);
       try {
-        // tu back: GET /api/combo (singular) con ?withEffectivePrice=true
-        const res = await fetch(`${BASE}/combo?withEffectivePrice=true`, { cache: "no-store" });
+        // pido items para poder hallar el principal
+        const res = await fetch(
+          `${BASE}/combo?withEffectivePrice=true&withItems=true`,
+          { cache: "no-store" }
+        );
         const json = await res.json();
         const list: ApiCombo[] =
           Array.isArray(json?.data) ? json.data :
@@ -53,8 +68,7 @@ export default function CombosListPage() {
     <div className="min-h-screen bg-background">
       <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
       <div className="h-[6px] w-full bg-white" />
-      {/* Banner “local cerrado” debajo del header (área roja que marcaste) */}
-            <ClosedBanner />
+      <ClosedBanner />
 
       <div className="mx-auto w-full max-w-6xl px-4 pt-3 pb-2">
         <h2 className="text-2xl font-extrabold uppercase">COMBOS</h2>
@@ -65,24 +79,46 @@ export default function CombosListPage() {
 
         {!loading && combos.map((c) => {
           const price = c.effectivePrice ?? c.basePrice ?? null;
+
+          // —— imagen: propia del combo -> principal del combo -> placeholder
+          const arr = c.items ?? c.comboItems ?? [];
+          const main = arr.find((x: any) => x?.isMain);
+          const mainImg = main?.imageUrl || main?.product?.imageUrl || "";
+          const imgSrc = fixImageUrl(c.imageUrl || mainImg) || "/placeholder.svg";
+
           return (
             <div
               key={String(c.id)}
               role="button"
               tabIndex={0}
               onClick={() => router.push(`/combos/${c.id}`)}
-              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && router.push(`/combos/${c.id}`)}
+              onKeyDown={(e) =>
+                (e.key === "Enter" || e.key === " ") && router.push(`/combos/${c.id}`)
+              }
               className="rounded-2xl bg-white/60 ring-1 ring-black/5 shadow-sm p-4 flex gap-3 cursor-pointer hover:shadow-md transition"
             >
               <div className="relative h-20 w-24 rounded-lg overflow-hidden flex-shrink-0 bg-neutral-100">
-                {c.imageUrl ? <img src={c.imageUrl} alt={c.name} className="h-full w-full object-cover" /> : null}
+                <Image
+                  src={imgSrc}
+                  alt={c.name}
+                  fill
+                  className="object-cover"
+                  unoptimized  // en LAN; en prod podés quitarlo
+                />
               </div>
-              <div className="flex-1">
-                <div className="font-extrabold uppercase text-sm sm:text-base">{c.name}</div>
+
+              <div className="flex-1 min-w-0">
+                <div className="font-extrabold uppercase text-sm sm:text-base break-words">
+                  {c.name}
+                </div>
                 {c.description ? (
-                  <div className="text-sm text-muted-foreground line-clamp-2">{c.description}</div>
+                  <div className="text-sm text-muted-foreground line-clamp-2">
+                    {c.description}
+                  </div>
                 ) : null}
-                <div className="mt-2 text-lg font-extrabold text-[var(--brand-color)]">{fmtPrice(price)}</div>
+                <div className="mt-2 text-lg font-extrabold text-[var(--brand-color)]">
+                  {fmtPrice(price)}
+                </div>
               </div>
             </div>
           );
