@@ -1,9 +1,9 @@
 // components/checkout-form.tsx
 "use client";
 
-import { useCart,CartComboItem  } from "@/components/cart-context";
+import { useCart, CartComboItem } from "@/components/cart-context";
 import { Button } from "@/components/ui/button";
-import { useEffect, useMemo, useState } from "react";
+import { useRef, useEffect, useMemo, useState } from "react";
 import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
 
 type Customer = {
@@ -36,6 +36,24 @@ type MaybeCombo = {
 
 export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const { items, getTotalPrice, clearCart } = useCart();
+  // 🪝 TODOS LOS HOOKS VAN ACÁ
+  const [customer, setCustomer] = useState<Customer>({
+    name: "",
+    phone: "",
+    address: "",
+  });
+  const [deliveryMethod, setDeliveryMethod] = useState<"delivery"|"pickup">("delivery");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "mp">("cash");
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const [phoneTouched, setPhoneTouched] = useState(false);
+  const [formError, setFormError] = useState<string>("");
+  const nameRef = useRef<HTMLInputElement>(null);
+  const phoneRef = useRef<HTMLInputElement>(null);
+  const addressRef = useRef<HTMLInputElement>(null);
+
+  const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
 
   // ORDEN a usar en Resumen + WhatsApp (considera size u optionName)
   const sortedItems = useMemo(() => {
@@ -57,31 +75,27 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     });
   }, [items]);
 
-  const [customer, setCustomer] = useState<Customer>({
-    name: "",
-    phone: "",
-    address: "",
-  });
+  
 
-  const [deliveryMethod, setDeliveryMethod] =
-    useState<"delivery" | "pickup">("delivery");
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "mp">("cash");
-  const [notes, setNotes] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
+  
 
   // Cargar / guardar datos del cliente en localStorage
   useEffect(() => {
     try {
       const raw = localStorage.getItem("checkout.customer");
       if (raw) setCustomer(JSON.parse(raw));
-    } catch {}
+    } catch { }
   }, []);
   useEffect(() => {
     try {
       localStorage.setItem("checkout.customer", JSON.stringify(customer));
-    } catch {}
+    } catch { }
   }, [customer]);
+  // válido: entre 8 y 15 dígitos; permite separadores comunes
+  const isPhoneValid = (v: string) => {
+    const digits = v.replace(/\D/g, "");
+    return digits.length >= 8 && digits.length <= 15 && !/[^0-9\s()+-]/.test(v);
+  };
 
   const BASE = process.env.NEXT_PUBLIC_API_URL;
   const STORE_NAME = process.env.NEXT_PUBLIC_STORE_NAME || "SRA. BURGA";
@@ -122,8 +136,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
       if (!isCombo) {
         lines.push(
-          `• ${it.quantity} x ${it.name}${
-            sizeLabel ? ` (tamaño: ${sizeLabel})` : ""
+          `• ${it.quantity} x ${it.name}${sizeLabel ? ` (tamaño: ${sizeLabel})` : ""
           } – ${fmt(unit)} c/u`
         );
         if (it.observations?.trim()) {
@@ -142,8 +155,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
         if (main) {
           lines.push(
-            `   · Principal: ${main.name || "Producto"}${
-              sizeLabel ? ` (tamaño: ${sizeLabel})` : ""
+            `   · Principal: ${main.name || "Producto"}${sizeLabel ? ` (tamaño: ${sizeLabel})` : ""
             }${main.qty && main.qty > 1 ? ` x${main.qty}` : ""}`
           );
         }
@@ -163,74 +175,91 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
     return lines.join("\n");
   }
+  
 
   async function submitOrder() {
-  if (!customer.name.trim() || !customer.phone.trim()) {
-    alert("Completá al menos nombre y teléfono.");
+    if (items.length === 0) {
+    return (
+      <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-6 text-center">
+        Tu carrito está vacío.
+      </div>
+    );
+    }
+    if (!customer.name.trim()) {
+    setFormError("Ingresá tu nombre y apellido.");
+    nameRef.current?.focus();
+    nameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     return;
-  }
-  if (items.length === 0) {
-    alert("Tu carrito está vacío.");
+    }
+    if (!isPhoneValid(customer.phone)) {
+    setPhoneTouched(true);
+    setFormError("Revisá el teléfono: solo números (8–15 dígitos). Podés usar espacios, +, (), -.");
+    phoneRef.current?.focus();
+    phoneRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     return;
-  }
-  // si es delivery, pedimos dirección
-  if (deliveryMethod === "delivery" && !customer.address.trim()) {
-    alert("Ingresá la dirección para el delivery.");
-    return;
-  }
+    }
+    // si es delivery, pedimos dirección
+    if (deliveryMethod === "delivery" && !customer.address.trim()) {
+      setFormError("Ingresá la dirección para el delivery.");
+      addressRef.current?.focus();
+      addressRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return; // 🚫 no envía
+    }
 
-  setSubmitting(true);
+    setFormError(""); // OK, seguimos
+    setSubmitting(true);
 
-  try {
-    const SEND_TO_API =
-      (process.env.NEXT_PUBLIC_SEND_ORDERS || "").toLowerCase() === "true";
+    try {
+      const SEND_TO_API =
+        (process.env.NEXT_PUBLIC_SEND_ORDERS || "").toLowerCase() === "true";
 
-    let createdOrderNumber: number | string | undefined;
+      let createdOrderNumber: number | string | undefined;
 
-    if (SEND_TO_API) {
-      if (!BASE) throw new Error("Falta NEXT_PUBLIC_API_URL");
+      if (SEND_TO_API) {
+        if (!BASE) throw new Error("Falta NEXT_PUBLIC_API_URL");
 
-      const itemsForApi: any[] = [];
-      const combosForApi: any[] = [];
+        const itemsForApi: any[] = [];
+        const combosForApi: any[] = [];
 
-      for (const it of items) {
-        if (it.kind === "combo") {
-          // precio unitario del combo (el back prorratea internamente)
-          const unitCombo = Math.round(Number(it.price));
+        for (const it of items) {
+          if (it.kind === "combo") {
+            // precio unitario del combo (el back prorratea internamente)
+            const unitCombo = Math.round(Number(it.price));
 
-          combosForApi.push({
-            combo_id: Number(it.id),
-            name: it.comboName || it.name,
-            quantity: Number(it.quantity),
-            unit_price: unitCombo,
-            comment: it.observations?.trim() || null,
-            items: (it.comboItems || []).map((ci: any) => ({
-              product_id: Number(ci.productId),
-              quantity: Number(ci.qty) || 1,
-              ...(ci.option?.id ? { option_ids: [Number(ci.option.id)] } : {}),
-            })),
-          });
-        } else {
-          // producto normal
-          const unit = Math.round(
-            (Number(it.finalPrice) || Number(it.price) * Number(it.quantity)) /
+            combosForApi.push({
+              combo_id: Number(it.id),
+              name: it.comboName || it.name,
+              quantity: Number(it.quantity),
+              unit_price: unitCombo,
+              comment: it.observations?.trim() || null,
+              items: (it.comboItems || []).map((ci: any) => ({
+                product_id: Number(ci.productId),
+                quantity: Number(ci.qty) || 1,
+                ...(ci.option?.id ? { option_ids: [Number(ci.option.id)] } : {}),
+              })),
+            });
+          } else {
+            // producto normal
+            const unit = Math.round(
+              (Number(it.finalPrice) || Number(it.price) * Number(it.quantity)) /
               Number(it.quantity)
-          );
-          const payload: any = {
-            product_id: Number(it.id),
-            quantity: Number(it.quantity),
-            unit_price: unit,
-          };
-          if (it.observations?.trim()) payload.comment = it.observations.trim();
-          if (it.productOptionId) payload.option_ids = [Number(it.productOptionId)];
-          itemsForApi.push(payload);
+            );
+            const payload: any = {
+              product_id: Number(it.id),
+              quantity: Number(it.quantity),
+              unit_price: unit,
+            };
+            if (it.observations?.trim()) payload.comment = it.observations.trim();
+            if (it.productOptionId) payload.option_ids = [Number(it.productOptionId)];
+            itemsForApi.push(payload);
+          }
         }
-      }
-
-      // 4) Delivery info (siempre provider WEB)
-      const delivery_info =
-        deliveryMethod === "delivery"
-          ? {
+        const channel = "WEB" as const;
+        const fulfillment = deliveryMethod === "delivery" ? "DELIVERY" : "TAKEAWAY";
+        // 4) Delivery info (siempre provider WEB)
+        const delivery_info =
+          deliveryMethod === "delivery"
+            ? {
               customerName: customer.name.trim(),
               customerPhone: customer.phone.trim(),
               addressText: customer.address.trim(),
@@ -239,7 +268,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               provider: "WEB",
               mapUrl: null,
             }
-          : {
+            : {
               customerName: customer.name.trim(),
               customerPhone: customer.phone.trim(),
               addressText: "", // vacío en retiro
@@ -249,102 +278,126 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               mapUrl: null,
             };
 
-      // body
-      const apiBodyRaw: any = {
-        items: itemsForApi,
-        combos: combosForApi,
-        payment_method:
-          paymentMethod === "cash"
-            ? "CASH"
-            : paymentMethod === "mp"
-            ? "MERCADOPAGO"
-            : "CARD",
-        amount_paid: Math.round(Number(total)),
-        delivery_info,
-      };
+        // body
+        const apiBodyRaw: any = {
+          items: itemsForApi,
+          combos: combosForApi,
+          payment_method:
+            paymentMethod === "cash"
+              ? "CASH"
+              : paymentMethod === "mp"
+                ? "MERCADOPAGO"
+                : "CARD",
+          amount_paid: Math.round(Number(total)),
+          delivery_info,
+          channel,                  // "WEB"
+          fulfillment,              // "DELIVERY" | "TAKEAWAY"
+        };
 
-      // limpieza defensiva (sin 'options' y sin undefined)
-      const apiBody = JSON.parse(
-        JSON.stringify(apiBodyRaw, (k, v) =>
-          k === "options" || v === undefined ? undefined : v
-        )
-      );
+        // limpieza defensiva (sin 'options' y sin undefined)
+        const apiBody = JSON.parse(
+          JSON.stringify(apiBodyRaw, (k, v) =>
+            k === "options" || v === undefined ? undefined : v
+          )
+        );
 
-      console.log("POST /orders body =>\n", JSON.stringify(apiBody, null, 2));
+        console.log("POST /orders body =>\n", JSON.stringify(apiBody, null, 2));
 
-      const res = await fetch(`${BASE}/orders`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(apiBody),
-      });
+        const res = await fetch(`${BASE}/orders`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(apiBody),
+        });
 
-      const text = await res.text();
-      if (!res.ok) {
-        console.error("❌ POST /orders failed", res.status, text);
-        alert(`No se pudo guardar el pedido (HTTP ${res.status}).\n${text}`);
-        return;
-      }
-      console.log("✅ Orden creada:", text);
+        const text = await res.text();
+        if (!res.ok) {
+          console.error("❌ POST /orders failed", res.status, text);
+          alert(`No se pudo guardar el pedido (HTTP ${res.status}).\n${text}`);
+          return;
+        }
+        console.log("✅ Orden creada:", text);
 
-      // intentar extraer el número de pedido para WhatsApp
-      try {
-        const parsed = JSON.parse(text);
-        createdOrderNumber =
-          parsed?.data?.orderNumber ??
-          parsed?.orderNumber ??
-          parsed?.data?.order?.orderNumber ??
-          undefined;
-      } catch {
-        // si no es JSON, dejamos undefined
-      }
-    }
-
-    // WhatsApp (con número si lo tenemos)
-      const businessPhone = process.env.NEXT_PUBLIC_WA_NUMBER || "";
-      const textRaw = buildWhatsAppText(createdOrderNumber);
-      const phone = businessPhone.replace(/[^\d]/g, "");             // E.164 sin +
-      const msg   = encodeURIComponent(textRaw);
-        
-      if (phone) {
-        // Deep link (app) + fallback a wa.me SOLO si la app no abre
-        const schemeUrl = `whatsapp://send?phone=${phone}&text=${msg}`;
-        const webUrl    = `https://wa.me/${phone}?text=${msg}`;
-      
-        let launched = false;
-        const onHide = () => { launched = true; };
-        // Si la app abre, la página pasa a hidden/pagehide: cancelamos fallback
-        window.addEventListener("pagehide", onHide, { once: true });
-        document.addEventListener("visibilitychange", () => {
-          if (document.hidden) launched = true;
-        }, { once: true });
-      
-        // Abrir en la MISMA pestaña (sin window.open)
-        window.location.assign(schemeUrl);
-      
-        // Fallback después de ~900 ms SOLO si no se ocultó la página
-        setTimeout(() => {
-          if (!launched) window.location.assign(webUrl);
-        }, 900);
-      } else {
-        // Sin número configurado: copiar mensaje y avisar
+        // intentar extraer el número de pedido para WhatsApp
         try {
-          await navigator.clipboard.writeText(textRaw);
-          alert("Configurá NEXT_PUBLIC_WA_NUMBER. El detalle del pedido fue copiado al portapapeles.");
+          const parsed = JSON.parse(text);
+          createdOrderNumber =
+            parsed?.data?.orderNumber ??
+            parsed?.orderNumber ??
+            parsed?.data?.order?.orderNumber ??
+            undefined;
         } catch {
-          alert("Configurá NEXT_PUBLIC_WA_NUMBER. Copiá y pegá este mensaje:\n\n" + textRaw);
+          // si no es JSON, dejamos undefined
         }
       }
 
+      
+      // WhatsApp (con número si lo tenemos)
+      const businessPhone = process.env.NEXT_PUBLIC_WA_NUMBER || "";
+      const textRaw = buildWhatsAppText(createdOrderNumber);
+      const phone = businessPhone.replace(/[^\d]/g, "");             // E.164 sin +
+      const msg = encodeURIComponent(textRaw);
 
-    clearCart();
-    onSuccess?.();
-  } catch (e) {
-    console.error("❌ Error en submitOrder:", e);
-    alert("Ocurrió un error al procesar el pedido. Revisá consola.");
-  } finally {
-    setSubmitting(false);
+      if (phone) {
+      const schemeUrl = `whatsapp://send?phone=${phone}&text=${msg}`;
+      const webUrl    = `https://wa.me/${phone}?text=${msg}`;
+      const isMobile  = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+          
+      // En desktop vamos directo a WhatsApp Web
+      if (!isMobile) {
+        window.location.assign(webUrl);
+        // o window.open(webUrl, "_blank");
+        return;
+      }
+    
+      let launched = false;
+      let timer: number;
+    
+      const cleanup = () => {
+        launched = true;
+        clearTimeout(timer);
+        window.removeEventListener("pagehide", onHide);
+        window.removeEventListener("blur", onHide);
+        document.removeEventListener("visibilitychange", onVisibility);
+      };
+    
+      const onHide = () => cleanup();
+      const onVisibility = () => {
+        if (document.hidden) cleanup();
+      };
+    
+      // Si la app se abre, la pestaña pierde foco/visibilidad → cancelamos fallback
+      window.addEventListener("pagehide", onHide, { once: true });
+      window.addEventListener("blur", onHide, { once: true });
+      document.addEventListener("visibilitychange", onVisibility, { once: true });
+    
+      // Abrimos la app
+      window.location.assign(schemeUrl);
+    
+      // Fallback SOLO si seguimos en esta pestaña con foco
+      timer = window.setTimeout(() => {
+        const stillHere =
+          !launched && document.visibilityState === "visible" && document.hasFocus();
+        if (stillHere) window.location.assign(webUrl);
+      }, 1200);
+    } else {
+      try {
+        await navigator.clipboard.writeText(textRaw);
+        alert("Configurá NEXT_PUBLIC_WA_NUMBER. El detalle del pedido fue copiado al portapapeles.");
+      } catch {
+        alert("Configurá NEXT_PUBLIC_WA_NUMBER. Copiá y pegá este mensaje:\n\n" + textRaw);
+      }
+    }
+
+
+      clearCart();
+      onSuccess?.();
+    } catch (e) {
+      console.error("❌ Error en submitOrder:", e);
+      alert("Ocurrió un error al procesar el pedido. Revisá consola.");
+    } finally {
+      setSubmitting(false);
+    }
   }
-}
 
 
 
@@ -358,6 +411,12 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     );
   }
 
+
+  
+
+
+
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {/* Columna izquierda: Datos del cliente */}
@@ -367,26 +426,45 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
           <label className="block text-sm mb-1">Nombre y Apellido</label>
           <input
+            ref={nameRef}
             className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)] mb-3"
             value={customer.name}
-            onChange={(e) =>
-              setCustomer({ ...customer, name: e.target.value })
-            }
+            onChange={(e) => setCustomer({ ...customer, name: e.target.value })}
             placeholder="Tu nombre"
           />
 
+          
+
           <label className="block text-sm mb-1">Teléfono</label>
           <input
-            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)] mb-3"
+            ref={phoneRef}
+            id="phone-input"
+            type="tel"
+            inputMode="numeric"
+            autoComplete="tel"
+            pattern="[0-9\s()+-]{8,15}"
+            title="Ingresá solo números; podés usar espacios, +, (), -. Mínimo 8 dígitos."
+            className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 mb-1
+              ${phoneTouched && !isPhoneValid(customer.phone)
+                ? "border-red-500 focus:ring-red-400"
+                : "focus:ring-[var(--brand-color)]"}`}
             value={customer.phone}
-            onChange={(e) =>
-              setCustomer({ ...customer, phone: e.target.value })
-            }
+            onChange={(e) => setCustomer({ ...customer, phone: e.target.value })}
+            onBlur={() => setPhoneTouched(true)}
             placeholder="Ej: 11 5555 5555"
+            aria-invalid={phoneTouched && !isPhoneValid(customer.phone)}
+            aria-describedby="phone-help"
           />
+
+          <p id="phone-help" className={`text-xs mb-3 ${
+            phoneTouched && !isPhoneValid(customer.phone) ? "text-red-600" : "text-muted-foreground"
+          }`}>
+            * Solo números; podés usar espacios, +, (), -. Mínimo 8 dígitos.
+          </p>
 
           <label className="block text-sm mb-1">Dirección</label>
           <input
+            ref={addressRef}
             className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
             value={customer.address}
             onChange={(e) =>
@@ -401,21 +479,19 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           <div className="flex gap-2">
             <button
               onClick={() => setDeliveryMethod("delivery")}
-              className={`px-3 py-2 rounded-lg border ${
-                deliveryMethod === "delivery"
+              className={`px-3 py-2 rounded-lg border ${deliveryMethod === "delivery"
                   ? "border-[var(--brand-color)] bg-[#fff5f2]"
                   : "border-transparent hover:bg-black/5"
-              }`}
+                }`}
             >
               Delivery
             </button>
             <button
               onClick={() => setDeliveryMethod("pickup")}
-              className={`px-3 py-2 rounded-lg border ${
-                deliveryMethod === "pickup"
+              className={`px-3 py-2 rounded-lg border ${deliveryMethod === "pickup"
                   ? "border-[var(--brand-color)] bg-[#fff5f2]"
                   : "border-transparent hover:bg-black/5"
-              }`}
+                }`}
             >
               Retiro
             </button>
@@ -427,21 +503,19 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           <div className="flex gap-2">
             <button
               onClick={() => setPaymentMethod("cash")}
-              className={`px-3 py-2 rounded-lg border ${
-                paymentMethod === "cash"
+              className={`px-3 py-2 rounded-lg border ${paymentMethod === "cash"
                   ? "border-[var(--brand-color)] bg-[#fff5f2]"
                   : "border-transparent hover:bg-black/5"
-              }`}
+                }`}
             >
               Efectivo
             </button>
             <button
               onClick={() => setPaymentMethod("mp")}
-              className={`px-3 py-2 rounded-lg border ${
-                paymentMethod === "mp"
+              className={`px-3 py-2 rounded-lg border ${paymentMethod === "mp"
                   ? "border-[var(--brand-color)] bg-[#fff5f2]"
                   : "border-transparent hover:bg-black/5"
-              }`}
+                }`}
             >
               Mercado Pago
             </button>
@@ -563,6 +637,21 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           </div>
         </div>
 
+              {formError && (
+            <div className="mx-auto w-full max-w-6xl px-4">
+              <div className="mb-3 rounded-xl border border-red-200 bg-red-50 text-red-700 p-3 flex items-start justify-between">
+                <div className="text-sm">⚠️ {formError}</div>
+                <button
+                  onClick={() => setFormError("")}
+                  className="ml-3 rounded-md px-2 py-1 hover:bg-red-100"
+                  aria-label="Cerrar advertencia"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4 space-y-2">
           <Button className={`w-full text-white transition-colors
                                     bg-[var(--brand-color)]
@@ -571,7 +660,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                                     hover:brightness-95 active:brightness-90
                                     disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none
                                     ${!STORE_OPEN ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`
-                                  } onClick={submitOrder} disabled={submitting}>
+          } onClick={submitOrder} disabled={submitting}>
             {submitting ? "Enviando..." : "Enviar Pedido"}
           </Button>
           <Button

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useMemo } from "react";
-import { XCircle, Trash2 } from "lucide-react";
+import {  Trash2 } from "lucide-react";
 import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
 
 const fmt = (n: number) => `$${n.toLocaleString("es-AR")}`;
@@ -157,9 +157,14 @@ export default function CartPage() {
                                 variant="outline"
                                 size="icon"
                                 className="h-8 w-8 p-0 sm:h-9 sm:w-9"
-                                onClick={() =>
-                                  updateQuantity(it.uniqueId, Math.max(1, Number(it.quantity) - 1))
-                                }
+                                onClick={() => {
+                                  const q = Number(it.quantity) || 0;
+                                  if (q <= 1) {
+                                    removeFromCart(it.uniqueId);
+                                  } else {
+                                    updateQuantity(it.uniqueId, q - 1);
+                                  }
+                                }}
                               >
                                 −
                               </Button>
@@ -178,25 +183,12 @@ export default function CartPage() {
                               </Button>
                             </div>
                             
-                          {/* Precio + Eliminar (abajo en mobile) */}
-                          <div className="flex items-center gap-2 order-2 sm:order-none">
-                            <div className="text-right font-semibold shrink-0 w-20 sm:w-24">
+                          {/* Precio (sin botón eliminar) */}
+                            <div className="text-right font-semibold shrink-0 w-20 sm:w-24 order-2 sm:order-none">
                               {fmt(Number(it.finalPrice) || 0)}
                             </div>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => removeFromCart(it.uniqueId)}
-                              aria-label="Eliminar ítem"
-                              title="Eliminar"
-                              className="shrink-0 hover:bg-neutral-200 focus-visible:bg-neutral-200 dark:hover:bg-neutral-800 dark:focus-visible:bg-neutral-800"
-                            >
-                              <XCircle className="h-5 w-5" />
-                              <span className="sr-only">Eliminar</span>
-                            </Button>
                           </div>
                         </div>
-                      </div>
                     );
             })}
 
