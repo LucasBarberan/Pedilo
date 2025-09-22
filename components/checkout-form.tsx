@@ -54,6 +54,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const addressRef = useRef<HTMLInputElement>(null);
 
   const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
+  const CHECKOUT_NOTES_MAX = 50; // o el número que prefieras
 
   // ORDEN a usar en Resumen + WhatsApp (considera size u optionName)
   const sortedItems = useMemo(() => {
@@ -523,15 +524,33 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         </div>
 
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
-          <div className="text-sm font-semibold mb-2">Observaciones</div>
-          <textarea
-            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
-            rows={3}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Usá este campo para indicar timbre roto, forma de pago, referencias del domicilio, etc."
-          />
+        <div className="text-sm font-semibold mb-2">Observaciones</div>
+
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value.slice(0, CHECKOUT_NOTES_MAX))} // hard limit
+          maxLength={CHECKOUT_NOTES_MAX}
+          rows={2} // arranca chico
+          placeholder="Usá este campo para indicar timbre roto, forma de pago, referencias del domicilio, etc."
+          className="w-full rounded-md border px-3 py-2 text-sm outline-none
+                    focus:ring-2 focus:ring-[var(--brand-color)]
+                    resize-none min-h-[40px]"
+          onInput={(e) => {
+            // auto-grow hasta un tope para que no se haga gigante
+            const ta = e.currentTarget;
+            ta.style.height = "auto";
+            ta.style.height = Math.min(ta.scrollHeight, 120) + "px"; // ~4–5 líneas
+          }}
+          aria-describedby="checkout-notes-counter"
+        />
+
+        <div
+          id="checkout-notes-counter"
+          className="mt-1 text-xs text-muted-foreground text-right"
+        >
+          {notes.length}/{CHECKOUT_NOTES_MAX}
         </div>
+      </div>
       </div>
 
       {/* Columna derecha: Resumen */}

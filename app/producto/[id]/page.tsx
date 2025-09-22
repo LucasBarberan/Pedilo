@@ -11,6 +11,7 @@ import ClosedBanner from "@/components/closed-banner";
 import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
 import type { Viewport } from "next";
 
+
 type ProductOption = {
   id: string | number;
   precio_extra?: number | string | null; // acepta string (Decimal)
@@ -28,6 +29,7 @@ type Product = {
   category?: { isDefault?: boolean };   // 👈 NUEVO
 };
 
+const MAX_NOTES = 50;
 // helpers
 const fmt = (n?: number | string) => {
   const v = typeof n === "string" ? Number(n) : n;
@@ -161,7 +163,7 @@ export default function ProductDetailPage() {
     });
 
     setJustAdded(true);
-    setTimeout(() => setJustAdded(false), 1500);
+    setTimeout(() => {setJustAdded(false); router.back(); }, 600);
     setNotes("");
     setQty(1);
   };
@@ -269,13 +271,27 @@ export default function ProductDetailPage() {
 
           <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
             <div className="text-sm font-semibold mb-2">Observaciones:</div>
+
             <textarea
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
+              onChange={(e) => setNotes(e.target.value.slice(0, MAX_NOTES))} // hard limit
+              maxLength={MAX_NOTES}
+              rows={2}                                   // arranca chico
               placeholder="Escribe aquí cualquier observación especial para tu pedido..."
-              className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
+              className="w-full rounded-md border px-3 py-2 text-sm outline-none
+                          focus:ring-2 focus:ring-[var(--brand-color)]
+                         resize-none min-h-[40px]"       // no mostrar handler de resize
+              onInput={(e) => {
+                // auto-grow hasta un tope (evita que se haga gigante)
+                const ta = e.currentTarget;
+                ta.style.height = "auto";
+                ta.style.height = Math.min(ta.scrollHeight, 120) + "px"; // ~4–5 líneas
+              }}
             />
+
+            <div className="mt-1 text-xs text-muted-foreground text-right">
+              {notes.length}/{MAX_NOTES}
+            </div>
           </div>
 
           <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">

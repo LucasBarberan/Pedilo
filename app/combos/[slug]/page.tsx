@@ -11,6 +11,7 @@ import ClosedBanner from "@/components/closed-banner";
 import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
 import { fixImageUrl } from "@/lib/img";
 
+
 // ===== Tipos =====
 type ApiProductOption = {
   id: string | number;
@@ -47,6 +48,8 @@ type ApiCombo = {
   items?: ApiComboItem[];
 };
 
+const MAX_NOTES = 50;
+
 // ===== Helpers =====
 const toNum = (v: unknown) =>
   typeof v === "string" ? Number(v) : typeof v === "number" ? v : 0;
@@ -81,6 +84,7 @@ const optionSorter = (a: ApiProductOption, b: ApiProductOption) => {
   const eb = Number(b.precio_extra || 0);
   return ea - eb;
 };
+
 
 
 export default function ComboDetailPage() {
@@ -197,6 +201,8 @@ const final = unit * qty;
 
   const img = heroImg !== "/placeholder.svg" ? heroImg : "";
 
+  
+
 // ✅ construir comboItems SIN undefineds en tipos estrictos
 const comboItems = (combo.items ?? [])
   .slice()
@@ -250,10 +256,12 @@ addToCart({
   priceExtra: extra,
 
   isDefaultCategory: false,
+  
 });
 
+
   setJustAdded(true);
-  setTimeout(() => setJustAdded(false), 1200);
+  setTimeout(() => { setJustAdded(false); router.back(); }, 600);
   setNotes("");
   setQty(1);
 };
@@ -371,13 +379,27 @@ addToCart({
 
           <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
             <div className="text-sm font-semibold mb-2">Observaciones:</div>
+                    
             <textarea
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
+              onChange={(e) => setNotes(e.target.value.slice(0, MAX_NOTES))} // hard limit
+              maxLength={MAX_NOTES}
+              rows={2}                                   // arranca chico
               placeholder="Escribe aquí cualquier observación especial para tu pedido..."
-              className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
+              className="w-full rounded-md border px-3 py-2 text-sm outline-none
+                          focus:ring-2 focus:ring-[var(--brand-color)]
+                         resize-none min-h-[40px]"       // no mostrar handler de resize
+              onInput={(e) => {
+                // auto-grow hasta un tope (evita que se haga gigante)
+                const ta = e.currentTarget;
+                ta.style.height = "auto";
+                ta.style.height = Math.min(ta.scrollHeight, 120) + "px"; // ~4–5 líneas
+              }}
             />
+          
+            <div className="mt-1 text-xs text-muted-foreground text-right">
+              {notes.length}/{MAX_NOTES}
+            </div>
           </div>
 
           <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">

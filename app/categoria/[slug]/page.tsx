@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import ClosedBanner from "@/components/closed-banner";
 import type { Viewport } from "next";
 import { fixImageUrl } from "@/lib/img";
+import { usePathname } from "next/navigation";
 
 
 
@@ -43,6 +44,7 @@ const fmtPrice = (n?: number | string) => {
     ? `$${v.toLocaleString("es-AR")}`
     : "-";
 };
+
 
 const slugify = (s: string) =>
   s
