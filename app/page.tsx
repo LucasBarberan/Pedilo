@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import SiteHeader from "@/components/site-header";
 import CategoryMenu, { type Category } from "@/components/category-menu";
 import ClosedBanner from "@/components/closed-banner";
+import BlockingLoader from "@/components/blocking-loader"; // 👈 ruta correcta
 
 export default function Home() {
   const router = useRouter();
@@ -20,10 +21,7 @@ export default function Home() {
         const res = await fetch(`${BASE}/categories`, { cache: "no-store" });
         const json = await res.json();
 
-        // Soportamos { data: [...] } o un array plano
         const raw: Category[] = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
-
-        // Orden: isDefault true primero; luego por sortOrder (si existe), luego por nombre
         const sorted = [...raw].sort((a: any, b: any) => {
           if (!!a.isDefault !== !!b.isDefault) return a.isDefault ? -1 : 1;
           const soA = typeof a.sortOrder === "number" ? a.sortOrder : Number.MAX_SAFE_INTEGER;
@@ -34,33 +32,28 @@ export default function Home() {
 
         setCategories(sorted);
       } catch {
-        setCategories([]); // sin fallback “COMBOS” fijo
+        setCategories([]);
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  const handleCartClick = () => {
-    router.push("/carrito");
-  };
-
-  if (loading) return <div className="p-6">Cargando…</div>;
+  const handleCartClick = () => router.push("/carrito");
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background relative">
       <SiteHeader onCartClick={handleCartClick} />
       <div className="h-[6px] w-full bg-white" />
-
-      {/* Banner “local cerrado” debajo del header */}
       <ClosedBanner />
 
       <CategoryMenu
         categories={categories}
-        // Nota: CategoryMenu ya hace router.push interno
-        // (normales → /categoria/[slug]?id=<ID>, combos → /combos?categoryId=<ID>)
         onCartClick={handleCartClick}
       />
+
+      {/* Overlay bloqueante mientras carga */}
+      <BlockingLoader open={loading} message="Preparando la carta…" />
     </div>
   );
 }

@@ -8,6 +8,7 @@ import ClosedBanner from "@/components/closed-banner";
 import type { Viewport } from "next";
 import { fixImageUrl } from "@/lib/img";
 import { usePathname } from "next/navigation";
+import BlockingLoader from "@/components/blocking-loader"; // 👈 ruta correcta
 
 
 
@@ -163,11 +164,8 @@ if (isCombos) {
 
       {/* Lista */}
       <div className="mx-auto w-full max-w-6xl px-4 py-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-        {loading && (
-          <div className="col-span-full p-8 text-center opacity-70">
-            Cargando...
-          </div>
-        )}
+        {/* Overlay bloqueante mientras carga */}
+                      <BlockingLoader open={loading} message="Preparando la carta…" />
 
         {!loading &&
           products.map((p) => (

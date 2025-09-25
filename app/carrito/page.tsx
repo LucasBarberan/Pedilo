@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { useMemo } from "react";
 import {  Trash2 } from "lucide-react";
 import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
+import BlockingLoader from "@/components/blocking-loader"; // 👈 ruta correcta
 
 const fmt = (n: number) => `$${n.toLocaleString("es-AR")}`;
 
@@ -24,6 +25,11 @@ type MaybeCombo = {
     isMain?: boolean;
     qty?: number;
     name?: string;
+    // 👇 NUEVO (para items que vienen de categorías incluidas)
+    isInclusion?: boolean;
+    inclusionTitle?: string;
+    unitPrice?: number;   // precio con regla aplicada
+    basePrice?: number;   // precio original
   }>;
   optionName?: string; // alias de size si lo preferís
 };
@@ -75,8 +81,11 @@ export default function CartPage() {
 
               const main =
                 comboData.comboItems?.find((x) => x.isMain) || undefined;
-              const extras =
-                comboData.comboItems?.filter((x) => !x.isMain) || [];
+              const fixedExtras =
+                comboData.comboItems?.filter((x) => !x.isMain && !x.isInclusion) || [];
+                          
+              const inclusionsChosen =
+                comboData.comboItems?.filter((x) => x.isInclusion) || [];
 
               const sizeLabel =
                 (it.size as string) ||
@@ -130,11 +139,12 @@ export default function CartPage() {
                                   {main.qty && main.qty > 1 ? ` x${main.qty}` : ""}
                                 </div>
                               )}
-                              {extras.length > 0 && (
+
+                              {fixedExtras.length > 0 && (
                                 <div>
                                   <span className="font-medium">Incluye:</span>
                                   <ul className="list-disc pl-5">
-                                    {extras.map((e, idx) => (
+                                    {fixedExtras.map((e, idx) => (
                                       <li key={idx}>
                                         {e.name || "Ítem"}
                                         {e.qty && e.qty > 1 ? ` x${e.qty}` : ""}
@@ -143,6 +153,42 @@ export default function CartPage() {
                                   </ul>
                                 </div>
                               )}
+
+                              {inclusionsChosen.length > 0 && (
+                                <div>
+                                  <span className="font-medium">Elegiste:</span>
+                                  <ul className="list-disc pl-5">
+                                    {inclusionsChosen.map((ci, idx) => (
+                                      <li key={idx}>
+                                        
+                                        <span>{ci.name}</span>
+                                        {/* precios si están disponibles */}
+                                        {typeof ci.unitPrice === "number" ? (
+                                          <>
+                                            {" "}
+                                            {typeof ci.basePrice === "number" &&
+                                            ci.basePrice !== ci.unitPrice ? (
+                                              <>
+                                                <span className="line-through opacity-50 mr-1">
+                                                  {fmt(ci.basePrice)}
+                                                </span>
+                                                <span className="font-medium">
+                                                  {fmt(ci.unitPrice)}
+                                                </span>
+                                              </>
+                                            ) : (
+                                              <span className="font-medium">
+                                                {fmt(ci.unitPrice)}
+                                              </span>
+                                            )}
+                                          </>
+                                        ) : null}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
                               {it.observations && <div>Obs: {String(it.observations)}</div>}
                             </div>
                           )}
@@ -218,6 +264,7 @@ export default function CartPage() {
           </>
         )}
       </div>
+      
     </div>
   );
 }

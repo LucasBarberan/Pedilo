@@ -6,6 +6,7 @@ import SiteHeader from "@/components/site-header";
 import ClosedBanner from "@/components/closed-banner";
 import Image from "next/image";
 import { fixImageUrl } from "@/lib/img";
+import BlockingLoader from "@/components/blocking-loader"; // 👈 ruta correcta
 
 type ApiCombo = {
   id: number | string;
@@ -47,6 +48,7 @@ export default function CombosListPage() {
   const [combos, setCombos] = useState<ApiCombo[]>([]);
   const [loading, setLoading] = useState(true);
   const [categoryName, setCategoryName] = useState<string | null>(null);
+  
 
   useEffect(() => {
     const BASE = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
@@ -126,7 +128,7 @@ export default function CombosListPage() {
       </div>
 
       <div className="mx-auto w-full max-w-6xl px-4 py-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-        {loading && <div className="col-span-full p-8 text-center opacity-70">Cargando...</div>}
+        
 
         {!loading && combos.map((c) => {
           const price = c.effectivePrice ?? c.basePrice ?? null;
@@ -175,9 +177,8 @@ export default function CombosListPage() {
           );
         })}
 
-        {!loading && combos.length === 0 && (
-          <div className="col-span-full p-8 text-center opacity-70">No hay combos.</div>
-        )}
+        {/* Overlay bloqueante mientras carga */}
+              <BlockingLoader open={loading} message="Preparando la carta…" />
       </div>
     </div>
   );

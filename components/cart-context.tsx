@@ -14,6 +14,11 @@ export type CartComboItem = {
     name: string;                // "Simple" | "Doble" | "Triple"
     extraPrice: number;          // 0 si no hay
   };
+  // 👇 NUEVO: cuando proviene de una categoría incluida
+  isInclusion?: boolean;         // lo usamos para detectarlo en el render
+  inclusionTitle?: string;       // ej. "Elegí tu bebida"
+  unitPrice?: number;            // precio con la regla aplicada (descuento/tope/etc.)
+  basePrice?: number;            // precio original del producto
 };
 
 export interface CartItem {

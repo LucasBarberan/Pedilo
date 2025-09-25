@@ -10,6 +10,8 @@ import { useCart } from "@/components/cart-context";
 import ClosedBanner from "@/components/closed-banner";
 import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
 import { fixImageUrl } from "@/lib/img";
+import BlockingLoader from "@/components/blocking-loader"; // 👈 ruta correcta
+
 
 // ===== Tipos =====
 type ApiProductOption = {
@@ -365,6 +367,38 @@ export default function ComboDetailPage() {
     }
     return total;
   }, [combo, inclusionsProducts, inclusionSelections]);
+  // 👇 agrega esto
+  const selectedInclusionItems = useMemo(() => {
+    if (!combo) return [];
+    const out: Array<{
+      inclusionId: string;
+      inclusionTitle: string;
+      productId: number;
+      name: string;
+      unitPrice: number;   // precio aplicado por la regla
+      basePrice: number;   // precio original del producto
+    }> = [];
+
+    for (const inc of combo.categoryInclusions ?? []) {
+      const key = String(inc.id);
+      const prods = inclusionsProducts[key] ?? [];
+      const sel = inclusionSelections[key] ?? [];
+      for (const pid of sel) {
+        const p = prods.find((x) => String(x.id) === pid);
+        const raw = toNumber(p?.price) ?? 0;
+        const fin = priceWithInclusionRule(raw, inc) ?? raw;
+        out.push({
+          inclusionId: key,
+          inclusionTitle: inc.name || inc.category?.name || "Opción",
+          productId: Number(p?.id ?? 0),
+          name: String(p?.name ?? "Ítem"),
+          unitPrice: fin,
+          basePrice: raw,
+        });
+      }
+    }
+    return out;
+  }, [combo, inclusionsProducts, inclusionSelections]);
 
   const total = (comboBase + optionExtra + selectedInclusionsTotal) * qty;
 
@@ -423,9 +457,18 @@ export default function ComboDetailPage() {
 
         return item;
       });
+      // 👉 opcional: si también querés mezclar estas selecciones dentro de comboItems:
+      const inclusionAsItems = selectedInclusionItems.map((s) => ({
+        productId: s.productId,
+        name: s.name,
+        qty: 1,
+        isInclusion: true,
+        inclusionTitle: s.inclusionTitle,
+        unitPrice: s.unitPrice,
+        basePrice: s.basePrice,
+      }));
 
     // (Opcional) podrías también empujar las selecciones de inclusiones al carrito si lo necesitás a futuro
-
     addToCart({
       uniqueId: `${combo.id}-${selectedOptId ?? "noopt"}-${Date.now()}`,
       id: Number(combo.id) || 0,
@@ -442,7 +485,8 @@ export default function ComboDetailPage() {
 
       kind: "combo",
       comboName: combo.name,
-      comboItems,
+      comboItems: [...comboItems, ...inclusionAsItems],
+      // ⬇️ y además mandamos la lista “cruda” por si la querés usar aparte en el carro
 
       productOptionId: hasSelected ? Number(selectedOption!.id) : undefined,
       optionId: hasSelected ? Number((selectedOption as any).option?.id) : undefined,
@@ -461,29 +505,20 @@ export default function ComboDetailPage() {
     setQty(1);
   };
 
-  // ===== Render =====
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background">
-        <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
-        <div className="h-[6px] w-full bg-white" />
-        <div className="mx-auto w-full max-w-6xl p-4">Cargando…</div>
-      </div>
-    );
-  }
+  
 
-  if (!combo) {
-    return (
-      <div className="min-h-screen bg-background">
-        <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
-        <div className="h-[6px] w-full bg-white" />
-        <div className="mx-auto w-full max-w-6xl p-4">No se encontró el combo.</div>
-      </div>
-    );
-  }
+  if (!combo && !loading) {
+  return (
+    <div className="min-h-screen bg-background">
+      <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
+      <div className="h-[6px] w-full bg-white" />
+      <div className="mx-auto w-full max-w-6xl p-4">No se encontró el combo.</div>
+    </div>
+  );
+}
 
   const hasOptions =
-    Array.isArray(mainProduct?.productOptions) && (mainProduct!.productOptions!.length ?? 0) > 0;
+    Array.isArray(mainProduct?.productOptions) && mainProduct.productOptions.length  > 0;
 
   return (
     <div className="min-h-screen bg-background">
@@ -494,14 +529,14 @@ export default function ComboDetailPage() {
       <div className="mx-auto w-full max-w-6xl p-4 grid grid-cols-1 gap-4 md:grid-cols-2">
   {/* Izquierda: Título del combo + imagen + nombre/desc + OBSERVACIONES */}
   <div className="space-y-3">
-    <h2 className="text-xl font-extrabold uppercase">{combo.name}</h2>
+    <h2 className="text-xl font-extrabold uppercase">{combo?.name ?? "Combo"}</h2>
 
     {/* Imagen más chica */}
     <div className="rounded-2xl overflow-hidden ring-1 ring-black/5 bg-white/60">
       <div className="relative w-full aspect-[3/2] md:aspect-[16/10] max-h-[340px] mx-auto">
         <Image
           src={heroImg}
-          alt={combo.name}
+          alt={combo?.name ?? "Combo"}
           fill
           className="object-cover"
           unoptimized
@@ -510,12 +545,12 @@ export default function ComboDetailPage() {
     </div>
 
     <h3 className="text-xl font-extrabold uppercase">
-      {mainProduct?.name ?? combo.name}
+      {mainProduct?.name ?? combo?.name ?? "Combo"}
     </h3>
 
-    {(mainProduct?.description || combo.description) && (
+    {(mainProduct?.description || combo?.description) && (
       <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 text-sm text-muted-foreground">
-        {mainProduct?.description ?? combo.description}
+        {mainProduct?.description ?? combo?.description}
       </div>
     )}
 
@@ -529,8 +564,8 @@ export default function ComboDetailPage() {
         rows={2}
         placeholder="Escribe aquí cualquier observación especial para tu pedido..."
         className="w-full rounded-md border px-3 py-2 text-sm outline-none
-                   focus:ring-2 focus:ring-[var(--brand-color)]
-                   resize-none min-h-[40px]"
+                  focus:ring-2 focus:ring-[var(--brand-color)]
+                  resize-none min-h-[40px]"
         onInput={(e) => {
           const ta = e.currentTarget;
           ta.style.height = "auto";
@@ -548,12 +583,13 @@ export default function ComboDetailPage() {
     {hasOptions && (
       <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 space-y-2">
         <div className="text-sm font-semibold mb-2">Tamaño:</div>
-        {mainProduct!.productOptions!.map((o) => {
+        {mainProduct?.productOptions?.map((o) => {
           const active = selectedOptId === o.id;
           const plus = toNum(o.precio_extra);
           return (
             <button
               key={String(o.id)}
+              disabled={loading}
               onClick={() => setSelectedOptId(o.id)}
               className={[
                 "w-full rounded-lg border px-3 py-2 text-left flex items-center justify-between",
@@ -572,7 +608,7 @@ export default function ComboDetailPage() {
           {/* === INCLUSIONES: categorías incluidas con descuento (dropdown / desplegable) === */}
           {(combo?.categoryInclusions?.length ?? 0) > 0 && (
             <div className="rounded-2xl ring-1 ring-[var(--brand-color)]/40 bg-white/60 p-3 space-y-4">
-              {combo!.categoryInclusions!.map((inc) => {
+              {(combo?.categoryInclusions ?? []).map((inc) => {
                 const key = String(inc.id);
                 const prods = inclusionsProducts[key] ?? [];
                 const sel = inclusionSelections[key] ?? [];
@@ -785,9 +821,9 @@ export default function ComboDetailPage() {
     <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
       <div className="text-sm font-semibold mb-2">Cantidad:</div>
       <div className="flex items-center gap-3">
-        <Button variant="outline" onClick={() => setQty((q) => Math.max(1, q - 1))}>−</Button>
+        <Button variant="outline" onClick={() => setQty(q => Math.max(1, q - 1))} disabled={loading}>−</Button>
         <div className="w-8 text-center font-semibold">{qty}</div>
-        <Button variant="outline" onClick={() => setQty((q) => q + 1)}>＋</Button>
+        <Button variant="outline" onClick={() => setQty(q => q + 1)} disabled={loading}>＋</Button>
       </div>
     </div>
 
@@ -806,7 +842,7 @@ export default function ComboDetailPage() {
                     disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none
                     ${!STORE_OPEN ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`}
         onClick={STORE_OPEN ? handleAdd : undefined}
-        disabled={!STORE_OPEN}
+        disabled={!STORE_OPEN || loading}
         title={!STORE_OPEN ? STORE_CLOSED_MSG : undefined}
         aria-disabled={!STORE_OPEN}
       >
@@ -815,6 +851,8 @@ export default function ComboDetailPage() {
     </div>
   </div>
   </div>
+  {/* Overlay bloqueante mientras carga */}
+        <BlockingLoader open={loading} message="Cargando combo.." />
     </div>
   );
 }
