@@ -1,21 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import SiteHeader from "@/components/site-header";
 import ClosedBanner from "@/components/closed-banner";
 import Image from "next/image";
-import { fixImageUrl } from "@/lib/img"; // 👈 importar helper
+import { fixImageUrl } from "@/lib/img";
 
 type ApiCombo = {
   id: number | string;
   name: string;
-  imageUrl?: string | null;
-  effectivePrice?: number | string | null;
-  basePrice?: number | string | null;
+  code?: string | number;
   description?: string | null;
-
-  // campos flexibles para items del combo
+  imageUrl?: string | null;
+  basePrice?: number | string | null;
+  effectivePrice?: number | string | null;
+  active?: boolean;
+  channel?: string;
+  categoryId?: number | string;
+  category?: {
+    id: number | string;
+    name: string;
+    isComboCategory?: boolean;
+  };
   items?: Array<{
     isMain?: boolean;
     imageUrl?: string | null;
@@ -36,8 +43,10 @@ const fmtPrice = (n?: number | string | null) => {
 
 export default function CombosListPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [combos, setCombos] = useState<ApiCombo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [categoryName, setCategoryName] = useState<string | null>(null);
 
   useEffect(() => {
     const BASE = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
@@ -46,23 +55,65 @@ export default function CombosListPage() {
     (async () => {
       setLoading(true);
       try {
-        // pido items para poder hallar el principal
-        const res = await fetch(
-          `${BASE}/combo?withEffectivePrice=true&withItems=true`,
-          { cache: "no-store" }
-        );
+        const categoryId = searchParams.get("categoryId");
+
+        const qs = new URLSearchParams();
+        qs.set("withEffectivePrice", "true");
+        qs.set("withItems", "true");
+        if (categoryId) qs.set("category", categoryId); // si tu back lo soporta, filtra server-side
+
+        const res = await fetch(`${BASE}/combo?${qs.toString()}`, { cache: "no-store" });
         const json = await res.json();
-        const list: ApiCombo[] =
-          Array.isArray(json?.data) ? json.data :
-          Array.isArray(json) ? json : [];
-        setCombos(list);
+        const list: ApiCombo[] = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
+
+        // Filtro client-side:
+        const filtered = list.filter((c) => {
+          const isComboCat = c?.category?.isComboCategory === true;
+          if (!isComboCat) return false;
+          if (!categoryId) return true;
+          return String(c.categoryId ?? c.category?.id) === String(categoryId);
+        });
+
+        setCombos(filtered);
+
+        // --- título: intentar resolver nombre real de la categoría combo ---
+        if (categoryId) {
+          // 1) del primer combo (si vino poblado)
+          const byCombo = filtered[0]?.category?.name;
+          if (byCombo) {
+            setCategoryName(byCombo);
+          } else {
+            // 2) buscar en /categories por id
+            try {
+              const catsRes = await fetch(`${BASE}/categories`, { cache: "no-store" });
+              const catsJson = await catsRes.json();
+              const cats: any[] = Array.isArray(catsJson?.data)
+                ? catsJson.data
+                : (Array.isArray(catsJson) ? catsJson : []);
+              const found = cats.find((c) => String(c.id) === String(categoryId));
+              setCategoryName(found?.name ?? null);
+            } catch {
+              setCategoryName(null);
+            }
+          }
+        } else {
+          setCategoryName(null);
+        }
       } catch {
         setCombos([]);
+        setCategoryName(null);
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]); // re-fetch si cambia categoryId
+
+  // título: usa nombre si lo tenemos
+  const title = useMemo(() => {
+    if (categoryName) return `${String(categoryName).toUpperCase()}`;
+    return "COMBOS";
+  }, [categoryName]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -71,7 +122,7 @@ export default function CombosListPage() {
       <ClosedBanner />
 
       <div className="mx-auto w-full max-w-6xl px-4 pt-3 pb-2">
-        <h2 className="text-2xl font-extrabold uppercase">COMBOS</h2>
+        <h2 className="text-2xl font-extrabold uppercase">{title}</h2>
       </div>
 
       <div className="mx-auto w-full max-w-6xl px-4 py-4 grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -80,7 +131,7 @@ export default function CombosListPage() {
         {!loading && combos.map((c) => {
           const price = c.effectivePrice ?? c.basePrice ?? null;
 
-          // —— imagen: propia del combo -> principal del combo -> placeholder
+          // imagen: propia -> principal -> placeholder
           const arr = c.items ?? c.comboItems ?? [];
           const main = arr.find((x: any) => x?.isMain);
           const mainImg = main?.imageUrl || main?.product?.imageUrl || "";
@@ -103,7 +154,7 @@ export default function CombosListPage() {
                   alt={c.name}
                   fill
                   className="object-cover"
-                  unoptimized  // en LAN; en prod podés quitarlo
+                  unoptimized
                 />
               </div>
 
