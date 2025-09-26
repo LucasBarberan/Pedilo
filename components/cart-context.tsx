@@ -59,11 +59,94 @@ interface CartContextType {
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
+/* =======================
+   Helpers para mergeo
+   ======================= */
+
+// Firma para saber si dos items pueden mergearse (solo si NO tienen observaciones)
+function getMergeSignature(it: CartItem): string | null {
+  // si hay observaciones, NO se mergea
+  if (it.observations && it.observations.trim() !== "") return null;
+
+  const kind = it.kind || "product";
+
+  if (kind !== "combo") {
+    // Producto suelto: mismo product_id + misma opción + mismo tamaño/alias
+    const prodId = Number(it.id) || 0;
+    const optId  = Number(it.productOptionId || it.optionId || 0) || 0;
+    const size   = String(it.size || it.optionName || "").toLowerCase();
+    return `prod|${prodId}|${optId}|${size}`;
+  }
+
+  // Combo: firmamos por combo id, opción principal y composición interna
+  const comboId = Number(it.id) || 0;
+  const optId   = Number(it.productOptionId || it.optionId || 0) || 0;
+
+  // Normalizamos items internos para que el orden no afecte
+  const inner = (it.comboItems || [])
+    .map(ci => ({
+      pid: Number(ci.productId) || 0,
+      qty: Number(ci.qty) || 1,
+      opt: ci?.option ? Number(ci.option.id) || 0 : 0,
+      inc: !!ci.isInclusion,
+    }))
+    .sort((a, b) => a.pid - b.pid || a.opt - b.opt || (a.inc === b.inc ? 0 : a.inc ? 1 : -1));
+
+  return `combo|${comboId}|${optId}|${JSON.stringify(inner)}`;
+}
+
+// Precio unitario robusto a partir del item actual
+function unitPriceOf(it: CartItem): number {
+  const q = Math.max(1, Number(it.quantity) || 1);
+  const byFinal = Number(it.finalPrice);
+  if (Number.isFinite(byFinal) && byFinal > 0) return byFinal / q;
+
+  const byPrice = Number(it.price);
+  if (Number.isFinite(byPrice) && byPrice > 0) return byPrice;
+
+  return 0;
+}
+
 export function CartProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
 
   const addToCart = (item: CartItem) => {
-    setItems((prev) => [...prev, item]);
+    setItems(prev => {
+      // aseguramos uniqueId si no vino
+      const newItem: CartItem = {
+        ...item,
+        uniqueId: item.uniqueId ?? `${item.id}-${Date.now()}`,
+      };
+
+      // si no puede mergearse (porque tiene observations), entra directo
+      const sig = getMergeSignature(newItem);
+      if (!sig) return [...prev, newItem];
+
+      // buscamos un existente con la misma firma
+      const idx = prev.findIndex(p => getMergeSignature(p) === sig);
+      if (idx === -1) return [...prev, newItem];
+
+      // ✅ merge: sumamos cantidades y recalculamos finalPrice con un unit coherente
+      const curr = prev[idx];
+
+      const currQty = Number(curr.quantity) || 0;
+      const addQty  = Number(newItem.quantity) || 0;
+
+      // tomamos el unit del nuevo si viene distinto; si no, del existente
+      const addUnit  = unitPriceOf(newItem);
+      const currUnit = unitPriceOf(curr);
+      const unit     = Number.isFinite(addUnit) && addUnit > 0 ? addUnit : currUnit;
+
+      const merged: CartItem = {
+        ...curr,
+        quantity: currQty + addQty,
+        finalPrice: Math.round(unit * (currQty + addQty)),
+      };
+
+      const copy = [...prev];
+      copy[idx] = merged;
+      return copy;
+    });
   };
 
   const removeFromCart = (uniqueId: string) => {
@@ -81,8 +164,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
           ? {
               ...item,
               quantity,
-              // conserva el precio unitario actual
-              finalPrice: (item.finalPrice / item.quantity) * quantity,
+              // conserva el precio unitario actual (con redondeo)
+              finalPrice: Math.round((item.finalPrice / item.quantity) * quantity),
             }
           : item
       )

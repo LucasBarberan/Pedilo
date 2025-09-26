@@ -7,6 +7,7 @@ import ClosedBanner from "@/components/closed-banner";
 import Image from "next/image";
 import { fixImageUrl } from "@/lib/img";
 import BlockingLoader from "@/components/blocking-loader"; // 👈 ruta correcta
+import { isAllowedForDelivery } from "@/lib/channel";
 
 type ApiCombo = {
   id: number | string;
@@ -72,6 +73,7 @@ export default function CombosListPage() {
         const filtered = list.filter((c) => {
           const isComboCat = c?.category?.isComboCategory === true;
           if (!isComboCat) return false;
+          if (!isAllowedForDelivery((c as any).channel)) return false;
           if (!categoryId) return true;
           return String(c.categoryId ?? c.category?.id) === String(categoryId);
         });

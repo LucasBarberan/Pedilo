@@ -49,8 +49,8 @@ export default function CategoryMenu({ categories, onCategorySelect }: CategoryM
             key={String(c.id)}
             onClick={() => handleClick(c)}
             className="group rounded-2xl bg-white/70 ring-1 ring-black/5 shadow-sm p-4 h-52
-                       flex flex-col items-center justify-center gap-3
-                       hover:shadow-md hover:bg-white/80 transition"
+                      flex flex-col items-center justify-center gap-3
+                      hover:shadow-md hover:bg-white/80 transition"
           >
             <div className="relative h-28 w-28">
               <Image

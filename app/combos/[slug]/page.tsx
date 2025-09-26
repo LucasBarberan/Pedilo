@@ -11,6 +11,7 @@ import ClosedBanner from "@/components/closed-banner";
 import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
 import { fixImageUrl } from "@/lib/img";
 import BlockingLoader from "@/components/blocking-loader"; // 👈 ruta correcta
+import { isAllowedForDelivery } from "@/lib/channel";
 
 
 // ===== Tipos =====
@@ -199,6 +200,8 @@ export default function ComboDetailPage() {
   const [notes, setNotes] = useState("");
   const [justAdded, setJustAdded] = useState(false);
   const [openIncId, setOpenIncId] = useState<string | null>(null);
+  const [inclusionErrors, setInclusionErrors] = useState<Record<string, string | null>>({});
+  const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     const BASE = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
@@ -221,6 +224,15 @@ export default function ComboDetailPage() {
             : (json as ApiCombo | null);
 
         setCombo(c ?? null);
+        // ✅ Si el combo existe pero NO está habilitado para web, navegamos atrás o mostramos mensaje
+        if (c && !isAllowedForDelivery((c as any).channel)) {
+          // opción A: volver atrás
+          router.replace("/"); // o router.back()
+        
+          // opción B (alternativa): setear un estado y mostrar un aviso bonito
+          // setCombo(null); setError("Este combo no está disponible para pedidos online.");
+        }
+        
 
         // 2) Si hay item principal, traigo el producto para obtener sus opciones
         const main = c?.items?.find((i) => i.isMain);
@@ -279,9 +291,7 @@ export default function ComboDetailPage() {
           byInclusion[key] = products;
 
           // preselección si minChoices >= 1 (agarro el primero)
-          const min = Number(inc.minChoices ?? 0);
-          if (min >= 1 && products[0]) defaultSel[key] = [String(products[0].id)];
-          else defaultSel[key] = [];
+          defaultSel[key] = [];
 
 
 
@@ -300,7 +310,7 @@ export default function ComboDetailPage() {
       }
     })();
   }, [slug]);
-
+  
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
       const el = e.target as HTMLElement;
@@ -316,7 +326,12 @@ export default function ComboDetailPage() {
     document.removeEventListener("mousedown", onDown);
     document.removeEventListener("keydown", onKey);
   };
-}, []);
+  }, []);
+  
+
+  
+
+
 
   // opción seleccionada
   const selectedOption = useMemo(() => {
@@ -329,20 +344,20 @@ export default function ComboDetailPage() {
     const key = String(inc.id);
     const max = Number(inc.maxChoices ?? 1);
 
-    setInclusionSelections((prev) => {
+    setInclusionSelections(prev => {
       const current = prev[key] ?? [];
+      let next = current.includes(prodId)
+        ? current.filter(x => x !== prodId)
+        : [...current, prodId];
 
-      if (max <= 1) {
-        // radio
-        return { ...prev, [key]: [prodId] };
-      }
-
-      // checkbox con tope
-      const exists = current.includes(prodId);
-      let next = exists ? current.filter((x) => x !== prodId) : [...current, prodId];
       if (next.length > max) next = next.slice(0, max);
+
       return { ...prev, [key]: next };
     });
+
+    // limpiar error y banner de esta inclusión
+    setInclusionErrors(e => ({ ...e, [key]: null }));
+    setFormError(null);
   };
 
   // precios
@@ -415,20 +430,58 @@ export default function ComboDetailPage() {
         ""
     ) || "/placeholder.svg";
 
-  const handleAdd = () => {
-    if (!combo) return;
+    const handleAdd = () => {
+        if (!combo) return;
+      
+        const sizeLabelRaw = (selectedOption?.option?.name || "").trim();
+        const hasSelected =
+          selectedOption != null && selectedOption.id != null && !Number.isNaN(Number(selectedOption.id));
 
-    const sizeLabelRaw = (selectedOption?.option?.name || "").trim();
-    const hasSelected =
-      selectedOption != null && selectedOption.id != null && !Number.isNaN(Number(selectedOption.id));
+        const base = toNum(combo?.effectivePrice ?? combo?.basePrice);
+        const extra = toNum(selectedOption?.precio_extra);
+        const unit = base + extra + selectedInclusionsTotal;
+        const final = unit * qty;
 
-    const base = toNum(combo?.effectivePrice ?? combo?.basePrice);
-    const extra = toNum(selectedOption?.precio_extra);
-    const unit = base + extra + selectedInclusionsTotal;
-    const final = unit * qty;
+        const img = heroImg !== "/placeholder.svg" ? heroImg : "";
+        const validateInclusions = (): boolean => {
+      const errs: Record<string, string | null> = {};
+      let ok = true;
+        
+      for (const inc of combo?.categoryInclusions ?? []) {
+        const key = String(inc.id);
+        const min = Number(inc.minChoices ?? 0);
+        const max = Number(inc.maxChoices ?? 1);
+        const selCount = (inclusionSelections[key] ?? []).length;
+      
+        if (selCount < min) {
+          ok = false;
+          errs[key] = min === 1
+            ? `Debés seleccionar ${min} opción`
+            : `Debés seleccionar al menos ${min} opciones`;
+        } else if (selCount > max) {
+          ok = false;
+          errs[key] = `Seleccionaste más de ${max} opciones`;
+        } else {
+          errs[key] = null;
+        }
+      }
+    
+      setInclusionErrors(errs);
+      return ok;
+    };
 
-    const img = heroImg !== "/placeholder.svg" ? heroImg : "";
 
+    // ✅ Bloquea si hay inclusiones obligatorias sin elegir
+        if (!validateInclusions()) {
+          // mensaje general (el detalle por inclusión ya lo pintás debajo del select)
+          setFormError("Completá las opciones requeridas del combo.");
+
+          // scrollear a la primera inclusión con error (opcional)
+          const firstKey = Object.keys(inclusionErrors).find(k => inclusionErrors[k]);
+          const el = firstKey ? document.querySelector(`[data-inc="${firstKey}"]`) : null;
+          el?.scrollIntoView({ behavior: "smooth", block: "center" });
+          return;
+        }
     // ✅ construir comboItems SIN undefineds (incluye los fijos del combo)
     const comboItems = (combo.items ?? [])
       .slice()
@@ -495,6 +548,7 @@ export default function ComboDetailPage() {
 
       isDefaultCategory: false,
     });
+    setFormError(null);
 
     setJustAdded(true);
     setTimeout(() => {
@@ -607,7 +661,7 @@ export default function ComboDetailPage() {
           
           {/* === INCLUSIONES: categorías incluidas con descuento (dropdown / desplegable) === */}
           {(combo?.categoryInclusions?.length ?? 0) > 0 && (
-            <div className="rounded-2xl ring-1 ring-[var(--brand-color)]/40 bg-white/60 p-3 space-y-4">
+            <div className="rounded-2xl ring-1  ring-black/5 bg-white/60 p-3 space-y-4">
               {(combo?.categoryInclusions ?? []).map((inc) => {
                 const key = String(inc.id);
                 const prods = inclusionsProducts[key] ?? [];
@@ -631,7 +685,7 @@ export default function ComboDetailPage() {
                 const selectedValue = sel[0] ?? "";
               
                 return (
-                  <div key={key} className="space-y-2">
+                  <div key={key} data-inc={key} className="space-y-2">
                     <div className="text-sm font-semibold">
                       {title} <span className="ml-2 text-xs font-normal opacity-60">({min}/{max})</span>
                     </div>
@@ -639,13 +693,13 @@ export default function ComboDetailPage() {
                     {/* ----- Caso single choice: SELECT ----- */}
                     {isSingle ? (
                       <div className="relative inc-dropdown">
-                        {/* Botón que muestra la selección actual */}
                         <button
                           type="button"
                           onClick={() => setOpenIncId((s) => (s === key ? null : key))}
                           className={[
                             "w-full rounded-xl border px-3 py-2 text-sm bg-white",
-                            "ring-1 ring-black/5 focus:outline-none focus:ring-2 focus:ring-[var(--brand-color)]",
+                            "ring-1 focus:outline-none focus:ring-2",
+                            inclusionErrors[key] ? "ring-red-400 focus:ring-red-500" : "ring-black/5 focus:ring-[var(--brand-color)]",
                             "flex items-center justify-between"
                           ].join(" ")}
                         >
@@ -653,7 +707,7 @@ export default function ComboDetailPage() {
                             {(() => {
                               const selId = sel[0];
                               const p = prods.find((x) => String(x.id) === selId);
-                              if (!p) return "Elegir…";
+                              if (!p) return "Elegir…"; // 👈 placeholder en blanco
                               const raw = toNumber(p.price);
                               const fin = priceWithInclusionRule(raw, inc);
                               return p.name + (fin != null ? ` — ${fmt(fin)}` : "");
@@ -662,19 +716,20 @@ export default function ComboDetailPage() {
                           <span className="ml-3 text-xs opacity-60">▼</span>
                         </button>
                           
-                        {/* Panel desplegable con el look antiguo */}
+                        {/* Opción “No seleccionar” sólo si min === 0 (como ya lo tenías) */}
                         {openIncId === key && (
                           <div
                             className="absolute z-50 mt-2 w-full rounded-2xl bg-white shadow-lg ring-1 ring-black/5 p-2"
                             role="listbox"
                             aria-label={title}
                           >
-                            {/* Opción vacía si min=0 */}
                             {min === 0 && (
                               <button
                                 type="button"
                                 onClick={() => {
                                   setInclusionSelections((prev) => ({ ...prev, [key]: [] }));
+                                  setInclusionErrors(e => ({ ...e, [key]: null }));
+                                  setFormError(null);
                                   setOpenIncId(null);
                                 }}
                                 className="w-full text-left rounded-lg border p-2 hover:bg-black/5"
@@ -683,56 +738,67 @@ export default function ComboDetailPage() {
                               </button>
                             )}
 
-                            {prods.map((p) => {
-                              const raw = toNumber(p.price);
-                              const fin = priceWithInclusionRule(raw, inc);
-                              const checked = sel.includes(String(p.id));
-                              return (
-                                <button
-                                  key={String(p.id)}
-                                  type="button"
-                                  onClick={() => {
-                                    setInclusionSelections((prev) => ({ ...prev, [key]: [String(p.id)] }));
-                                    setOpenIncId(null);
-                                  }}
-                                  className={[
-                                    "w-full rounded-lg border p-2 mb-2 last:mb-0",
-                                    "flex items-center justify-between gap-3",
-                                    checked ? "ring-2 ring-[var(--brand-color)]" : "ring-1 ring-black/5",
-                                    "hover:bg-black/5"
-                                  ].join(" ")}
-                                  role="option"
-                                  aria-selected={checked}
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <span
-                                      className={[
-                                        "inline-block h-4 w-4 rounded-full border",
-                                        checked ? "border-[var(--brand-color)] bg-[var(--brand-color)]" : "border-gray-400"
-                                      ].join(" ")}
-                                      aria-hidden
-                                    />
-                                    <span className="text-sm font-medium">{p.name}</span>
-                                  </div>
-                                    
-                                  <div className="text-sm text-right">
-                                    {raw !== null && fin !== null ? (
-                                      raw === fin ? (
-                                        <span>{fmt(fin)}</span>
+                            {prods.length === 0 ? (
+                              <div className="p-2 text-sm text-muted-foreground">No hay opciones disponibles.</div>
+                            ) : (
+                              prods.map((p) => {
+                                const raw = toNumber(p.price);
+                                const fin = priceWithInclusionRule(raw, inc);
+                                const checked = sel.includes(String(p.id));
+                                return (
+                                  <button
+                                    key={String(p.id)}
+                                    type="button"
+                                    onClick={() => {
+                                      setInclusionSelections((prev) => ({ ...prev, [key]: [String(p.id)] }));
+                                      setInclusionErrors(e => ({ ...e, [key]: null }));
+                                      setFormError(null);            // ← limpia banner
+                                      setOpenIncId(null);
+                                    }}
+                                    className={[
+                                      "w-full rounded-lg border p-2 mb-2 last:mb-0",
+                                      "flex items-center justify-between gap-3",
+                                      checked ? "ring-2 ring-[var(--brand-color)]" : "ring-1 ring-black/5",
+                                      "hover:bg-black/5"
+                                    ].join(" ")}
+                                    role="option"
+                                    aria-selected={checked}
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <span
+                                        className={[
+                                          "inline-block h-4 w-4 rounded-full border",
+                                          checked ? "border-[var(--brand-color)] bg-[var(--brand-color)]" : "border-gray-400"
+                                        ].join(" ")}
+                                        aria-hidden
+                                      />
+                                      <span className="text-sm font-medium">{p.name}</span>
+                                    </div>
+                                      
+                                    <div className="text-sm text-right">
+                                      {raw !== null && fin !== null ? (
+                                        raw === fin ? (
+                                          <span>{fmt(fin)}</span>
+                                        ) : (
+                                          <>
+                                            <span className="line-through opacity-50 mr-2">{fmt(raw)}</span>
+                                            <span className="font-semibold text-[var(--brand-color)]">{fmt(fin)}</span>
+                                          </>
+                                        )
                                       ) : (
-                                        <>
-                                          <span className="line-through opacity-50 mr-2">{fmt(raw)}</span>
-                                          <span className="font-semibold text-[var(--brand-color)]">{fmt(fin)}</span>
-                                        </>
-                                      )
-                                    ) : (
-                                      "-"
-                                    )}
-                                  </div>
-                                </button>
-                              );
-                            })}
+                                        "-"
+                                      )}
+                                    </div>
+                                  </button>
+                                );
+                              })
+                            )}
                           </div>
+                        )}
+
+                        {/* Mensaje de error debajo */}
+                        {inclusionErrors[key] && (
+                          <div className="mt-1 text-xs text-red-600">{inclusionErrors[key]}</div>
                         )}
                       </div>
                     ) : (
@@ -826,6 +892,23 @@ export default function ComboDetailPage() {
         <Button variant="outline" onClick={() => setQty(q => q + 1)} disabled={loading}>＋</Button>
       </div>
     </div>
+    {formError && (
+      <div className="rounded-xl bg-red-50 text-red-700 ring-1 ring-red-200 px-3 py-2 flex items-start justify-between">
+        <div className="flex items-start gap-2">
+          <span aria-hidden className="mt-0.5">⚠️</span>
+          <span className="text-sm">{formError}</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setFormError(null)}
+          className="text-red-600/80 hover:text-red-700 text-sm"
+          aria-label="Cerrar"
+          title="Cerrar"
+        >
+          ✕
+        </button>
+      </div>
+    )}
 
     {/* Total + Agregar */}
     <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">

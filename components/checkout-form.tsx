@@ -55,6 +55,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
   const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
   const CHECKOUT_NOTES_MAX = 50; // o el número que prefieras
+  
+
 
   // ORDEN a usar en Resumen + WhatsApp (considera size u optionName)
   const sortedItems = useMemo(() => {
@@ -97,6 +99,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     const digits = v.replace(/\D/g, "");
     return digits.length >= 8 && digits.length <= 15 && !/[^0-9\s()+-]/.test(v);
   };
+  // debajo de isPhoneValid:
+  const isNonEmpty = (s: string) => !!s.trim();
 
   const BASE = process.env.NEXT_PUBLIC_API_URL;
   const STORE_NAME = process.env.NEXT_PUBLIC_STORE_NAME || "SRA. BURGA";
@@ -411,17 +415,38 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       </div>
     );
   }
-
-
-  
-
-
-
-
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {/* Columna izquierda: Datos del cliente */}
       <div className="space-y-4">
+        
+        {/* Entrega — MOVER ARRIBA */}
+        <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
+          <div className="text-sm font-semibold mb-3">Entrega</div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setDeliveryMethod("delivery")}
+              className={`px-3 py-2 rounded-lg border ${
+                deliveryMethod === "delivery"
+                  ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                  : "border-transparent hover:bg-black/5"
+              }`}
+            >
+              Delivery
+            </button>
+            <button
+              onClick={() => setDeliveryMethod("pickup")}
+              className={`px-3 py-2 rounded-lg border ${
+                deliveryMethod === "pickup"
+                  ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                  : "border-transparent hover:bg-black/5"
+              }`}
+            >
+              Retiro
+            </button>
+          </div>
+        </div>
+        
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-3">Datos del cliente</div>
 
@@ -430,11 +455,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             ref={nameRef}
             className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)] mb-3"
             value={customer.name}
-            onChange={(e) => setCustomer({ ...customer, name: e.target.value })}
+            onChange={(e) => {
+              const v = e.target.value;
+              setCustomer({ ...customer, name: v });
+              if (formError && v.trim() && /nombre/i.test(formError)) setFormError("");
+            }}
             placeholder="Tu nombre"
           />
-
-          
 
           <label className="block text-sm mb-1">Teléfono</label>
           <input
@@ -445,59 +472,48 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             autoComplete="tel"
             pattern="[0-9\s()+-]{8,15}"
             title="Ingresá solo números; podés usar espacios, +, (), -. Mínimo 8 dígitos."
-            className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 mb-1
-              ${phoneTouched && !isPhoneValid(customer.phone)
+            className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 mb-1 ${
+              phoneTouched && !isPhoneValid(customer.phone)
                 ? "border-red-500 focus:ring-red-400"
-                : "focus:ring-[var(--brand-color)]"}`}
+                : "focus:ring-[var(--brand-color)]"
+            }`}
             value={customer.phone}
-            onChange={(e) => setCustomer({ ...customer, phone: e.target.value })}
+            onChange={(e) => {
+              const v = e.target.value;
+              setCustomer({ ...customer, phone: v });
+              if (formError && isPhoneValid(v) && /tel|tel[eé]fono/i.test(formError)) setFormError("");
+            }}
             onBlur={() => setPhoneTouched(true)}
             placeholder="Ej: 11 5555 5555"
             aria-invalid={phoneTouched && !isPhoneValid(customer.phone)}
             aria-describedby="phone-help"
           />
-
           <p id="phone-help" className={`text-xs mb-3 ${
             phoneTouched && !isPhoneValid(customer.phone) ? "text-red-600" : "text-muted-foreground"
           }`}>
             * Solo números; podés usar espacios, +, (), -. Mínimo 8 dígitos.
           </p>
-
-          <label className="block text-sm mb-1">Dirección</label>
-          <input
-            ref={addressRef}
-            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
-            value={customer.address}
-            onChange={(e) =>
-              setCustomer({ ...customer, address: e.target.value })
-            }
-            placeholder="Calle 123, Piso/Depto"
-          />
+        
+          {/* Dirección SOLO si delivery */}
+          {deliveryMethod === "delivery" && (
+            <>
+              <label className="block text-sm mb-1">Dirección</label>
+              <input
+                ref={addressRef}
+                className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
+                value={customer.address}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setCustomer({ ...customer, address: v });
+                  if (formError && v.trim() && /direcci[oó]n/i.test(formError)) setFormError("");
+                }}
+                placeholder="Calle 123, Piso/Depto"
+              />
+            </>
+          )}
         </div>
 
-        <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
-          <div className="text-sm font-semibold mb-3">Entrega</div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setDeliveryMethod("delivery")}
-              className={`px-3 py-2 rounded-lg border ${deliveryMethod === "delivery"
-                  ? "border-[var(--brand-color)] bg-[#fff5f2]"
-                  : "border-transparent hover:bg-black/5"
-                }`}
-            >
-              Delivery
-            </button>
-            <button
-              onClick={() => setDeliveryMethod("pickup")}
-              className={`px-3 py-2 rounded-lg border ${deliveryMethod === "pickup"
-                  ? "border-[var(--brand-color)] bg-[#fff5f2]"
-                  : "border-transparent hover:bg-black/5"
-                }`}
-            >
-              Retiro
-            </button>
-          </div>
-        </div>
+        
 
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-3">Pago</div>
@@ -555,38 +571,27 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
       {/* Columna derecha: Resumen */}
       <div className="space-y-4">
-        <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
+        <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4 md:sticky md:top-4">
           <div className="text-sm font-semibold mb-3">Resumen</div>
-          <div className="space-y-2">
+                
+          {/* LISTA SCROLLEABLE */}
+          <div className="space-y-2 max-h-[45vh] md:max-h-[55vh] overflow-y-auto pr-1">
             {sortedItems.map((it: any) => {
               const unit = it.finalPrice / it.quantity || it.price;
-
               const comboData = it as MaybeCombo;
-              const isCombo =
-                comboData.kind === "combo" ||
-                Array.isArray(comboData.comboItems);
-
-              const sizeLabel =
-                (it.size as string) ||
-                (comboData.optionName as string) ||
-                undefined;
-
+              const isCombo = comboData.kind === "combo" || Array.isArray(comboData.comboItems);
+              const sizeLabel = (it.size as string) || (comboData.optionName as string) || undefined;
+            
               if (!isCombo) {
                 return (
-                  <div
-                    key={it.uniqueId}
-                    className="flex items-start justify-between"
-                  >
+                  <div key={it.uniqueId} className="flex items-start justify-between">
                     <div className="text-sm">
                       <div className="font-semibold">{it.name}</div>
                       <div className="text-muted-foreground">
-                        {it.quantity} x {fmt(unit)}
-                        {sizeLabel ? ` · Tamaño: ${sizeLabel}` : ""}
+                        {it.quantity} x {fmt(unit)}{sizeLabel ? ` · Tamaño: ${sizeLabel}` : ""}
                       </div>
                       {it.observations?.trim() ? (
-                        <div className="text-muted-foreground">
-                          Obs: {it.observations.trim()}
-                        </div>
+                        <div className="text-muted-foreground">Obs: {it.observations.trim()}</div>
                       ) : null}
                     </div>
                     <div className="text-sm font-semibold">
@@ -595,23 +600,21 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                   </div>
                 );
               }
-
-              // Render para COMBO
+            
               const main = comboData.comboItems?.find((x) => x.isMain);
               const extras = comboData.comboItems?.filter((x) => !x.isMain) || [];
+            
               return (
-                <div
-                  key={it.uniqueId}
-                  className="flex items-start justify-between"
-                >
+                <div key={it.uniqueId} className="flex items-start justify-between">
                   <div className="text-sm">
                     <div className="font-semibold">
-                      {it.name} <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#fff5f2] border border-[var(--brand-color)]/30 text-[var(--brand-color)] font-semibold align-middle">COMBO</span>
+                      {it.name}{" "}
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#fff5f2] border border-[var(--brand-color)]/30 text-[var(--brand-color)] font-semibold align-middle">
+                        COMBO
+                      </span>
                     </div>
-                    <div className="text-muted-foreground">
-                      {it.quantity} x {fmt(unit)}
-                    </div>
-
+                    <div className="text-muted-foreground">{it.quantity} x {fmt(unit)}</div>
+              
                     <div className="mt-1 text-xs text-muted-foreground space-y-1">
                       {main && (
                         <div>
@@ -627,19 +630,16 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                           <ul className="list-disc pl-5">
                             {extras.map((e, idx) => (
                               <li key={idx}>
-                                {e.name || "Ítem"}
-                                {e.qty && e.qty > 1 ? ` x${e.qty}` : ""}
+                                {e.name || "Ítem"}{e.qty && e.qty > 1 ? ` x${e.qty}` : ""}
                               </li>
                             ))}
                           </ul>
                         </div>
                       )}
-                      {it.observations?.trim() ? (
-                        <div>Obs: {it.observations.trim()}</div>
-                      ) : null}
+                      {it.observations?.trim() ? <div>Obs: {it.observations.trim()}</div> : null}
                     </div>
                   </div>
-
+                    
                   <div className="text-sm font-semibold">
                     {fmt(it.finalPrice || it.price * it.quantity)}
                   </div>
@@ -647,12 +647,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               );
             })}
           </div>
-
-          <div className="flex items-center justify-between border-t mt-3 pt-3">
+          
+          {/* FOOTER FIJO DENTRO DE LA CARD */}
+          <div className="flex items-center justify-between border-t mt-3 pt-3 bg-white/0">
             <div className="text-sm font-semibold">Total:</div>
-            <div className="text-xl font-extrabold text-[var(--brand-color)]">
-              {fmt(total)}
-            </div>
+            <div className="text-xl font-extrabold text-[var(--brand-color)]">{fmt(total)}</div>
           </div>
         </div>
 
