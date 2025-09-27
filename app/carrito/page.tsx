@@ -111,6 +111,7 @@ export default function CartPage() {
                     key={it.uniqueId}
                     className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 flex items-start gap-3"
                   >
+                    {/* Imagen */}
                     <div className="relative w-14 h-14 overflow-hidden rounded-md bg-black/5 flex-shrink-0">
                       <Image
                         src={it.image?.trim() ? it.image : "/placeholder.svg"}
@@ -122,28 +123,17 @@ export default function CartPage() {
 
                     {/* Texto / detalles */}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-start gap-2">
-                        {/* nombre SIN truncate: permite varias líneas */}
-                        <div className="font-semibold leading-tight whitespace-normal break-words">
-                          {it.name}
-                        </div>
-                        {isCombo && (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#fff5f2] border border-[var(--brand-color)]/30 text-[var(--brand-color)] font-semibold">
-                            COMBO
-                          </span>
-                        )}
+                      {/* nombre SIN chapita al lado */}
+                      <div className="font-semibold leading-tight whitespace-normal break-words">
+                        {it.name}
                       </div>
 
                       {/* Detalles producto suelto */}
                       {!isCombo && sizeLabel && (
-                        <div className="text-xs text-muted-foreground">
-                          Tamaño: {sizeLabel}
-                        </div>
+                        <div className="text-xs text-muted-foreground">Tamaño: {sizeLabel}</div>
                       )}
                       {!isCombo && it.observations && (
-                        <div className="text-xs text-muted-foreground">
-                          Obs: {it.observations}
-                        </div>
+                        <div className="text-xs text-muted-foreground">Obs: {it.observations}</div>
                       )}
 
                       {/* Detalles combo */}
@@ -179,24 +169,18 @@ export default function CartPage() {
                                 {inclusionsChosen.map((ci, idx) => (
                                   <li key={idx}>
                                     <span>{ci.name}</span>
-                                    {/* precios si están disponibles */}
                                     {typeof ci.unitPrice === "number" ? (
                                       <>
                                         {" "}
-                                        {typeof ci.basePrice === "number" &&
-                                        ci.basePrice !== ci.unitPrice ? (
+                                        {typeof ci.basePrice === "number" && ci.basePrice !== ci.unitPrice ? (
                                           <>
                                             <span className="line-through opacity-50 mr-1">
                                               {fmt(ci.basePrice)}
                                             </span>
-                                            <span className="font-medium">
-                                              {fmt(ci.unitPrice)}
-                                            </span>
+                                            <span className="font-medium">{fmt(ci.unitPrice)}</span>
                                           </>
                                         ) : (
-                                          <span className="font-medium">
-                                            {fmt(ci.unitPrice)}
-                                          </span>
+                                          <span className="font-medium">{fmt(ci.unitPrice)}</span>
                                         )}
                                       </>
                                     ) : null}
@@ -206,20 +190,35 @@ export default function CartPage() {
                             </div>
                           )}
 
-                          {it.observations && (
-                            <div>Obs: {String(it.observations)}</div>
-                          )}
+                          {it.observations && <div>Obs: {String(it.observations)}</div>}
                         </div>
                       )}
                     </div>
-
-                    {/* Derecha: qty arriba, precio + X abajo (mobile); horizontal en desktop */}
+                    
+                    {/* Columna derecha: COMBO (arriba), cantidad (medio), precio (abajo) */}
                     <div
-                      className="ml-auto w-28 sm:w-auto flex flex-col items-end gap-2 shrink-0
-                                  sm:flex-row sm:items-center sm:gap-3"
+                      className="
+                        ml-auto shrink-0
+                        flex flex-col items-end gap-1 w-24 sm:w-28
+                        md:w-auto md:flex-row md:items-center md:gap-3
+                      "
                     >
-                      {/* Cantidad (arriba en mobile) */}
-                      <div className="flex items-center gap-2 order-1 sm:order-none">
+                      {/* Chapita COMBO */}
+                      {isCombo && (
+                        <span
+                          className="
+                            self-end md:self-auto
+                            text-[10px] px-2 py-0.5 rounded-full
+                            bg-[#fff5f2] border border-[var(--brand-color)]/30 text-[var(--brand-color)]
+                            font-semibold
+                          "
+                        >
+                          COMBO
+                        </span>
+                      )}
+                    
+                      {/* Controles de cantidad */}
+                      <div className="flex items-center gap-2">
                         <Button
                           variant="outline"
                           size="icon"
@@ -232,35 +231,39 @@ export default function CartPage() {
                               updateQuantity(it.uniqueId, q - 1);
                             }
                           }}
+                          aria-label="Restar"
                         >
                           −
                         </Button>
-
+                        
                         <div className="w-7 sm:w-8 text-center font-semibold text-sm sm:text-base">
                           {it.quantity}
                         </div>
-
+                        
                         <Button
                           variant="outline"
                           size="icon"
                           className="h-8 w-8 p-0 sm:h-9 sm:w-9"
-                          onClick={() =>
-                            updateQuantity(
-                              it.uniqueId,
-                              Number(it.quantity) + 1
-                            )
-                          }
+                          onClick={() => updateQuantity(it.uniqueId, Number(it.quantity) + 1)}
+                          aria-label="Sumar"
                         >
                           ＋
                         </Button>
                       </div>
-
-                      {/* Precio (sin botón eliminar) */}
-                      <div className="text-right font-semibold shrink-0 w-20 sm:w-24 order-2 sm:order-none">
+                        
+                      {/* Precio */}
+                      <div
+                        className="
+                          text-right font-semibold
+                          w-full md:w-auto md:min-w-[6rem]
+                        "
+                      >
                         {fmt(Number(it.finalPrice) || 0)}
                       </div>
                     </div>
-                  </div>
+                    </div>
+                 
+                  
                 );
               })}
             </div>

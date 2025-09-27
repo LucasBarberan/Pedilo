@@ -241,6 +241,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                 product_id: Number(ci.productId),
                 quantity: Number(ci.qty) || 1,
                 ...(ci.option?.id ? { option_ids: [Number(ci.option.id)] } : {}),
+                ...(ci.isMain && it.observations?.trim()
+                  ? { comment: it.observations.trim() }
+                  : {}),
               })),
             });
           } else {
