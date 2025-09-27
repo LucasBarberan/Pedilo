@@ -12,6 +12,32 @@ interface ProductListProps {
   onCartClick: () => void
 }
 
+function prewarmProduct(p: any) {
+  try {
+    sessionStorage.setItem(
+      `prefetch:product:${p.id}`,
+      JSON.stringify({
+        id: p.id,
+        name: p.name,
+        imageUrl: p.image ?? p.imageUrl ?? "",
+        price: p.price ?? 0,
+        description: p.description ?? "",
+        category: p.category ?? "",
+        productOptions: p.productOptions ?? [],
+      })
+    );
+  } catch {}
+
+  // Precarga de imagen para que el swap sea instantáneo
+  const src = p.image ?? p.imageUrl;
+  if (src) {
+    const img = new Image();
+    img.src = src;
+  }
+}
+
+
+
 export function ProductList({ category, onProductSelect, onBack, onCartClick }: ProductListProps) {
   const { getTotalItems } = useCart()
 
@@ -53,7 +79,11 @@ export function ProductList({ category, onProductSelect, onBack, onCartClick }: 
         {products.map((product) => (
           <div
             key={product.id}
-            onClick={() => onProductSelect(product)}
+            onMouseEnter={() => prewarmProduct(product)}
+            onClick={() => {
+              prewarmProduct(product);
+              onProductSelect(product);
+            }}
             className="bg-card rounded-xl p-4 flex gap-4 cursor-pointer transform transition-transform active:scale-95 shadow-sm"
           >
             <img

@@ -4,12 +4,13 @@
 import SiteHeader from "@/components/site-header";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useCart } from "@/components/cart-context";
 import { Button } from "@/components/ui/button";
 import ClosedBanner from "@/components/closed-banner";
 import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
 import BlockingLoader from "@/components/blocking-loader";
+import { fixImageUrl } from "@/lib/img";
 
 type ProductOption = {
   id: string | number;
@@ -35,7 +36,8 @@ const fmt = (n?: number | string) => {
 };
 const toNum = (v: unknown) => (typeof v === "string" ? Number(v) : typeof v === "number" ? v : 0);
 
-const normalize = (s?: string) => (s || "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+const normalize = (s?: string) =>
+  (s || "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
 const rankByName = (o: ProductOption) => {
   const n = normalize(o.option?.name);
   if (n.includes("simple")) return 0;
@@ -53,25 +55,67 @@ const optionSorter = (a: ProductOption, b: ProductOption) => {
   return ea - eb;
 };
 
+// ------- Warm cache helpers (sessionStorage) -------
+const warmKey = (id: string | number) => `prefetch:product:${id}`;
+function readWarmProduct(id: string | number): Product | null {
+  try {
+    const raw = sessionStorage.getItem(warmKey(id));
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    // defensivo: dejamos solo lo básico
+    return {
+      id: p.id,
+      name: p.name,
+      description: p.description ?? "",
+      price: p.price,
+      imageUrl: p.imageUrl,
+      productOptions: Array.isArray(p.productOptions) ? p.productOptions : [],
+      category: p.category,
+    } as Product;
+  } catch {
+    return null;
+  }
+}
+
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { addToCart } = useCart();
 
   const [justAdded, setJustAdded] = useState(false);
-  const [prod, setProd] = useState<Product | null>(null);
+
+  // 1) Si hay preview en sessionStorage lo uso para pintar YA
+  const warmOnce = useRef<Product | null>(null);
+  if (!warmOnce.current && id) {
+    warmOnce.current = readWarmProduct(id);
+  }
+
+  const [prod, setProd] = useState<Product | null>(warmOnce.current);
   const [selectedOptId, setSelectedOptId] = useState<string | number | null>(null);
   const [qty, setQty] = useState(1);
   const [notes, setNotes] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!warmOnce.current); // si tengo warm, no muestro overlay
 
+  // Cuando llega el producto (warm o fetch), elegir opción por defecto
+  useEffect(() => {
+    if (!prod?.productOptions?.length) return;
+    const ordered = [...prod.productOptions].sort(optionSorter);
+    const def = ordered.find((o) => o.isDefault) ?? ordered[0];
+    setSelectedOptId(def?.id ?? null);
+    // actualizo prod con el orden aplicado (mejora UX si vino warm sin ordenar)
+    setProd((p) => (p ? { ...p, productOptions: ordered } : p));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prod?.id]); // solo cuando cambia de producto
+
+  // 2) Fetch real (reemplaza el warm en cuanto llega)
   useEffect(() => {
     const BASE = process.env.NEXT_PUBLIC_API_URL;
     if (!id || !BASE) return;
 
+    let aborted = false;
     (async () => {
       try {
-        setLoading(true);
+        setLoading(!warmOnce.current); // si no había warm, muestro overlay; si había, no
         const res = await fetch(`${BASE}/products/${id}`, { cache: "no-store" });
         if (!res.ok) throw new Error("not ok");
 
@@ -83,18 +127,29 @@ export default function ProductDetailPage() {
             ? raw.data.data
             : raw;
 
-        const ordered = product.productOptions?.length ? [...product.productOptions].sort(optionSorter) : [];
-        const productOrdered: Product = { ...product, productOptions: ordered };
-        setProd(productOrdered || null);
+        const ordered = product.productOptions?.length
+          ? [...product.productOptions].sort(optionSorter)
+          : [];
 
-        const def = ordered.find((o) => o.isDefault);
-        setSelectedOptId((def ?? ordered[0])?.id ?? null);
+        const productOrdered: Product = { ...product, productOptions: ordered };
+        if (!aborted) setProd(productOrdered || null);
+        // refresco el warm para futuras navegaciones “atrás/adelante”
+        try {
+          sessionStorage.setItem(
+            warmKey(productOrdered.id),
+            JSON.stringify(productOrdered)
+          );
+        } catch {}
       } catch {
-        setProd(null);
+        if (!aborted) setProd((p) => p ?? null); // si falló, mantené warm
       } finally {
-        setLoading(false);
+        if (!aborted) setLoading(false);
       }
     })();
+
+    return () => {
+      aborted = true;
+    };
   }, [id]);
 
   const selectedOption = useMemo(() => {
@@ -142,7 +197,7 @@ export default function ProductDetailPage() {
     setQty(1);
   };
 
-  // ⬇️ Render SIEMPRE y uso overlay bloqueante mientras loading
+  // ⬇️ Render SIEMPRE; overlay solo si no hubo warm
   return (
     <div className="min-h-screen bg-background relative">
       <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
@@ -154,14 +209,15 @@ export default function ProductDetailPage() {
       ) : (
         <div className="mx-auto w-full max-w-6xl p-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           {/* Izquierda */}
-          <div className="space-y-4 opacity-[var(--content-opacity,1)]">
+          <div className="space-y-4">
             <div className="rounded-2xl overflow-hidden ring-1 ring-black/5 bg-white/60">
               <div className="relative w-full aspect-[4/3]">
                 <Image
-                  src={prod?.imageUrl && prod.imageUrl.trim() ? prod.imageUrl : "/placeholder.svg"}
+                  src={fixImageUrl(prod?.imageUrl) || "/placeholder.svg"}
                   alt={prod?.name || "Producto"}
                   fill
                   className="object-cover"
+                  priority // 👈 prioriza descarga del hero
                 />
               </div>
             </div>
@@ -187,11 +243,10 @@ export default function ProductDetailPage() {
                     <button
                       key={String(o.id)}
                       onClick={() => setSelectedOptId(o.id)}
-                      disabled={loading}
+                      disabled={loading && !prod} // durante overlay real
                       className={[
                         "w-full rounded-lg border px-3 py-2 text-left flex items-center justify-between",
                         active ? "border-[var(--brand-color)] bg-[#fff5f2]" : "border-transparent hover:bg-black/5",
-                        loading ? "opacity-60 pointer-events-none" : "",
                       ].join(" ")}
                     >
                       <span className="text-sm">{o.option?.name || "Opción"}</span>
@@ -205,11 +260,11 @@ export default function ProductDetailPage() {
             <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
               <div className="text-sm font-semibold mb-2">Cantidad:</div>
               <div className="flex items-center gap-3">
-                <Button variant="outline" onClick={() => setQty((q) => Math.max(1, q - 1))} disabled={loading}>
+                <Button variant="outline" onClick={() => setQty((q) => Math.max(1, q - 1))} disabled={loading && !prod}>
                   −
                 </Button>
                 <div className="w-8 text-center font-semibold">{qty}</div>
-                <Button variant="outline" onClick={() => setQty((q) => q + 1)} disabled={loading}>
+                <Button variant="outline" onClick={() => setQty((q) => q + 1)} disabled={loading && !prod}>
                   ＋
                 </Button>
               </div>
@@ -229,7 +284,7 @@ export default function ProductDetailPage() {
                   ta.style.height = "auto";
                   ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
                 }}
-                disabled={loading}
+                disabled={loading && !prod}
               />
               <div className="mt-1 text-xs text-muted-foreground text-right">
                 {notes.length}/{MAX_NOTES}
@@ -250,9 +305,9 @@ export default function ProductDetailPage() {
                   disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none
                   ${!STORE_OPEN ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`}
                 onClick={STORE_OPEN ? handleAdd : undefined}
-                disabled={!STORE_OPEN || loading}
+                disabled={!STORE_OPEN || (loading && !prod)}
                 title={!STORE_OPEN ? STORE_CLOSED_MSG : undefined}
-                aria-disabled={!STORE_OPEN || loading}
+                aria-disabled={!STORE_OPEN || (loading && !prod)}
               >
                 {!STORE_OPEN ? "Local cerrado" : justAdded ? "Agregado ✔" : "Agregar al Carrito"}
               </Button>
@@ -260,8 +315,8 @@ export default function ProductDetailPage() {
           </div>
         </div>
       )}
-      {/* Overlay bloqueante mientras carga */}
-      <BlockingLoader open={loading} message="Cargando producto…" />
+      {/* Overlay bloqueante solo si no teníamos warm */}
+      <BlockingLoader open={loading && !warmOnce.current} message="Cargando producto…" />
     </div>
   );
 }

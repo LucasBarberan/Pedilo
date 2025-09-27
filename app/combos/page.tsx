@@ -6,7 +6,7 @@ import SiteHeader from "@/components/site-header";
 import ClosedBanner from "@/components/closed-banner";
 import Image from "next/image";
 import { fixImageUrl } from "@/lib/img";
-import BlockingLoader from "@/components/blocking-loader"; // 👈 ruta correcta
+import BlockingLoader from "@/components/blocking-loader";
 import { isAllowedForDelivery } from "@/lib/channel";
 
 type ApiCombo = {
@@ -49,7 +49,6 @@ export default function CombosListPage() {
   const [combos, setCombos] = useState<ApiCombo[]>([]);
   const [loading, setLoading] = useState(true);
   const [categoryName, setCategoryName] = useState<string | null>(null);
-  
 
   useEffect(() => {
     const BASE = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
@@ -63,13 +62,13 @@ export default function CombosListPage() {
         const qs = new URLSearchParams();
         qs.set("withEffectivePrice", "true");
         qs.set("withItems", "true");
-        if (categoryId) qs.set("category", categoryId); // si tu back lo soporta, filtra server-side
+        if (categoryId) qs.set("category", categoryId);
 
         const res = await fetch(`${BASE}/combo?${qs.toString()}`, { cache: "no-store" });
         const json = await res.json();
         const list: ApiCombo[] = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
 
-        // Filtro client-side:
+        // Filtrado client-side
         const filtered = list.filter((c) => {
           const isComboCat = c?.category?.isComboCategory === true;
           if (!isComboCat) return false;
@@ -80,14 +79,12 @@ export default function CombosListPage() {
 
         setCombos(filtered);
 
-        // --- título: intentar resolver nombre real de la categoría combo ---
+        // Título de categoría si vino categoryId
         if (categoryId) {
-          // 1) del primer combo (si vino poblado)
           const byCombo = filtered[0]?.category?.name;
           if (byCombo) {
             setCategoryName(byCombo);
           } else {
-            // 2) buscar en /categories por id
             try {
               const catsRes = await fetch(`${BASE}/categories`, { cache: "no-store" });
               const catsJson = await catsRes.json();
@@ -111,13 +108,51 @@ export default function CombosListPage() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]); // re-fetch si cambia categoryId
+  }, [searchParams]);
 
-  // título: usa nombre si lo tenemos
   const title = useMemo(() => {
     if (categoryName) return `${String(categoryName).toUpperCase()}`;
     return "COMBOS";
   }, [categoryName]);
+
+  // ---------- Prefetch helpers ----------
+  const buildMainImage = (c: ApiCombo) => {
+    const arr = c.items ?? c.comboItems ?? [];
+    const main = arr.find((x: any) => x?.isMain);
+    const mainImg = main?.imageUrl || main?.product?.imageUrl || "";
+    return fixImageUrl(c.imageUrl || mainImg) || "/placeholder.svg";
+  };
+
+  const prewarmCombo = (c: ApiCombo) => {
+    try {
+      sessionStorage.setItem(
+        `prefetch:combo:${c.id}`,
+        JSON.stringify({
+          id: c.id,
+          name: c.name,
+          description: c.description ?? "",
+          imageUrl: buildMainImage(c),
+          basePrice: c.basePrice ?? null,
+          effectivePrice: c.effectivePrice ?? null,
+          // Si necesitás algo del main para render inicial:
+          // mainName: (c.items ?? c.comboItems ?? []).find(i => i?.isMain)?.product?.name ?? null,
+        })
+      );
+    } catch {}
+
+    const src = buildMainImage(c);
+    if (src && typeof Image !== "undefined") {
+      const img = new window.Image();
+      img.src = src;
+    }
+  };
+
+  const prefetchAndGo = (c: ApiCombo) => {
+    const url = `/combos/${encodeURIComponent(String(c.id))}`;
+    prewarmCombo(c);
+    router.prefetch(url);
+    router.push(url);
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -130,57 +165,51 @@ export default function CombosListPage() {
       </div>
 
       <div className="mx-auto w-full max-w-6xl px-4 py-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-        
+        {!loading &&
+          combos.map((c) => {
+            const price = c.effectivePrice ?? c.basePrice ?? null;
+            const imgSrc = buildMainImage(c);
 
-        {!loading && combos.map((c) => {
-          const price = c.effectivePrice ?? c.basePrice ?? null;
-
-          // imagen: propia -> principal -> placeholder
-          const arr = c.items ?? c.comboItems ?? [];
-          const main = arr.find((x: any) => x?.isMain);
-          const mainImg = main?.imageUrl || main?.product?.imageUrl || "";
-          const imgSrc = fixImageUrl(c.imageUrl || mainImg) || "/placeholder.svg";
-
-          return (
-            <div
-              key={String(c.id)}
-              role="button"
-              tabIndex={0}
-              onClick={() => router.push(`/combos/${c.id}`)}
-              onKeyDown={(e) =>
-                (e.key === "Enter" || e.key === " ") && router.push(`/combos/${c.id}`)
-              }
-              className="rounded-2xl bg-white/60 ring-1 ring-black/5 shadow-sm p-4 flex gap-3 cursor-pointer hover:shadow-md transition"
-            >
-              <div className="relative h-20 w-24 rounded-lg overflow-hidden flex-shrink-0 bg-neutral-100">
-                <Image
-                  src={imgSrc}
-                  alt={c.name}
-                  fill
-                  className="object-cover"
-                  unoptimized
-                />
-              </div>
-
-              <div className="flex-1 min-w-0">
-                <div className="font-extrabold uppercase text-sm sm:text-base break-words">
-                  {c.name}
+            return (
+              <div
+                key={String(c.id)}
+                role="button"
+                tabIndex={0}
+                onClick={() => prefetchAndGo(c)}
+                onMouseEnter={() => prewarmCombo(c)}
+                onTouchStart={() => prewarmCombo(c)}
+                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && prefetchAndGo(c)}
+                className="rounded-2xl bg-white/60 ring-1 ring-black/5 shadow-sm p-4 flex gap-3 cursor-pointer hover:shadow-md transition"
+              >
+                <div className="relative h-20 w-24 rounded-lg overflow-hidden flex-shrink-0 bg-neutral-100">
+                  <Image
+                    src={imgSrc}
+                    alt={c.name}
+                    fill
+                    className="object-cover"
+                    unoptimized
+                  />
                 </div>
-                {c.description ? (
-                  <div className="text-sm text-muted-foreground line-clamp-2">
-                    {c.description}
+
+                <div className="flex-1 min-w-0">
+                  <div className="font-extrabold uppercase text-sm sm:text-base break-words">
+                    {c.name}
                   </div>
-                ) : null}
-                <div className="mt-2 text-lg font-extrabold text-[var(--brand-color)]">
-                  {fmtPrice(price)}
+                  {c.description ? (
+                    <div className="text-sm text-muted-foreground line-clamp-2">
+                      {c.description}
+                    </div>
+                  ) : null}
+                  <div className="mt-2 text-lg font-extrabold text-[var(--brand-color)]">
+                    {fmtPrice(price)}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
 
         {/* Overlay bloqueante mientras carga */}
-              <BlockingLoader open={loading} message="Preparando la carta…" />
+        <BlockingLoader open={loading} message="Preparando la carta…" />
       </div>
     </div>
   );

@@ -2,6 +2,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import { useCallback } from "react";
 
 export type Category = {
   id: string | number;
@@ -28,26 +29,35 @@ function slugify(s: string) {
 export default function CategoryMenu({ categories, onCategorySelect }: CategoryMenuProps) {
   const router = useRouter();
 
-  const handleClick = (c: Category) => {
+  // URL destino para cada categoría
+  const targetFor = useCallback((c: Category) => {
     const slug = slugify(c.name);
     const id = encodeURIComponent(String(c.id));
-    if (c.isComboCategory) {
-      router.push(`/combos?categoryId=${id}`);
-    } else {
-      router.push(`/categoria/${encodeURIComponent(slug)}?id=${id}`);
-    }
-    onCategorySelect?.(slug);
+    return c.isComboCategory
+      ? `/combos?categoryId=${id}`
+      : `/categoria/${encodeURIComponent(slug)}?id=${id}`;
+  }, []);
+
+  const handleClick = (c: Category) => {
+    const url = targetFor(c);
+    router.push(url);
+    onCategorySelect?.(slugify(c.name));
   };
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-4 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
       {categories.map((c) => {
         const imgSrc =
-          (c.imageUrl && c.imageUrl.trim()) ? c.imageUrl : "/brand/SraBurga.png"; // ← fallback
+          (c.imageUrl && c.imageUrl.trim()) ? c.imageUrl : "/brand/SraBurga.png"; // fallback
+        const url = targetFor(c);
+
         return (
           <button
             key={String(c.id)}
             onClick={() => handleClick(c)}
+            onMouseEnter={() => router.prefetch(url)}   // 👈 prefetch al pasar el mouse
+            onTouchStart={() => router.prefetch(url)}   // 👈 prefetch en touch (mobile)
+            onFocus={() => router.prefetch(url)}        // 👈 accesibilidad (tab)
             className="group rounded-2xl bg-white/70 ring-1 ring-black/5 shadow-sm p-4 h-52
                       flex flex-col items-center justify-center gap-3
                       hover:shadow-md hover:bg-white/80 transition"

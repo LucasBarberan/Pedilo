@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ArrowLeft, ShoppingCart, Plus, Minus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -17,8 +17,24 @@ export function ProductDetail({ product, onBack, onCartClick }: ProductDetailPro
   const [quantity, setQuantity] = useState(1)
   const [size, setSize] = useState<"simple" | "doble" | "triple">("simple")
   const [observations, setObservations] = useState("")
+  const [mergedProduct, setMergedProduct] = useState<any>(product);
 
-  const isHamburger = product.category === "hamburguesas-completas" || product.category === "hamburguesas-sin-papas"
+  useEffect(() => {
+    // Intenta leer el preview guardado por product-list
+    try {
+      const raw = sessionStorage.getItem(`prefetch:product:${product.id}`);
+      if (raw) {
+        const preview = JSON.parse(raw);
+        setMergedProduct((prev: any) => ({ ...preview, ...prev }));
+      } else {
+        setMergedProduct(product);
+      }
+    } catch {
+      setMergedProduct(product);
+    }
+  }, [product]);
+
+  const isHamburger = mergedProduct.category === "hamburguesas-completas" || mergedProduct.category === "hamburguesas-sin-papas"
 
   const getSizePrice = () => {
     const basePrice = product.price
@@ -31,6 +47,8 @@ export function ProductDetail({ product, onBack, onCartClick }: ProductDetailPro
         return basePrice
     }
   }
+  
+
 
   const handleAddToCart = () => {
     const item = {
@@ -65,7 +83,7 @@ export function ProductDetail({ product, onBack, onCartClick }: ProductDetailPro
           >
             <ArrowLeft className="h-6 w-6" />
           </Button>
-          <h1 className="text-lg font-bold">{product.name}</h1>
+          <h1 className="text-lg font-bold">{mergedProduct.name}</h1>
         </div>
         <Button
           variant="ghost"
@@ -85,15 +103,15 @@ export function ProductDetail({ product, onBack, onCartClick }: ProductDetailPro
       {/* Product Image */}
       <div className="p-4">
         <img
-          src={product.image || "/placeholder.svg"}
-          alt={product.name}
+          src={mergedProduct.image || mergedProduct.imageUrl || "/placeholder.svg"}
+          alt={mergedProduct.name}
           className="w-full h-64 object-cover rounded-xl"
         />
       </div>
 
       {/* Product Info */}
       <div className="px-4 pb-4">
-        <p className="text-muted-foreground text-sm mb-4">{product.description}</p>
+        <p className="text-muted-foreground text-sm mb-4">{mergedProduct.description}</p>
 
         {/* Size Selection for Hamburgers */}
         {isHamburger && (
