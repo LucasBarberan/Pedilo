@@ -283,7 +283,9 @@ export default function ComboDetailPage() {
           );
           const prJson = await prRes.json();
           const raw: any[] = toArray(prJson);
-          const products: ApiProduct[] = raw.map((p: any) => ({
+          // 👇 solo activos
+          const rawActive = raw.filter((p: any) => p?.isActive === true);
+          const products: ApiProduct[] = rawActive.map((p: any) => ({
             id: p.id,
             name: p.name,
             price: typeof p.price === "string" ? Number(p.price) : p.price,

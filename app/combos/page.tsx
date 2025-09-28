@@ -73,6 +73,8 @@ export default function CombosListPage() {
           const isComboCat = c?.category?.isComboCategory === true;
           if (!isComboCat) return false;
           if (!isAllowedForDelivery((c as any).channel)) return false;
+          // 👇 solo combos activos
+          if (c?.active !== true) return false;
           if (!categoryId) return true;
           return String(c.categoryId ?? c.category?.id) === String(categoryId);
         });

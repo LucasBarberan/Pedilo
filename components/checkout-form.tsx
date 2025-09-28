@@ -42,7 +42,12 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     phone: "",
     address: "",
   });
-  const [deliveryMethod, setDeliveryMethod] = useState<"delivery"|"pickup">("delivery");
+
+  const DELIVERY_ENABLED =
+  (process.env.NEXT_PUBLIC_DELIVERY_ENABLED || "false").toLowerCase() === "true";
+  const [deliveryMethod, setDeliveryMethod] = useState<"delivery"|"pickup">(
+    DELIVERY_ENABLED ? "delivery" : "pickup"
+  );
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "mp">("cash");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -104,6 +109,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
   const BASE = process.env.NEXT_PUBLIC_API_URL;
   const STORE_NAME = process.env.NEXT_PUBLIC_STORE_NAME || "SRA. BURGA";
+  
 
   /** 🔹 Arma el texto de WhatsApp (usa el mismo orden del resumen) */
   function buildWhatsAppText(orderNumber?: number | string) {
@@ -204,11 +210,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     return;
     }
     // si es delivery, pedimos dirección
-    if (deliveryMethod === "delivery" && !customer.address.trim()) {
+    if (DELIVERY_ENABLED && deliveryMethod === "delivery" && !customer.address.trim()) {
       setFormError("Ingresá la dirección para el delivery.");
       addressRef.current?.focus();
       addressRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      return; // 🚫 no envía
+      return;
     }
 
     setFormError(""); // OK, seguimos
@@ -426,28 +432,36 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         {/* Entrega — MOVER ARRIBA */}
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-3">Entrega</div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setDeliveryMethod("delivery")}
-              className={`px-3 py-2 rounded-lg border ${
-                deliveryMethod === "delivery"
-                  ? "border-[var(--brand-color)] bg-[#fff5f2]"
-                  : "border-transparent hover:bg-black/5"
-              }`}
-            >
-              Delivery
-            </button>
-            <button
-              onClick={() => setDeliveryMethod("pickup")}
-              className={`px-3 py-2 rounded-lg border ${
-                deliveryMethod === "pickup"
-                  ? "border-[var(--brand-color)] bg-[#fff5f2]"
-                  : "border-transparent hover:bg-black/5"
-              }`}
-            >
-              Retiro
-            </button>
-          </div>
+
+          {DELIVERY_ENABLED ? (
+            <div className="flex gap-2">
+              <button
+                onClick={() => setDeliveryMethod("delivery")}
+                className={`px-3 py-2 rounded-lg border ${
+                  deliveryMethod === "delivery"
+                    ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                    : "border-transparent hover:bg-black/5"
+                }`}
+              >
+                Delivery
+              </button>
+              <button
+                onClick={() => setDeliveryMethod("pickup")}
+                className={`px-3 py-2 rounded-lg border ${
+                  deliveryMethod === "pickup"
+                    ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                    : "border-transparent hover:bg-black/5"
+                }`}
+              >
+                Retiro en local 
+              </button>
+            </div>
+          ) : (
+            // Delivery deshabilitado: mostramos fijo “Retiro”
+            <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--brand-color)] bg-[#fff5f2]">
+              <span className="text-sm font-medium">Retiro en local</span>
+            </div>
+          )}
         </div>
         
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">

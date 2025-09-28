@@ -29,15 +29,20 @@ type Product = {
   category?: { isDefault?: boolean };
 };
 
+// ===== Helpers de formato y cálculos =====
 const MAX_NOTES = 50;
 const fmt = (n?: number | string) => {
   const v = typeof n === "string" ? Number(n) : n;
-  return typeof v === "number" && Number.isFinite(v) ? `$${v.toLocaleString("es-AR")}` : "-";
+  return typeof v === "number" && Number.isFinite(v)
+    ? `$${v.toLocaleString("es-AR")}`
+    : "-";
 };
-const toNum = (v: unknown) => (typeof v === "string" ? Number(v) : typeof v === "number" ? v : 0);
+const toNum = (v: unknown) =>
+  typeof v === "string" ? Number(v) : typeof v === "number" ? v : 0;
 
 const normalize = (s?: string) =>
   (s || "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+
 const rankByName = (o: ProductOption) => {
   const n = normalize(o.option?.name);
   if (n.includes("simple")) return 0;
@@ -77,6 +82,60 @@ function readWarmProduct(id: string | number): Product | null {
   }
 }
 
+// ===== Helper local para cotizar (usa /pricing/quote si existe) =====
+type QuoteItemProductView = {
+  kind: "PRODUCT";
+  productId: number;
+  name: string;
+  qty: number;
+  unitList: string;   // lista sin promo
+  unitPrice: string;  // unitario efectivo (con promo y ponderación)
+  total: string;      // qty * unitPrice
+  options?: Array<{ id: number; name: string; extra: string }>;
+  promo?: { type: string; value: string; units: number; applyToOptions: boolean };
+  comment?: string | null;
+};
+
+async function quoteProduct(
+  productId: number,
+  qty: number,
+  optionIds: number[] = [],
+  comment?: string
+): Promise<QuoteItemProductView | null> {
+  try {
+    const BASE = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
+    if (!BASE) return null;
+
+    const body = {
+      channel: "WEB",
+      lines: [
+        {
+          type: "PRODUCT",
+          product_id: productId,
+          quantity: qty,
+          option_ids: optionIds,
+          comment: comment ?? null,
+        },
+      ],
+    };
+
+    const res = await fetch(`${BASE}/pricing/quote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return null;
+
+    const json = await res.json();
+    const item = Array.isArray(json?.items) ? json.items[0] : null;
+    if (!item || item.kind !== "PRODUCT") return null;
+    return item as QuoteItemProductView;
+  } catch {
+    return null;
+  }
+}
+
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -84,86 +143,153 @@ export default function ProductDetailPage() {
 
   const [justAdded, setJustAdded] = useState(false);
 
-  // 1) Si hay preview en sessionStorage lo uso para pintar YA
-  const warmOnce = useRef<Product | null>(null);
-  if (!warmOnce.current && id) {
-    warmOnce.current = readWarmProduct(id);
-  }
+  
 
-  const [prod, setProd] = useState<Product | null>(warmOnce.current);
+  const [prod, setProd] = useState<Product | null>(null);
   const [selectedOptId, setSelectedOptId] = useState<string | number | null>(null);
   const [qty, setQty] = useState(1);
   const [notes, setNotes] = useState("");
-  const [loading, setLoading] = useState(!warmOnce.current); // si tengo warm, no muestro overlay
+  const [loading, setLoading] = useState(true);
 
-  // Cuando llega el producto (warm o fetch), elegir opción por defecto
+  // 💰 estados de cotización (promos)
+  const [quotedUnit, setQuotedUnit] = useState<number | null>(null);
+  const [quotedTotal, setQuotedTotal] = useState<number | null>(null);
+  const [listUnit, setListUnit] = useState<number | null>(null);   // precio de lista (sin promo) por unidad
+  const [hasPromo, setHasPromo] = useState(false);                 // flag si hay promo aplicada
+
+  // 1) al montar en el CLIENTE, intento leer el warm cache
   useEffect(() => {
-    if (!prod?.productOptions?.length) return;
-    const ordered = [...prod.productOptions].sort(optionSorter);
-    const def = ordered.find((o) => o.isDefault) ?? ordered[0];
-    setSelectedOptId(def?.id ?? null);
-    // actualizo prod con el orden aplicado (mejora UX si vino warm sin ordenar)
-    setProd((p) => (p ? { ...p, productOptions: ordered } : p));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prod?.id]); // solo cuando cambia de producto
-
-  // 2) Fetch real (reemplaza el warm en cuanto llega)
+    if (!id) return;
+    const warm = readWarmProduct(id); // seguro: la función ya tiene try/catch
+    if (warm) {
+      const ordered = warm.productOptions?.length ? [...warm.productOptions].sort(optionSorter) : [];
+      setProd({ ...warm, productOptions: ordered });
+      setSelectedOptId(ordered.find(o => o.isDefault)?.id ?? ordered[0]?.id ?? null);
+      setLoading(false); // evita mostrar el loader si ya hay warm
+    }
+  }, [id]);
+  
+  // 2) fetch real (reemplaza o completa el warm)
   useEffect(() => {
-    const BASE = process.env.NEXT_PUBLIC_API_URL;
-    if (!id || !BASE) return;
+  const BASE = process.env.NEXT_PUBLIC_API_URL;
+  if (!id || !BASE) return;
 
-    let aborted = false;
-    (async () => {
-      try {
-        setLoading(!warmOnce.current); // si no había warm, muestro overlay; si había, no
-        const res = await fetch(`${BASE}/products/${id}`, { cache: "no-store" });
-        if (!res.ok) throw new Error("not ok");
+  let aborted = false;
+  (async () => {
+    try {
+      // si no hubo warm, mostramos loader; si hubo, puede quedar en false
+      setLoading(prev => prev || !prod);
+      const res = await fetch(`${BASE}/products/${id}`, { cache: "no-store" });
+      if (!res.ok) throw new Error("not ok");
+      const raw = await res.json();
+      const product: Product =
+        raw?.data && !Array.isArray(raw.data) ? raw.data :
+        raw?.data?.data && !Array.isArray(raw.data.data) ? raw.data.data :
+        raw;
 
-        const raw = await res.json();
-        const product: Product =
-          raw?.data && !Array.isArray(raw.data)
-            ? raw.data
-            : raw?.data?.data && !Array.isArray(raw.data.data)
-            ? raw.data.data
-            : raw;
+      const ordered = product.productOptions?.length ? [...product.productOptions].sort(optionSorter) : [];
+      const productOrdered: Product = { ...product, productOptions: ordered };
 
-        const ordered = product.productOptions?.length
-          ? [...product.productOptions].sort(optionSorter)
-          : [];
-
-        const productOrdered: Product = { ...product, productOptions: ordered };
-        if (!aborted) setProd(productOrdered || null);
-        // refresco el warm para futuras navegaciones “atrás/adelante”
-        try {
-          sessionStorage.setItem(
-            warmKey(productOrdered.id),
-            JSON.stringify(productOrdered)
-          );
-        } catch {}
-      } catch {
-        if (!aborted) setProd((p) => p ?? null); // si falló, mantené warm
-      } finally {
-        if (!aborted) setLoading(false);
+      if (!aborted) {
+        setProd(productOrdered);
+        // si aún no había opción elegida, elegí default/primera
+        setSelectedOptId(prev => prev ?? (ordered.find(o => o.isDefault)?.id ?? ordered[0]?.id ?? null));
       }
-    })();
 
-    return () => {
-      aborted = true;
-    };
+      // refresco warm
+      try { sessionStorage.setItem(warmKey(productOrdered.id), JSON.stringify(productOrdered)); } catch {}
+    } catch {
+      // si falla el fetch, no rompas el warm
+    } finally {
+      if (!aborted) setLoading(false);
+    }
+  })();
+
+  return () => { aborted = true; };
+  // ⚠️ importante incluir `prod` solo para la línea setLoading(prev...)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // opción elegida
   const selectedOption = useMemo(() => {
     if (!prod?.productOptions?.length) return undefined;
     return prod.productOptions.find((o) => o.id === selectedOptId);
   }, [prod, selectedOptId]);
 
+  // cálculo local (fallback)
   const base = toNum(prod?.price);
   const extra = toNum(selectedOption?.precio_extra);
-  const total = (base + extra) * qty;
+  const localTotal = (base + extra) * qty;
 
-  const handleAdd = () => {
+  // 🔁 Cotizar en el back (promos) cada vez que cambian qty / option / producto
+  useEffect(() => {
+    (async () => {
+      if (!prod?.id) {
+        setQuotedUnit(null);
+        setQuotedTotal(null);
+        return;
+      }
+      const optionIds = selectedOption?.id ? [Number(selectedOption.id)] : [];
+      const qres = await quoteProduct(Number(prod.id), Math.max(1, qty || 1), optionIds, notes?.trim() || undefined);
+
+      if (qres) {
+        const unit = Number(qres.unitPrice);
+        const tot  = Number(qres.total);
+        const list = Number(qres.unitList);
+        if (Number.isFinite(unit) && Number.isFinite(tot)) {
+          setQuotedUnit(unit);
+          setQuotedTotal(tot);
+          setListUnit(Number.isFinite(list) ? list : null);
+          setHasPromo(!!qres.promo);        // 👈 si el back marcó promo
+          return;
+        }
+      }
+      // fallback local si la cotización falla/no aplica
+      const unitLocal = base + extra;
+      setQuotedUnit(unitLocal);
+      setQuotedTotal(unitLocal * qty);
+      setHasPromo(false);
+      setListUnit(null);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prod?.id, selectedOption?.id, qty]);
+
+  const handleAdd = async () => {
     if (!prod) return;
-    const baseNum = typeof prod.price === "string" ? Number(prod.price) : (prod.price ?? 0);
+
+    // usar cotización ya calculada (si está), con fallback
+    let unit = quotedUnit;
+    let total = quotedTotal;
+
+    if (unit == null || total == null) {
+      const optionIds = selectedOption?.id ? [Number(selectedOption.id)] : [];
+      const qres = await quoteProduct(
+        Number(prod.id),
+        Math.max(1, qty || 1),
+        optionIds,
+        notes?.trim() || undefined
+      );
+      if (qres) {
+        const u = Number(qres.unitPrice);
+        const t = Number(qres.total);
+        if (Number.isFinite(u) && Number.isFinite(t)) {
+          unit = u;
+          total = t;
+        }
+      }
+      if (unit == null || total == null) {
+        // último fallback local
+        const baseNum =
+          typeof prod.price === "string" ? Number(prod.price) : (prod.price ?? 0);
+        const extraNum =
+          typeof selectedOption?.precio_extra === "string"
+            ? Number(selectedOption?.precio_extra)
+            : (selectedOption?.precio_extra ?? 0);
+        unit = baseNum + extraNum;
+        total = unit * qty;
+      }
+    }
+
     const extraNum =
       typeof selectedOption?.precio_extra === "string"
         ? Number(selectedOption?.precio_extra)
@@ -174,8 +300,8 @@ export default function ProductDetailPage() {
       id: Number(prod.id) || 0,
       name: prod.name || "",
       description: prod.description || "",
-      price: baseNum + extraNum,
-      finalPrice: (baseNum + extraNum) * qty,
+      price: unit,                 // 💰 unitario efectivo
+      finalPrice: total,           // 💰 total efectivo
       image: prod.imageUrl || "",
       category: "",
       quantity: qty,
@@ -200,12 +326,18 @@ export default function ProductDetailPage() {
   // ⬇️ Render SIEMPRE; overlay solo si no hubo warm
   return (
     <div className="min-h-screen bg-background relative">
-      <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
+      <SiteHeader
+        showBack
+        onBack={() => router.back()}
+        onCartClick={() => router.push("/carrito")}
+      />
       <div className="h-[6px] w-full bg-white" />
       <ClosedBanner />
 
       {!prod && !loading ? (
-        <div className="mx-auto w-full max-w-6xl p-4">No se encontró el producto.</div>
+        <div className="mx-auto w-full max-w-6xl p-4">
+          No se encontró el producto.
+        </div>
       ) : (
         <div className="mx-auto w-full max-w-6xl p-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           {/* Izquierda */}
@@ -217,12 +349,14 @@ export default function ProductDetailPage() {
                   alt={prod?.name || "Producto"}
                   fill
                   className="object-cover"
-                  priority // 👈 prioriza descarga del hero
+                  priority
                 />
               </div>
             </div>
 
-            <h2 className="text-xl font-extrabold uppercase">{prod?.name ?? "…"}</h2>
+            <h2 className="text-xl font-extrabold uppercase">
+              {prod?.name ?? "…"}
+            </h2>
 
             {prod?.description && (
               <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 text-sm text-muted-foreground">
@@ -243,14 +377,18 @@ export default function ProductDetailPage() {
                     <button
                       key={String(o.id)}
                       onClick={() => setSelectedOptId(o.id)}
-                      disabled={loading && !prod} // durante overlay real
+                      disabled={loading && !prod}
                       className={[
                         "w-full rounded-lg border px-3 py-2 text-left flex items-center justify-between",
-                        active ? "border-[var(--brand-color)] bg-[#fff5f2]" : "border-transparent hover:bg-black/5",
+                        active
+                          ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                          : "border-transparent hover:bg-black/5",
                       ].join(" ")}
                     >
                       <span className="text-sm">{o.option?.name || "Opción"}</span>
-                      <span className="text-sm font-semibold">{plus ? `+${fmt(plus)}` : ""}</span>
+                      <span className="text-sm font-semibold">
+                        {plus ? `+${fmt(plus)}` : ""}
+                      </span>
                     </button>
                   );
                 })}
@@ -260,11 +398,19 @@ export default function ProductDetailPage() {
             <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
               <div className="text-sm font-semibold mb-2">Cantidad:</div>
               <div className="flex items-center gap-3">
-                <Button variant="outline" onClick={() => setQty((q) => Math.max(1, q - 1))} disabled={loading && !prod}>
+                <Button
+                  variant="outline"
+                  onClick={() => setQty((q) => Math.max(1, q - 1))}
+                  disabled={loading && !prod}
+                >
                   −
                 </Button>
                 <div className="w-8 text-center font-semibold">{qty}</div>
-                <Button variant="outline" onClick={() => setQty((q) => q + 1)} disabled={loading && !prod}>
+                <Button
+                  variant="outline"
+                  onClick={() => setQty((q) => q + 1)}
+                  disabled={loading && !prod}
+                >
                   ＋
                 </Button>
               </div>
@@ -294,7 +440,23 @@ export default function ProductDetailPage() {
             <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
               <div className="flex items-center justify-between mb-3">
                 <div className="text-sm font-semibold">Total:</div>
-                <div className="text-xl font-extrabold text-[var(--brand-color)]">{fmt(total)}</div>
+                <div className="text-right">
+                  {/* Si hay promo y tenemos unitList, mostramos el total de lista tachado */}
+                  {hasPromo && listUnit != null && (
+                    <div className="text-sm text-muted-foreground line-through">
+                      {fmt(listUnit * qty)}
+                    </div>
+                  )}
+                  <div className="text-xl font-extrabold text-[var(--brand-color)]">
+                    {fmt(quotedTotal ?? localTotal)}
+                  </div>
+                  {/* Opcional: aclaración pequeña */}
+                  {hasPromo && (
+                    <div className="text-[11px] text-green-700 font-medium">
+                      Precio promo aplicado
+                    </div>
+                  )}
+                </div>
               </div>
               <Button
                 className={`w-full text-white transition-colors
@@ -316,7 +478,7 @@ export default function ProductDetailPage() {
         </div>
       )}
       {/* Overlay bloqueante solo si no teníamos warm */}
-      <BlockingLoader open={loading && !warmOnce.current} message="Cargando producto…" />
+      <BlockingLoader open={loading } message="Cargando producto…" />
     </div>
   );
 }
