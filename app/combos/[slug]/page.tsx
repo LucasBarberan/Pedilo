@@ -98,8 +98,12 @@ const toArray = (json: any): any[] =>
 const fmt = (n?: number | string | null) => {
   if (n === null || n === undefined) return "-";
   const v = typeof n === "string" ? Number(n) : n;
-  return Number.isFinite(v) ? `$${(v as number).toLocaleString("es-AR")}` : "-";
+  if (!Number.isFinite(v)) return "-";
+  // 👇 redondear siempre hacia arriba y sin decimales
+  const rounded = Math.ceil(v as number);
+  return `$${rounded.toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 };
+
 
 // ordenar opciones: simple -> doble -> triple; default primero si empatan
 const normalize = (s?: string) =>
@@ -159,6 +163,15 @@ const priceWithInclusionRule = (
     default:
       return round2(base);
   }
+};
+const priceWithInclusionRuleAndPromo = (
+  baseItemPrice: number | null,
+  r: CategoryInclusion,
+  factor: number
+): number | null => {
+  const ruled = priceWithInclusionRule(baseItemPrice, r);
+  if (ruled === null) return null;
+  return round2(ruled * factor);
 };
 
 export default function ComboDetailPage() {
@@ -355,26 +368,42 @@ export default function ComboDetailPage() {
   };
 
   // precios
-  const comboBase = toNum(combo?.effectivePrice ?? combo?.basePrice);
-  const optionExtra = toNum(selectedOption?.precio_extra);
+const baseList = toNum(combo?.basePrice);                              // precio base (lista) del combo
+const baseEff  = toNum(combo?.effectivePrice ?? combo?.basePrice);     // precio base efectivo (promo si aplica)
+const optionExtra = toNum(selectedOption?.precio_extra);
+// ¿hay promo?
+const hasPromo = Number.isFinite(baseList) && Number.isFinite(baseEff) && baseEff < baseList;
+const promoFactor = hasPromo && baseList > 0 ? Math.max(0, Math.min(1, baseEff / baseList)) : 1;
 
-  const selectedInclusionsTotal = useMemo(() => {
-    if (!combo) return 0;
-    let total = 0;
-
-    for (const inc of combo.categoryInclusions ?? []) {
-      const key = String(inc.id);
-      const prods = inclusionsProducts[key] ?? [];
-      const sel = inclusionSelections[key] ?? [];
-      for (const pid of sel) {
-        const p = prods.find((x) => String(x.id) === pid);
-        const raw = toNumber(p?.price);
-        const final = priceWithInclusionRule(raw, inc);
-        if (final) total += final;
-      }
+// total por inclusiones seleccionadas (se mantiene como ya lo tenías)
+const selectedInclusionsTotal = useMemo(() => {
+  if (!combo) return 0;
+  let total = 0;
+  for (const inc of combo.categoryInclusions ?? []) {
+    const key = String(inc.id);
+    const prods = inclusionsProducts[key] ?? [];
+    const sel = inclusionSelections[key] ?? [];
+    for (const pid of sel) {
+      const p = prods.find((x) => String(x.id) === pid);
+      const raw = toNumber(p?.price);
+      const final = priceWithInclusionRuleAndPromo(raw, inc, promoFactor);
+      if (final) total += final;
     }
-    return total;
-  }, [combo, inclusionsProducts, inclusionSelections]);
+  }
+  return total;
+}, [combo, inclusionsProducts, inclusionSelections]);
+
+// totales unitarios (por 1 combo)
+const unitNoPromo = (baseList + optionExtra + selectedInclusionsTotal);
+const unitPromo   = (baseEff  + optionExtra + selectedInclusionsTotal);
+
+// totales finales (por cantidad)
+const totalNoPromo = unitNoPromo * qty;
+const totalPromo   = unitPromo   * qty;
+
+
+
+
 
   const selectedInclusionItems = useMemo(() => {
     if (!combo) return [];
@@ -394,7 +423,7 @@ export default function ComboDetailPage() {
       for (const pid of sel) {
         const p = prods.find((x) => String(x.id) === pid);
         const raw = toNumber(p?.price) ?? 0;
-        const fin = priceWithInclusionRule(raw, inc) ?? raw;
+        const fin = priceWithInclusionRuleAndPromo(raw, inc, promoFactor) ?? raw;
         out.push({
           inclusionId: key,
           inclusionTitle: inc.name || inc.category?.name || "Opción",
@@ -408,7 +437,7 @@ export default function ComboDetailPage() {
     return out;
   }, [combo, inclusionsProducts, inclusionSelections]);
 
-  const total = (comboBase + optionExtra + selectedInclusionsTotal) * qty;
+  //const total = (comboBase + optionExtra + selectedInclusionsTotal) * qty;
 
   // items
   const mainItem = useMemo(() => combo?.items?.find((i) => i.isMain), [combo]);
@@ -430,10 +459,10 @@ export default function ComboDetailPage() {
     const hasSelected =
       selectedOption != null && selectedOption.id != null && !Number.isNaN(Number(selectedOption.id));
 
-    const base = toNum(combo?.effectivePrice ?? combo?.basePrice);
-    const extra = toNum(selectedOption?.precio_extra);
-    const unit = base + extra + selectedInclusionsTotal;
-    const final = unit * qty;
+    // precios para el carrito (ya consideran promo, opciones e inclusiones)
+    const unit = unitPromo;      // unitario efectivo
+    const final = totalPromo;    // total efectivo
+
 
     const img = heroImg !== "/placeholder.svg" ? heroImg : "";
 
@@ -530,7 +559,7 @@ export default function ComboDetailPage() {
       productOptionId: hasSelected ? Number(selectedOption!.id) : undefined,
       optionId: hasSelected ? Number((selectedOption as any).option?.id) : undefined,
       optionName: hasSelected ? sizeLabelRaw : undefined,
-      priceExtra: extra,
+      priceExtra: optionExtra,
 
       isDefaultCategory: false,
     });
@@ -795,7 +824,7 @@ export default function ComboDetailPage() {
                           ) : (
                             prods.map((p) => {
                               const raw = toNumber(p.price);
-                              const fin = priceWithInclusionRule(raw, inc);
+                              const fin = priceWithInclusionRuleAndPromo(raw, inc, promoFactor);
                               const checked = sel.includes(String(p.id));
 
                               return (
@@ -895,8 +924,23 @@ export default function ComboDetailPage() {
           <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
             <div className="flex items-center justify-between mb-3">
               <div className="text-sm font-semibold">Total:</div>
-              <div className="text-xl font-extrabold text-[var(--brand-color)]">{fmt(total)}</div>
+              <div className="text-right">
+                {hasPromo && (
+                  <div className="text-sm text-muted-foreground line-through">
+                    {fmt(totalNoPromo)}
+                  </div>
+                )}
+                <div className="text-xl font-extrabold text-[var(--brand-color)]">
+                  {fmt(totalPromo)}
+                </div>
+                {hasPromo && (
+                  <div className="text-[11px] text-green-700 font-medium">
+                    Precio promo aplicado
+                  </div>
+                )}
+              </div>
             </div>
+              
             <Button
               className={`w-full text-white transition-colors
                           bg-[var(--brand-color)]

@@ -37,10 +37,15 @@ type ApiCombo = {
   }>;
 };
 
+// números seguros
+const toNum = (v: unknown): number | null => {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === "string" ? Number(v) : (v as number);
+  return Number.isFinite(n) ? n : null;
+};
 const fmtPrice = (n?: number | string | null) => {
-  if (n === null || n === undefined) return "-";
-  const v = typeof n === "string" ? Number(n) : n;
-  return Number.isFinite(v) ? `$${(v as number).toLocaleString("es-AR")}` : "-";
+  const v = toNum(n);
+  return v === null ? "-" : `$${v.toLocaleString("es-AR")}`;
 };
 
 export default function CombosListPage() {
@@ -73,8 +78,7 @@ export default function CombosListPage() {
           const isComboCat = c?.category?.isComboCategory === true;
           if (!isComboCat) return false;
           if (!isAllowedForDelivery((c as any).channel)) return false;
-          // 👇 solo combos activos
-          if (c?.active !== true) return false;
+          if (c?.active !== true) return false; // solo activos
           if (!categoryId) return true;
           return String(c.categoryId ?? c.category?.id) === String(categoryId);
         });
@@ -90,9 +94,7 @@ export default function CombosListPage() {
             try {
               const catsRes = await fetch(`${BASE}/categories`, { cache: "no-store" });
               const catsJson = await catsRes.json();
-              const cats: any[] = Array.isArray(catsJson?.data)
-                ? catsJson.data
-                : (Array.isArray(catsJson) ? catsJson : []);
+              const cats: any[] = Array.isArray(catsJson?.data) ? catsJson.data : (Array.isArray(catsJson) ? catsJson : []);
               const found = cats.find((c) => String(c.id) === String(categoryId));
               setCategoryName(found?.name ?? null);
             } catch {
@@ -136,8 +138,6 @@ export default function CombosListPage() {
           imageUrl: buildMainImage(c),
           basePrice: c.basePrice ?? null,
           effectivePrice: c.effectivePrice ?? null,
-          // Si necesitás algo del main para render inicial:
-          // mainName: (c.items ?? c.comboItems ?? []).find(i => i?.isMain)?.product?.name ?? null,
         })
       );
     } catch {}
@@ -169,7 +169,10 @@ export default function CombosListPage() {
       <div className="mx-auto w-full max-w-6xl px-4 py-4 grid grid-cols-1 gap-4 md:grid-cols-2">
         {!loading &&
           combos.map((c) => {
-            const price = c.effectivePrice ?? c.basePrice ?? null;
+            const base = toNum(c.basePrice);
+            const eff  = toNum(c.effectivePrice);
+            const hasPromo = base !== null && eff !== null && eff < base;
+
             const imgSrc = buildMainImage(c);
 
             return (
@@ -184,26 +187,39 @@ export default function CombosListPage() {
                 className="rounded-2xl bg-white/60 ring-1 ring-black/5 shadow-sm p-4 flex gap-3 cursor-pointer hover:shadow-md transition"
               >
                 <div className="relative h-20 w-24 rounded-lg overflow-hidden flex-shrink-0 bg-neutral-100">
-                  <Image
-                    src={imgSrc}
-                    alt={c.name}
-                    fill
-                    className="object-cover"
-                    unoptimized
-                  />
+                  <Image src={imgSrc} alt={c.name} fill className="object-cover" unoptimized />
                 </div>
 
                 <div className="flex-1 min-w-0">
                   <div className="font-extrabold uppercase text-sm sm:text-base break-words">
                     {c.name}
                   </div>
+
                   {c.description ? (
                     <div className="text-sm text-muted-foreground line-clamp-2">
                       {c.description}
                     </div>
                   ) : null}
-                  <div className="mt-2 text-lg font-extrabold text-[var(--brand-color)]">
-                    {fmtPrice(price)}
+
+                  {/* PRECIO con promo */}
+                  <div className="mt-2">
+                    {hasPromo ? (
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-sm text-muted-foreground line-through">
+                          {fmtPrice(base)}
+                        </span>
+                        <span className="text-lg font-extrabold text-[var(--brand-color)]">
+                          {fmtPrice(eff)}
+                        </span>
+                        <span className="text-[11px] text-green-700 font-medium">
+                          Promo
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-lg font-extrabold text-[var(--brand-color)]">
+                        {fmtPrice(eff ?? base)}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
