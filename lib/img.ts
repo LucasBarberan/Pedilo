@@ -1,9 +1,9 @@
-// lib/img.ts
+﻿// lib/img.ts
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
 const API = new URL(API_URL);
 const API_ORIGIN = `${API.protocol}//${API.hostname}${API.port ? `:${API.port}` : ""}`;
 
-export function fixImageUrl(input?: string) {
+export function fixImageUrl(input?: string | null) {
   if (!input) return "";
 
   // Siempre resolvemos contra la base (sirve si viene relativa)
@@ -16,7 +16,7 @@ export function fixImageUrl(input?: string) {
     u.port = API.port;
   }
 
-  // Tu backend sirve bajo /static/productos/... → asegura el prefijo
+  // Tu backend sirve bajo /static/productos/... â†’ asegura el prefijo
   if (u.pathname.startsWith("/productos/")) {
     u.pathname = `/static${u.pathname}`;
   }

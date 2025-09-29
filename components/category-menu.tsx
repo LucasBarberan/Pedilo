@@ -1,17 +1,10 @@
-// components/category-menu.tsx
-"use client";
+﻿"use client";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { useCallback } from "react";
+import type { Category as CategoryModel } from "@/lib/categories";
 
-export type Category = {
-  id: string | number;
-  name: string;
-  code?: number | string;
-  imageUrl?: string | null;
-  isDefault?: boolean;
-  isComboCategory?: boolean;
-};
+export type Category = CategoryModel;
 
 export type CategoryMenuProps = {
   categories: Category[];
@@ -29,7 +22,7 @@ function slugify(s: string) {
 export default function CategoryMenu({ categories, onCategorySelect }: CategoryMenuProps) {
   const router = useRouter();
 
-  // URL destino para cada categoría
+  // URL destino para cada categoria
   const targetFor = useCallback((c: Category) => {
     const slug = slugify(c.name);
     const id = encodeURIComponent(String(c.id));
@@ -55,9 +48,9 @@ export default function CategoryMenu({ categories, onCategorySelect }: CategoryM
           <button
             key={String(c.id)}
             onClick={() => handleClick(c)}
-            onMouseEnter={() => router.prefetch(url)}   // 👈 prefetch al pasar el mouse
-            onTouchStart={() => router.prefetch(url)}   // 👈 prefetch en touch (mobile)
-            onFocus={() => router.prefetch(url)}        // 👈 accesibilidad (tab)
+            onMouseEnter={() => router.prefetch(url)}   // prefetch al pasar el mouse
+            onTouchStart={() => router.prefetch(url)}   // prefetch en touch (mobile)
+            onFocus={() => router.prefetch(url)}        // accesibilidad (tab)
             className="group rounded-2xl bg-white/70 ring-1 ring-black/5 shadow-sm p-4 h-52
                       flex flex-col items-center justify-center gap-3
                       hover:shadow-md hover:bg-white/80 transition"
