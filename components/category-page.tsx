@@ -21,6 +21,14 @@ type CategoryPageProps = {
   apiBase: string | null;
 };
 
+// Overlay local para no romper tipos si Product no define subcategory/subcategoryId
+type ProductWithMaybeSub = Product & {
+  subcategory?: { id?: number; name?: string; description?: string | null } | null;
+  subcategoryId?: number | null;
+};
+
+type SubcategoryDTO = { id: number; name: string; description?: string | null; categoryId?: number };
+
 const fmtPrice = (n?: number | string | null) => {
   if (n === null || n === undefined) return "-";
   const v = typeof n === "string" ? Number(n) : n;
@@ -36,12 +44,12 @@ export default function CategoryPageClient({
 }: CategoryPageProps) {
   const router = useRouter();
 
-  const [products, setProducts] = useState<Product[]>(initialProducts);
+  const [products, setProducts] = useState<ProductWithMaybeSub[]>(initialProducts as ProductWithMaybeSub[]);
   const [promoMap, setPromoMap] = useState<QuoteProductsBatchMap>(initialPromoMap);
   const [loading, setLoading] = useState(initialProducts.length === 0 && !!category && !!apiBase);
 
   useEffect(() => {
-    setProducts(initialProducts);
+    setProducts(initialProducts as ProductWithMaybeSub[]);
   }, [initialProducts]);
 
   useEffect(() => {
@@ -58,27 +66,84 @@ export default function CategoryPageClient({
     (async () => {
       setLoading(true);
       try {
-        const data = await fetchProductsByCategory(category.id, {
+        // 1) Traer productos por categoría (incluye subcategory si tu back lo manda)
+        const data = await fetchProductsByCategory(category!.id, {
           baseUrl: apiBase ?? undefined,
           signal: controller.signal,
         });
-        if (cancelled) return;
-        setProducts(data);
 
-        const ids = data
+        if (cancelled) return;
+
+        let finalProducts = data as ProductWithMaybeSub[];
+
+        // 2) Fallback: si no hay productos o no traen subcategoría, intentamos por /subcategories
+        const lacksSubInfo =
+          finalProducts.length > 0 &&
+          !finalProducts.some((p) => p?.subcategory?.id != null || p?.subcategoryId != null);
+
+        if ((finalProducts.length === 0 || lacksSubInfo) && apiBase && category?.id) {
+          try {
+            const subUrl = new URL(`${apiBase.replace(/\/$/, "")}/subcategories`);
+            subUrl.searchParams.set("categoryId", String(category.id));
+            const subRes = await fetch(subUrl, { signal: controller.signal });
+            if (subRes.ok) {
+              const subJson = await subRes.json();
+              const subs: SubcategoryDTO[] = Array.isArray(subJson?.data) ? subJson.data : Array.isArray(subJson) ? subJson : [];
+              // Si hay subcategorías, traemos productos por cada una
+              if (subs.length > 0) {
+                const perSub = await Promise.all(
+                  subs.map(async (sc) => {
+                    const u = new URL(`${apiBase!.replace(/\/$/, "")}/products`);
+                    u.searchParams.set("subcategory", String(sc.id));
+                    const r = await fetch(u, { signal: controller.signal });
+                    if (!r.ok) return [] as ProductWithMaybeSub[];
+                    const list = await r.json();
+                  
+                    const arr = Array.isArray(list?.data) ? list.data : Array.isArray(list) ? list : [];
+                  
+                    // 🔧 Aseguramos que la subcategory tenga categoryId
+                    const ensuredCategoryId = (sc.categoryId != null ? sc.categoryId : Number(category?.id)) || undefined;
+                  
+                    return (arr as ProductWithMaybeSub[]).map((p) => ({
+                      ...p,
+                      subcategory: p.subcategory ?? {
+                        id: sc.id,
+                        name: sc.name,
+                        // 👇 ESTA LÍNEA RESUELVE EL ERROR DE TIPO
+                        categoryId: ensuredCategoryId as number,
+                        description: sc.description ?? null,
+                      },
+                      subcategoryId: p.subcategoryId ?? sc.id,
+                    }));
+                  })
+                );
+                finalProducts = perSub.flat();
+
+                // si aún así no vino nada, mantenemos lo que teníamos (data)
+                if (finalProducts.length === 0) finalProducts = data as ProductWithMaybeSub[];
+              }
+            }
+          } catch {
+            // ignoramos el error del fallback; nos quedamos con data
+          }
+        }
+
+        setProducts(finalProducts);
+
+        // 3) Cotizaciones/promos
+        const ids = finalProducts
           .map((p) => Number(p.id))
           .filter((n) => Number.isFinite(n)) as number[];
 
         if (ids.length === 0) {
           setPromoMap({});
-          return;
+        } else {
+          const quoted = await quoteProductsBatch(ids, {
+            baseUrl: apiBase ?? undefined,
+            signal: controller.signal,
+          });
+          if (!cancelled) setPromoMap(quoted);
         }
-
-        const quoted = await quoteProductsBatch(ids, {
-          baseUrl: apiBase ?? undefined,
-          signal: controller.signal,
-        });
-        if (!cancelled) setPromoMap(quoted);
       } catch {
         if (!cancelled) {
           setProducts([]);
@@ -103,6 +168,50 @@ export default function CategoryPageClient({
     return "CATEGORIA";
   }, [category, slug]);
 
+  // Agrupar por subcategoría si existe; si no, grupo plano
+  const groups = useMemo(() => {
+    const list = products;
+
+    const anySub = list.some((p) => p?.subcategory?.id != null || p?.subcategoryId != null);
+    if (!anySub) {
+      return [
+        {
+          key: "no-subcat",
+          header: null as null | { title: string; description?: string | null },
+          items: list,
+        },
+      ];
+    }
+
+    type G = {
+      key: string | number;
+      header: { title: string; description?: string | null };
+      items: ProductWithMaybeSub[];
+    };
+    const map = new Map<string | number, G>();
+
+    for (const p of list) {
+      const sid = (p.subcategory?.id ?? p.subcategoryId) as number | undefined;
+      const sname = p.subcategory?.name ?? "Subcategoría";
+      const sdesc = p.subcategory?.description ?? null;
+      const key = sid ?? -1;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          header: key === -1 ? { title: "Otros", description: undefined } : { title: String(sname), description: sdesc ?? undefined },
+          items: [],
+        });
+      }
+      map.get(key)!.items.push(p);
+    }
+
+    // Orden simple por título asc
+    return Array.from(map.values()).sort((a, b) =>
+      String(a.header.title).localeCompare(String(b.header.title), "es")
+    );
+  }, [products]);
+
   const handleCartClick = () => router.push("/carrito");
 
   return (
@@ -122,62 +231,82 @@ export default function CategoryPageClient({
       <div className="mx-auto w-full max-w-6xl px-4 py-4 grid grid-cols-1 gap-4 md:grid-cols-2">
         <BlockingLoader open={loading} message="Preparando la carta..." />
 
+        {/* Render por grupos (mismo estilo de cards) */}
         {!loading &&
-          products.map((p) => {
-            const productId = Number(p.id);
-            const promo = Number.isFinite(productId) ? promoMap[productId] : undefined;
-            const showPromo = promo?.hasPromo && Number.isFinite(promo.unit);
-            const unit = promo?.unit ?? (typeof p.price === "number" ? p.price : undefined);
-            const targetUrl = `/producto/${p.id}`;
-
-            return (
-              <div
-                key={String(p.id)}
-                onClick={() => router.push(targetUrl)}
-                onMouseEnter={() => router.prefetch(targetUrl)}
-                onTouchStart={() => router.prefetch(targetUrl)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") router.push(targetUrl);
-                }}
-                role="button"
-                tabIndex={0}
-                className="rounded-2xl bg-white/60 ring-1 ring-black/5 shadow-sm p-4 flex gap-3 cursor-pointer hover:shadow-md transition"
-              >
-                <div className="relative h-20 w-24 rounded-lg overflow-hidden flex-shrink-0">
-                  <Image
-                    src={fixImageUrl(p.imageUrl) || "/placeholder.svg"}
-                    alt={p.name}
-                    fill
-                    className="object-cover"
-                  />
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="font-extrabold uppercase text-sm sm:text-base break-words">
-                    {p.name}
-                  </div>
-                  <div className="text-sm text-muted-foreground line-clamp-2">
-                    {p.description || ""}
-                  </div>
-
-                  {!showPromo ? (
-                    <div className="mt-2 text-lg font-extrabold text-[var(--brand-color)]">
-                      {fmtPrice(unit)}
-                    </div>
-                  ) : (
-                    <div className="mt-2">
-                      <div className="text-sm text-muted-foreground line-through">
-                        {fmtPrice(promo.list)}
-                      </div>
-                      <div className="text-lg font-extrabold text-[var(--brand-color)]">
-                        {fmtPrice(promo.unit)}
-                      </div>
-                    </div>
+          groups.map((group) => (
+            <div key={String(group.key)} className="col-span-full">
+              {group.header && (
+                <div className="mb-3">
+                  <h3 className="text-base font-extrabold uppercase">
+                    {group.header.title}
+                  </h3>
+                  {group.header.description && (
+                    <p className="text-sm text-muted-foreground">
+                      {group.header.description}
+                    </p>
                   )}
                 </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {group.items.map((p) => {
+                  const productId = Number(p.id);
+                  const promo = Number.isFinite(productId) ? promoMap[productId] : undefined;
+                  const showPromo = promo?.hasPromo && Number.isFinite(promo.unit);
+                  const unit = promo?.unit ?? (typeof (p as any).price === "number" ? (p as any).price : undefined);
+                  const targetUrl = `/producto/${p.id}`;
+
+                  return (
+                    <div
+                      key={String(p.id)}
+                      onClick={() => router.push(targetUrl)}
+                      onMouseEnter={() => router.prefetch(targetUrl)}
+                      onTouchStart={() => router.prefetch(targetUrl)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") router.push(targetUrl);
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      className="rounded-2xl bg-white/60 ring-1 ring-black/5 shadow-sm p-4 flex gap-3 cursor-pointer hover:shadow-md transition"
+                    >
+                      <div className="relative h-20 w-24 rounded-lg overflow-hidden flex-shrink-0">
+                        <Image
+                          src={fixImageUrl((p as any).imageUrl) || "/placeholder.svg"}
+                          alt={String((p as any).name)}
+                          fill
+                          className="object-cover"
+                        />
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="font-extrabold uppercase text-sm sm:text-base break-words">
+                          {(p as any).name}
+                        </div>
+                        <div className="text-sm text-muted-foreground line-clamp-2">
+                          {(p as any).description || ""}
+                        </div>
+
+                        {!showPromo ? (
+                          <div className="mt-2 text-lg font-extrabold text-[var(--brand-color)]">
+                            {fmtPrice(unit)}
+                          </div>
+                        ) : (
+                          <div className="mt-2">
+                            <div className="text-sm text-muted-foreground line-through">
+                              {fmtPrice(promo.list)}
+                            </div>
+                            <div className="text-lg font-extrabold text-[var(--brand-color)]">
+                              {fmtPrice(promo.unit)}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            </div>
+          ))}
 
         {!loading && products.length === 0 && (
           <div className="col-span-full p-8 text-center opacity-70">

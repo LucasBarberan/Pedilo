@@ -1,6 +1,6 @@
 import { isAllowedForDelivery } from "@/lib/channel";
 import type { Product } from "@/lib/api/products";
-import { normalizeProduct, fetchProductById, fetchProductsByCategory } from "@/lib/api/products";
+import { normalizeProduct, fetchProductById, fetchProductsByCategory, fetchProductsBySubcategory  } from "@/lib/api/products";
 
 export type ComboItem = {
   id: string | number;
@@ -15,6 +15,7 @@ export type ComboCategoryInclusion = {
   id: string | number;
   comboId?: string | number | null;
   categoryId?: string | number | null;
+  subcategoryId?: string | number | null;
   name?: string | null;
   minChoices?: number | null;
   maxChoices?: number | null;
@@ -29,6 +30,11 @@ export type ComboCategoryInclusion = {
     name?: string | null;
     isComboCategory?: boolean | null;
   };
+  subcategory?: {                                         // 👈 NUEVO
+    id?: string | number | null;
+    name?: string | null;
+    categoryId?: string | number | null;
+  } | null;
 };
 
 export type Combo = {
@@ -121,12 +127,16 @@ function normalizeComboCategoryInclusion(raw: any): ComboCategoryInclusion | nul
   if (id === undefined || id === null) return null;
 
   const categoryId = raw.categoryId ?? raw.category_id ?? raw.category?.id ?? null;
+  const subcategoryId = raw.subcategoryId ?? raw.subcategory_id ?? raw.subcategory?.id ?? null;
 
   return {
     id,
     comboId: raw.comboId ?? raw.combo_id ?? raw.comboID ?? null,
     categoryId,
-    name: typeof raw.name === "string" ? raw.name : raw.category?.name ?? null,
+    subcategoryId,
+    name: typeof raw.name === "string"
+        ? raw.name
+        : raw.subcategory?.name ?? raw.category?.name ?? null,
     minChoices: parseNullableNumber(raw.minChoices ?? raw.min_choices),
     maxChoices: parseNullableNumber(raw.maxChoices ?? raw.max_choices),
     pricingMode: raw.pricingMode ?? raw.pricing_mode ?? null,
@@ -142,6 +152,14 @@ function normalizeComboCategoryInclusion(raw: any): ComboCategoryInclusion | nul
           isComboCategory: raw.category.isComboCategory ?? raw.category.is_combo_category ?? null,
         }
       : undefined,
+      subcategory:
+      raw.subcategory && typeof raw.subcategory === "object"
+        ? {
+            id: raw.subcategory.id ?? raw.subcategory_id ?? raw.subcategory.code ?? raw.subcategory.uuid ?? subcategoryId,
+            name: raw.subcategory.name ?? raw.subcategory.title ?? null,
+            categoryId: raw.subcategory.categoryId ?? raw.subcategory.category_id ?? categoryId ?? null,
+          }
+        : (subcategoryId ? { id: subcategoryId, name: null, categoryId: categoryId ?? null } : null),
   };
 }
 
@@ -364,14 +382,36 @@ export async function fetchComboDetail(
 
   const inclusionProductsEntries = await Promise.all(
     (combo.categoryInclusions ?? []).map(async (inc) => {
-      if (!inc?.id || !inc?.categoryId) return null;
-      const products = await fetchProductsByCategory(inc.categoryId, {
-        baseUrl,
-        signal,
-        limit: 100,
-        includeInactive: false,
-      });
-      return [String(inc.id), products.filter((p) => p.isActive !== false)];
+      if (!inc?.id) return null;
+
+      // Preferimos subcategoría si está seteada
+      const subId = inc.subcategoryId ?? inc.subcategory?.id ?? null;
+      const catId = inc.categoryId ?? inc.category?.id ?? null;
+
+      let products: Product[] = [];
+      try {
+        if (subId != null) {
+          products = await fetchProductsBySubcategory(subId, {
+            baseUrl,
+            signal,
+            limit: 100,
+            includeInactive: false,
+          });
+        } else if (catId != null) {
+          products = await fetchProductsByCategory(catId, {
+            baseUrl,
+            signal,
+            limit: 100,
+            includeInactive: false,
+          });
+        } else {
+          return null; // nada que buscar
+        }
+      } catch {
+        products = [];
+      }
+
+      return [String(inc.id), products.filter((p) => p.isActive !== false)] as const;
     })
   );
 

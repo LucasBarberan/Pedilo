@@ -1,4 +1,17 @@
-﻿export type Category = {
+﻿// lib/categories.ts
+
+// 👇 NUEVO: tipo para subcategorías
+export type Subcategory = {
+  id: string | number;
+  name: string;
+  description?: string | null;
+  code?: string | number | null;
+  imageUrl?: string | null;
+  sortOrder?: number | null;
+};
+
+// ⬇️ EXISTENTE + children/description opcional
+export type Category = {
   id: string | number;
   name: string;
   code?: string | number | null;
@@ -6,6 +19,10 @@
   isDefault?: boolean | null;
   isComboCategory?: boolean | null;
   sortOrder?: number | null;
+
+  // 👇 NUEVO
+  description?: string | null;
+  children?: Subcategory[] | null;
 };
 
 function extractCategoryArray(input: unknown): unknown[] {
@@ -20,7 +37,8 @@ function extractCategoryArray(input: unknown): unknown[] {
   return [];
 }
 
-function normalizeCategory(raw: any): Category | null {
+// 👇 NUEVO: normalización de subcategorías
+function normalizeSubcategory(raw: any): Subcategory | null {
   if (!raw) return null;
 
   const id = raw.id ?? raw.code ?? raw.slug ?? raw.uuid;
@@ -39,11 +57,67 @@ function normalizeCategory(raw: any): Category | null {
   return {
     id,
     name: String(name),
+    description: raw.description ?? raw.desc ?? null,
+    code: raw.code ?? null,
+    imageUrl,
+    sortOrder,
+  };
+}
+
+function normalizeSubcategoryArray(input: unknown): Subcategory[] {
+  const arr = Array.isArray(input) ? input : [];
+  const out: Subcategory[] = [];
+  for (const item of arr) {
+    const sc = normalizeSubcategory(item);
+    if (sc) out.push(sc);
+  }
+  // Orden local por sortOrder y nombre (opcional)
+  const fallback = Number.MAX_SAFE_INTEGER;
+  out.sort((a, b) => {
+    const aSort = typeof a.sortOrder === "number" ? a.sortOrder : fallback;
+    const bSort = typeof b.sortOrder === "number" ? b.sortOrder : fallback;
+    if (aSort !== bSort) return aSort - bSort;
+    return String(a.name || "").localeCompare(String(b.name || ""), "es");
+  });
+  return out;
+}
+
+function normalizeCategory(raw: any): Category | null {
+  if (!raw) return null;
+
+  const id = raw.id ?? raw.code ?? raw.slug ?? raw.uuid;
+  const name = raw.name ?? raw.title ?? raw.label;
+  if (id === undefined || id === null || !name) return null;
+
+  const asNumber = typeof raw.sortOrder === "number" ? raw.sortOrder : Number(raw.sortOrder);
+  const sortOrder = Number.isFinite(asNumber) ? (asNumber as number) : null;
+
+  const imageUrl = typeof raw.imageUrl === "string"
+    ? raw.imageUrl
+    : typeof raw.image === "string"
+      ? raw.image
+      : null;
+
+  // 👇 NUEVO: description a nivel categoría (si viene)
+  const description = raw.description ?? raw.desc ?? null;
+
+  // 👇 NUEVO: children si vienen como "children" o "subcategories"
+  const childrenRaw = Array.isArray(raw?.children)
+    ? raw.children
+    : Array.isArray(raw?.subcategories)
+      ? raw.subcategories
+      : null;
+
+  return {
+    id,
+    name: String(name),
     code: raw.code ?? null,
     imageUrl,
     isDefault: raw.isDefault ?? null,
     isComboCategory: raw.isComboCategory ?? raw.isCombo ?? null,
     sortOrder,
+    description,
+    children: childrenRaw ? normalizeSubcategoryArray(childrenRaw) : null,
   };
 }
 

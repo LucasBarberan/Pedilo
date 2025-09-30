@@ -15,6 +15,14 @@ export type Product = {
   code?: string | number;
   isActive?: boolean | null;
   productOptions?: ProductOption[];
+  // 👇 NUEVO: para agrupar por subcategoría
+  subcategoryId?: number | null;
+  subcategory?: {
+    id: number;
+    name: string;
+    categoryId: number;
+    description?: string | null;
+  } | null;
 };
 
 type FetchProductsOptions = {
@@ -31,6 +39,7 @@ function extractProductsArray(payload: unknown): unknown[] {
     const data = (payload as { data?: unknown }).data;
     if (Array.isArray(data)) return data;
     if (data && typeof data === "object" && Array.isArray((data as { data?: unknown }).data)) {
+      // Soporta { success, data: { data: [...] , pagination } }
       return ((data as { data?: unknown }).data as unknown[]) ?? [];
     }
   }
@@ -106,6 +115,23 @@ export function normalizeProduct(raw: any): Product | null {
         .filter((opt): opt is ProductOption => Boolean(opt))
     : undefined;
 
+  // 👇 NUEVO: normalizar subcategoría (viene en tu payload)
+  const subcat =
+    raw.subcategory && typeof raw.subcategory === "object"
+      ? {
+          id: Number(raw.subcategory.id),
+          name: String(raw.subcategory.name ?? ""),
+          categoryId: Number(raw.subcategory.categoryId),
+          description: typeof raw.subcategory.description === "string" ? raw.subcategory.description : undefined,
+        }
+      : null;
+
+  const subcategoryId = raw.subcategoryId != null
+    ? Number(raw.subcategoryId)
+    : subcat
+      ? subcat.id
+      : undefined;
+
   return {
     id,
     name: String(name),
@@ -116,6 +142,10 @@ export function normalizeProduct(raw: any): Product | null {
     code: raw.code ?? null,
     isActive: raw.isActive ?? raw.active ?? null,
     productOptions,
+
+    // 👇 NUEVO
+    subcategoryId: Number.isFinite(subcategoryId) ? (subcategoryId as number) : null,
+    subcategory: subcat,
   };
 }
 
@@ -141,6 +171,32 @@ export async function fetchProductsByCategory(
   try {
     const search = new URLSearchParams({
       category: String(categoryId),
+      page: String(page),
+      limit: String(limit),
+    });
+
+    const res = await fetch(`${base}/products?${search.toString()}`, {
+      cache: "no-store",
+      signal,
+    });
+    if (!res.ok) return [];
+
+    const json = await res.json();
+    return normalizeProductsPayload(json, { includeInactive });
+  } catch {
+    return [];
+  }
+}
+export async function fetchProductsBySubcategory(
+  subcategoryId: string | number,
+  { baseUrl, signal, page = 1, limit = 50, includeInactive = false }: FetchProductsOptions = {}
+): Promise<Product[]> {
+  const base = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  if (!base) return [];
+
+  try {
+    const search = new URLSearchParams({
+      subcategory: String(subcategoryId),
       page: String(page),
       limit: String(limit),
     });

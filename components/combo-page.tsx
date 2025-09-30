@@ -523,7 +523,8 @@ const totalPromo   = unitPromo   * qty;
                 const max = Number(inc.maxChoices ?? 1);
                 const min = Number(inc.minChoices ?? 0);
                 const isSingle = max <= 1;
-                const title = (inc.name || inc.category?.name || "Elige una opcion").toLowerCase();
+                const title = (inc.name || (inc as any).subcategory?.name || inc.category?.name || "Elige una opcion").toLowerCase();
+
 
                 const optionLabel = (p: any) => {
                   const raw = toNumber(p.price);
@@ -562,10 +563,10 @@ const totalPromo   = unitPromo   * qty;
                               if (!p) return "Elegir...";
                               const raw = toNumber(p.price);
                               const fin = priceWithInclusionRule(raw, inc);
-                              return p.name + (fin != null ? ` â€” ${fmt(fin)}` : "");
+                              return p.name + (fin != null ? ` — ${fmt(fin)}` : "");
                             })()}
                           </span>
-                          <span className="ml-3 text-xs opacity-60">â–¼</span>
+                          <span className="ml-3 text-xs opacity-60">▼</span>
                         </button>
 
                         {openIncId === key && (
@@ -585,7 +586,7 @@ const totalPromo   = unitPromo   * qty;
                                 }}
                                 className="w-full text-left rounded-lg border p-2 hover:bg-black/5"
                               >
-                                â€” No seleccionar â€”
+                                — No seleccionar —
                               </button>
                             )}
 
