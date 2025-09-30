@@ -185,7 +185,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     };
   }, []);
 
-  // opciÃ³n seleccionada
+  // opcion seleccionada
   const selectedOption = useMemo(() => {
     if (!mainProduct?.productOptions?.length) return undefined;
     return mainProduct.productOptions.find((o) => o.id === selectedOptId);
@@ -218,7 +218,7 @@ const optionExtra = toNum(selectedOption?.precio_extra);
 const hasPromo = Number.isFinite(baseList) && Number.isFinite(baseEff) && baseEff < baseList;
 const promoFactor = hasPromo && baseList > 0 ? Math.max(0, Math.min(1, baseEff / baseList)) : 1;
 
-// total por inclusiones seleccionadas (se mantiene como ya lo tenÃ­as)
+// total por inclusiones seleccionadas (se mantiene como ya lo teni­as)
 const selectedInclusionsTotal = useMemo(() => {
   if (!combo) return 0;
   let total = 0;
@@ -269,9 +269,9 @@ const totalPromo   = unitPromo   * qty;
         const fin = priceWithInclusionRuleAndPromo(raw, inc, promoFactor) ?? raw;
         out.push({
           inclusionId: key,
-          inclusionTitle: inc.name || inc.category?.name || "OpciÃ³n",
+          inclusionTitle: inc.name || inc.category?.name || "Opción",
           productId: Number(p?.id ?? 0),
-          name: String(p?.name ?? "Ãtem"),
+          name: String(p?.name ?? "Ítem"),
           unitPrice: fin,
           basePrice: raw,
         });
@@ -322,11 +322,11 @@ const totalPromo   = unitPromo   * qty;
         if (selCount < min) {
           ok = false;
           errs[key] = min === 1
-            ? `DebÃ©s seleccionar ${min} opciÃ³n`
-            : `DebÃ©s seleccionar al menos ${min} opciones`;
+            ? `Debés seleccionar ${min} opción`
+            : `Debés seleccionar al menos ${min} opciones`;
         } else if (selCount > max) {
           ok = false;
-          errs[key] = `Seleccionaste mÃ¡s de ${max} opciones`;
+          errs[key] = `Seleccionaste más de ${max} opciones`;
         } else {
           errs[key] = null;
         }
@@ -337,7 +337,7 @@ const totalPromo   = unitPromo   * qty;
     };
 
     if (!validateInclusions()) {
-      setFormError("CompletÃ¡ las opciones requeridas del combo.");
+      setFormError("Completá las opciones requeridas del combo.");
       const firstKey = Object.keys(inclusionErrors).find((k) => inclusionErrors[k]);
       const el = firstKey ? document.querySelector(`[data-inc="${firstKey}"]`) : null;
       el?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -356,7 +356,7 @@ const totalPromo   = unitPromo   * qty;
           option?: { id: number; name: string; extraPrice: number };
         } = {
           productId: Number(i.productId),
-          name: i.product?.name ?? "Ãtem",
+          name: i.product?.name ?? "Ítem",
           qty: Number(i.quantity ?? 1),
           isMain: !!i.isMain,
         };
@@ -422,7 +422,7 @@ const totalPromo   = unitPromo   * qty;
       <div className="min-h-screen bg-background">
         <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
         <div className="h-[6px] w-full bg-white" />
-        <div className="mx-auto w-full max-w-6xl p-4">No se encontrÃ³ el combo.</div>
+        <div className="mx-auto w-full max-w-6xl p-4">No se encontró  el combo.</div>
       </div>
     );
   }
@@ -491,7 +491,7 @@ const totalPromo   = unitPromo   * qty;
         <div className="space-y-4">
           {hasOptions && (
             <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 space-y-2">
-              <div className="text-sm font-semibold mb-2">TamaÃ±o:</div>
+              <div className="text-sm font-semibold mb-2">Tamaño:</div>
               {mainProduct?.productOptions?.map((o) => {
                 const active = selectedOptId === o.id;
                 const plus = toNum(o.precio_extra);
@@ -505,7 +505,7 @@ const totalPromo   = unitPromo   * qty;
                       active ? "border-[var(--brand-color)] bg-[#fff5f2]" : "border-transparent hover:bg-black/5",
                     ].join(" ")}
                   >
-                    <span className="text-sm">{o.option?.name || "OpciÃ³n"}</span>
+                    <span className="text-sm">{o.option?.name || "Opcion"}</span>
                     <span className="text-sm font-semibold">{plus ? `+${fmt(plus)}` : ""}</span>
                   </button>
                 );
@@ -523,7 +523,7 @@ const totalPromo   = unitPromo   * qty;
                 const max = Number(inc.maxChoices ?? 1);
                 const min = Number(inc.minChoices ?? 0);
                 const isSingle = max <= 1;
-                const title = (inc.name || inc.category?.name || "Elige una opciÃ³n").toLowerCase();
+                const title = (inc.name || inc.category?.name || "Elige una opcion").toLowerCase();
 
                 const optionLabel = (p: any) => {
                   const raw = toNumber(p.price);
@@ -719,7 +719,7 @@ const totalPromo   = unitPromo   * qty;
           <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
             <div className="text-sm font-semibold mb-2">Incluye:</div>
             {extras.length === 0 ? (
-              <div className="text-sm text-muted-foreground">â€” Sin agregados â€”</div>
+              <div className="text-sm text-muted-foreground">— Sin agregados —</div>
             ) : (
               <ul className="list-disc pl-5 text-sm">
                 {extras.map((it) => {
@@ -751,7 +751,7 @@ const totalPromo   = unitPromo   * qty;
           {formError && (
             <div className="rounded-xl bg-red-50 text-red-700 ring-1 ring-red-200 px-3 py-2 flex items-start justify-between">
               <div className="flex items-start gap-2">
-                <span aria-hidden className="mt-0.5">âš ï¸</span>
+                <span aria-hidden className="mt-0.5">⚠️</span>
                 <span className="text-sm">{formError}</span>
               </div>
               <button
@@ -761,7 +761,7 @@ const totalPromo   = unitPromo   * qty;
                 aria-label="Cerrar"
                 title="Cerrar"
               >
-                âœ•
+                ✕
               </button>
             </div>
           )}
@@ -800,7 +800,7 @@ const totalPromo   = unitPromo   * qty;
               title={!STORE_OPEN ? STORE_CLOSED_MSG : undefined}
               aria-disabled={!STORE_OPEN}
             >
-              {!STORE_OPEN ? "Local cerrado" : justAdded ? "Agregado âœ”" : "Agregar al Carrito"}
+              {!STORE_OPEN ? "Local cerrado" : justAdded ? "Agregado ✔" : "Agregar al Carrito"}
             </Button>
           </div>
         </div>

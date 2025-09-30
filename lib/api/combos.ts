@@ -1,4 +1,4 @@
-﻿import { isAllowedForDelivery } from "@/lib/channel";
+import { isAllowedForDelivery } from "@/lib/channel";
 import type { Product } from "@/lib/api/products";
 import { normalizeProduct, fetchProductById, fetchProductsByCategory } from "@/lib/api/products";
 
@@ -344,8 +344,22 @@ export async function fetchComboDetail(
   let mainProduct = mainItem?.product ?? null;
   const mainProductId = mainItem?.productId;
 
-  if (!mainProduct && mainProductId !== undefined && mainProductId !== null) {
-    mainProduct = await fetchProductById(mainProductId, { baseUrl, signal });
+  const needsHydratedMainProduct =
+    mainProductId !== undefined &&
+    mainProductId !== null &&
+    (!mainProduct || !Array.isArray(mainProduct.productOptions) || mainProduct.productOptions.length === 0);
+
+  if (needsHydratedMainProduct) {
+    const fetchedMain = await fetchProductById(mainProductId, { baseUrl, signal });
+    if (fetchedMain) {
+      mainProduct = mainProduct
+        ? {
+            ...mainProduct,
+            ...fetchedMain,
+            productOptions: fetchedMain.productOptions ?? mainProduct.productOptions,
+          }
+        : fetchedMain;
+    }
   }
 
   const inclusionProductsEntries = await Promise.all(
@@ -370,6 +384,7 @@ export async function fetchComboDetail(
 
   return { combo, mainProduct, inclusionProducts };
 }
+
 
 
 
