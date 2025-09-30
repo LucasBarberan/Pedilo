@@ -1,4 +1,11 @@
-﻿export type Product = {
+﻿export type ProductOption = {
+  id: string | number;
+  precio_extra?: number | string | null;
+  isDefault?: boolean | null;
+  option?: { id: string | number; name?: string | null };
+};
+
+export type Product = {
   id: string | number;
   name: string;
   description?: string;
@@ -7,6 +14,7 @@
   categoryId?: string | number;
   code?: string | number;
   isActive?: boolean | null;
+  productOptions?: ProductOption[];
 };
 
 type FetchProductsOptions = {
@@ -31,14 +39,46 @@ function extractProductsArray(payload: unknown): unknown[] {
 
 function parseNumber(input: unknown): number | undefined {
   if (typeof input === "number") return Number.isFinite(input) ? input : undefined;
-  if (typeof input === "string") {
+  if (typeof input === "string" && input.trim() !== "") {
     const parsed = Number(input);
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
 }
 
-function normalizeProduct(raw: any): Product | null {
+function normalizeProductOption(raw: any): ProductOption | null {
+  if (!raw) return null;
+
+  const id = raw.id ?? raw.optionId ?? raw.option_id ?? raw.code ?? raw.uuid;
+  if (id === undefined || id === null) return null;
+
+  const extraRaw =
+    raw.precio_extra ??
+    raw.precioExtra ??
+    raw.extraPrice ??
+    raw.priceExtra ??
+    raw.additionalPrice ??
+    raw.extra ??
+    null;
+  const extraParsed = parseNumber(extraRaw);
+
+  const option =
+    raw.option && typeof raw.option === "object"
+      ? {
+          id: raw.option.id ?? raw.optionId ?? raw.option_id ?? raw.option?.code ?? raw.option?.uuid ?? id,
+          name: raw.option.name ?? raw.option.label ?? raw.option.descripcion ?? null,
+        }
+      : undefined;
+
+  return {
+    id,
+    precio_extra: extraParsed ?? (typeof extraRaw === "string" ? extraRaw : extraRaw ?? null),
+    isDefault: raw.isDefault ?? raw.default ?? raw.is_default ?? null,
+    option,
+  };
+}
+
+export function normalizeProduct(raw: any): Product | null {
   if (!raw) return null;
 
   const id = raw.id ?? raw.code ?? raw.slug ?? raw.uuid;
@@ -54,6 +94,18 @@ function normalizeProduct(raw: any): Product | null {
       ? raw.image
       : null;
 
+  const optionsRaw: unknown[] | null = Array.isArray(raw.productOptions)
+    ? raw.productOptions
+    : Array.isArray(raw.product_options)
+      ? raw.product_options
+      : null;
+
+  const productOptions = optionsRaw
+    ? optionsRaw
+        .map((opt) => normalizeProductOption(opt))
+        .filter((opt): opt is ProductOption => Boolean(opt))
+    : undefined;
+
   return {
     id,
     name: String(name),
@@ -63,6 +115,7 @@ function normalizeProduct(raw: any): Product | null {
     categoryId: raw.categoryId ?? raw.category_id ?? raw.category?.id,
     code: raw.code ?? null,
     isActive: raw.isActive ?? raw.active ?? null,
+    productOptions,
   };
 }
 
@@ -104,3 +157,38 @@ export async function fetchProductsByCategory(
     return [];
   }
 }
+
+type FetchProductByIdOptions = {
+  baseUrl?: string | null;
+  signal?: AbortSignal;
+};
+
+export async function fetchProductById(
+  productId: string | number,
+  { baseUrl, signal }: FetchProductByIdOptions = {}
+): Promise<Product | null> {
+  const base = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  if (!base) return null;
+
+  try {
+    const res = await fetch(`${base}/products/${encodeURIComponent(String(productId))}`, {
+      cache: "no-store",
+      signal,
+    });
+    if (!res.ok) return null;
+
+    const json = await res.json();
+    const raw =
+      json && typeof json === "object" && "data" in json && json.data && !Array.isArray((json as any).data)
+        ? (json as any).data
+        : json && typeof (json as any)?.data === "object" && !Array.isArray((json as any).data?.data)
+          ? (json as any).data.data
+          : json;
+
+    return normalizeProduct(raw) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+

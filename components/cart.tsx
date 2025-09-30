@@ -4,7 +4,6 @@ import { useState } from "react"
 import { X, Plus, Minus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useCart } from "@/components/cart-context"
-import { CheckoutForm } from "@/components/checkout-form"
 
 interface CartProps {
   onClose: () => void
@@ -23,9 +22,7 @@ export function Cart({ onClose }: CartProps) {
     setShowCheckout(false)
   }
 
-  if (showCheckout) {
-    return <CheckoutForm onBack={handleBackToCart} onClose={onClose} />
-  }
+
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-end">
