@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useCart } from "@/components/cart-context";
 import ClosedBanner from "@/components/closed-banner";
+import InfoBanner from "@/components/info-banner";
 import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
 import { fixImageUrl } from "@/lib/img";
 import BlockingLoader from "@/components/blocking-loader";
@@ -435,6 +436,7 @@ const totalPromo   = unitPromo   * qty;
       <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
       <div className="h-[6px] w-full bg-white" />
       <ClosedBanner />
+      <InfoBanner />
 
       <div className="mx-auto w-full max-w-6xl p-4 grid grid-cols-1 gap-4 md:grid-cols-2">
         {/* Izquierda */}

@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useCart } from "@/components/cart-context";
 import { Button } from "@/components/ui/button";
 import ClosedBanner from "@/components/closed-banner";
+import InfoBanner from "@/components/info-banner";
 import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
 import BlockingLoader from "@/components/blocking-loader";
 import { fixImageUrl } from "@/lib/img";
@@ -333,6 +334,7 @@ export default function ProductDetailPage() {
       />
       <div className="h-[6px] w-full bg-white" />
       <ClosedBanner />
+      <InfoBanner />
 
       {!prod && !loading ? (
         <div className="mx-auto w-full max-w-6xl p-4">

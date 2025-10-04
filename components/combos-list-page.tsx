@@ -6,6 +6,7 @@ import Image from "next/image";
 
 import SiteHeader from "@/components/site-header";
 import ClosedBanner from "@/components/closed-banner";
+import InfoBanner from "@/components/info-banner";
 import BlockingLoader from "@/components/blocking-loader";
 import { fixImageUrl } from "@/lib/img";
 import { isAllowedForDelivery } from "@/lib/channel";
@@ -138,6 +139,7 @@ export default function CombosListScreen({ initialCombos, categoryName, category
       <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
       <div className="h-[6px] w-full bg-white" />
       <ClosedBanner />
+      <InfoBanner />
 
       <div className="mx-auto w-full max-w-6xl px-4 pt-3 pb-2">
         <h2 className="text-2xl font-extrabold uppercase">{title}</h2>
