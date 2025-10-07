@@ -9,7 +9,8 @@ import { useCart } from "@/components/cart-context";
 import { Button } from "@/components/ui/button";
 import ClosedBanner from "@/components/closed-banner";
 import InfoBanner from "@/components/info-banner";
-import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
+import { STORE_CLOSED_MSG } from "@/lib/flags";
+import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import BlockingLoader from "@/components/blocking-loader";
 import { fixImageUrl } from "@/lib/img";
 
@@ -143,7 +144,12 @@ export default function ProductDetailPage() {
   const { addToCart } = useCart();
 
   const [justAdded, setJustAdded] = useState(false);
+  const { data: status } = useBusinessStatusSmart();
+  // mientras carga: true => botón habilitado (si preferís bloquear hasta cargar, cambiá a !!status?.web.open)
+  const isWebOpen  = status?.web?.open ?? true;
+  const pickupOnly = !!(status?.pos?.open && status?.web?.open === false);
 
+  const disabledByStatus = !isWebOpen;
   
 
   const [prod, setProd] = useState<Product | null>(null);
@@ -466,14 +472,19 @@ export default function ProductDetailPage() {
                   hover:bg-[color-mix(in_srgb,var(--brand-color),#000_12%)]
                   active:bg-[color-mix(in_srgb,var(--brand-color),#000_18%)]
                   hover:brightness-95 active:brightness-90
-                  disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none
-                  ${!STORE_OPEN ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`}
-                onClick={STORE_OPEN ? handleAdd : undefined}
-                disabled={!STORE_OPEN || (loading && !prod)}
-                title={!STORE_OPEN ? STORE_CLOSED_MSG : undefined}
-                aria-disabled={!STORE_OPEN || (loading && !prod)}
+                  disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none`}
+                onClick={isWebOpen ? handleAdd : undefined}
+                disabled={disabledByStatus || (loading && !prod)}
+                title={
+                  disabledByStatus
+                    ? (pickupOnly ? "Solo tomamos pedidos en el local." : STORE_CLOSED_MSG)
+                    : undefined
+                }
+                aria-disabled={disabledByStatus || (loading && !prod)}
               >
-                {!STORE_OPEN ? "Local cerrado" : justAdded ? "Agregado ✔" : "Agregar al Carrito"}
+                {disabledByStatus
+                  ? (pickupOnly ? "Solo en el local" : "Local cerrado")
+                  : (justAdded ? "Agregado ✔" : "Agregar al Carrito")}
               </Button>
             </div>
           </div>

@@ -8,15 +8,17 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useMemo } from "react";
 import { Trash2 } from "lucide-react";
-import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
-import BlockingLoader from "@/components/blocking-loader"; // (no se usa ahora, lo podés quitar si querés)
+import ClosedBanner from "@/components/closed-banner";
+import InfoBanner from "@/components/info-banner";
+import { STORE_CLOSED_MSG } from "@/lib/flags";
+import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 
 const fmt = (n: number) => `$${n.toLocaleString("es-AR")}`;
 
 // ranking de tamaños: triple -> doble -> simple
 const SIZE_RANK: Record<string, number> = { triple: 0, doble: 1, simple: 2 };
 
-// Tipo auxiliar para no romper si aún no agregaste los campos del combo al CartItem
+// Tipo auxiliar para combos en items del carrito
 type MaybeCombo = {
   kind?: string;
   comboName?: string;
@@ -25,19 +27,24 @@ type MaybeCombo = {
     isMain?: boolean;
     qty?: number;
     name?: string;
-    // 👇 NUEVO (para items que vienen de categorías incluidas)
     isInclusion?: boolean;
     inclusionTitle?: string;
     unitPrice?: number; // precio con regla aplicada
     basePrice?: number; // precio original
   }>;
-  optionName?: string; // alias de size si lo preferís
+  optionName?: string;
 };
 
 export default function CartPage() {
   const router = useRouter();
   const { items, updateQuantity, removeFromCart, clearCart, getTotalPrice } =
     useCart();
+
+  // === Estado comercial (igual que en producto/combos) ===
+  const { data: status } = useBusinessStatusSmart();
+  const isWebOpen  = status?.web?.open ?? true;                       // mientras carga, asumimos abierto
+  const pickupOnly = !!(status?.pos?.open && status?.web?.open === false);
+  const disabledByStatus = !isWebOpen;
 
   // Ordenar ítems según regla pedida
   const sortedItems = useMemo(() => {
@@ -64,6 +71,10 @@ export default function CartPage() {
       <SiteHeader showBack onBack={() => router.back()} onCartClick={() => {}} />
       <div className="h-[6px] w-full bg-white" />
 
+      {/* Banners de estado (opcional pero consistente con las otras pantallas) */}
+      <ClosedBanner />
+      <InfoBanner />
+
       <div className="mx-auto w-full max-w-4xl p-4 space-y-4">
         <h2 className="text-xl font-extrabold uppercase">Mi Carrito</h2>
 
@@ -79,8 +90,8 @@ export default function CartPage() {
                 space-y-3
                 overflow-y-auto
                 pr-1
-                max-h-[60vh]            /* móvil */
-                md:max-h-[65vh]         /* desktop */
+                max-h-[60vh]
+                md:max-h-[65vh]
               "
               role="list"
               aria-label="Ítems del carrito"
@@ -123,7 +134,6 @@ export default function CartPage() {
 
                     {/* Texto / detalles */}
                     <div className="flex-1 min-w-0">
-                      {/* nombre SIN chapita al lado */}
                       <div className="font-semibold leading-tight whitespace-normal break-words">
                         {it.name}
                       </div>
@@ -194,8 +204,8 @@ export default function CartPage() {
                         </div>
                       )}
                     </div>
-                    
-                    {/* Columna derecha: COMBO (arriba), cantidad (medio), precio (abajo) */}
+
+                    {/* Columna derecha */}
                     <div
                       className="
                         ml-auto shrink-0
@@ -203,7 +213,6 @@ export default function CartPage() {
                         md:w-auto md:flex-row md:items-center md:gap-3
                       "
                     >
-                      {/* Chapita COMBO */}
                       {isCombo && (
                         <span
                           className="
@@ -216,7 +225,7 @@ export default function CartPage() {
                           COMBO
                         </span>
                       )}
-                    
+
                       {/* Controles de cantidad */}
                       <div className="flex items-center gap-2">
                         <Button
@@ -235,11 +244,11 @@ export default function CartPage() {
                         >
                           −
                         </Button>
-                        
+
                         <div className="w-7 sm:w-8 text-center font-semibold text-sm sm:text-base">
                           {it.quantity}
                         </div>
-                        
+
                         <Button
                           variant="outline"
                           size="icon"
@@ -250,7 +259,7 @@ export default function CartPage() {
                           ＋
                         </Button>
                       </div>
-                        
+
                       {/* Precio */}
                       <div
                         className="
@@ -261,9 +270,7 @@ export default function CartPage() {
                         {fmt(Number(it.finalPrice) || 0)}
                       </div>
                     </div>
-                    </div>
-                 
-                  
+                  </div>
                 );
               })}
             </div>
@@ -287,17 +294,26 @@ export default function CartPage() {
 
               <div className="flex items-center gap-3 flex-nowrap pb-1">
                 <Button
-                  className={`flex-1 text-white transition-colors
-                              bg-[var(--brand-color)]
-                              hover:bg-[color-mix(in_srgb,var(--brand-color),#000_12%)]
-                              active:bg-[color-mix(in_srgb,var(--brand-color),#000_18%)]
-                              hover:brightness-95 active:brightness-90
-                              disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none
-                              ${!STORE_OPEN ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`}
-                  onClick={() => router.push("/checkout")}
+                  className="flex-1 text-white transition-colors
+                             bg-[var(--brand-color)]
+                             hover:bg-[color-mix(in_srgb,var(--brand-color),#000_12%)]
+                             active:bg-[color-mix(in_srgb,var(--brand-color),#000_18%)]
+                             hover:brightness-95 active:brightness-90
+                             disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none"
+                  onClick={isWebOpen ? () => router.push("/checkout") : undefined}
+                  disabled={disabledByStatus}
+                  title={
+                    disabledByStatus
+                      ? (pickupOnly ? "Solo tomamos pedidos en el local." : STORE_CLOSED_MSG)
+                      : undefined
+                  }
+                  aria-disabled={disabledByStatus}
                 >
-                  Realizar Pedido
+                  {disabledByStatus
+                    ? (pickupOnly ? "Solo en el local" : "Local cerrado")
+                    : "Realizar Pedido"}
                 </Button>
+
                 <Button
                   variant="outline"
                   size="icon"

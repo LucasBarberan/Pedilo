@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { useCart } from "@/components/cart-context";
 import ClosedBanner from "@/components/closed-banner";
 import InfoBanner from "@/components/info-banner";
-import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
+import { STORE_CLOSED_MSG } from "@/lib/flags";
+import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import { fixImageUrl } from "@/lib/img";
 import BlockingLoader from "@/components/blocking-loader";
 import { isAllowedForDelivery } from "@/lib/channel";
@@ -38,18 +39,13 @@ const fmt = (n?: number | string | null) => {
   if (n === null || n === undefined) return "-";
   const v = typeof n === "string" ? Number(n) : n;
   if (!Number.isFinite(v)) return "-";
-  // ðŸ‘‡ redondear siempre hacia arriba y sin decimales
   const rounded = Math.ceil(v as number);
   return `$${rounded.toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 };
 
-
 // ordenar opciones: simple -> doble -> triple; default primero si empatan
 const normalize = (s?: string | null) =>
-  (s || "")
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
+  (s || "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
 
 const rankByName = (o: ApiProductOption) => {
   const n = normalize(o.option?.name);
@@ -143,7 +139,14 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   });
   const [inclusionErrors, setInclusionErrors] = useState<Record<string, string | null>>({});
   const [formError, setFormError] = useState<string | null>(null);
-  const loading = false;
+
+  // Igual que en producto: estado comercial
+  const { data: status } = useBusinessStatusSmart();
+  const isWebOpen  = status?.web?.open ?? true; // mientras carga, asumimos abierto
+  const pickupOnly = !!(status?.pos?.open && status?.web?.open === false);
+  const disabledByStatus = !isWebOpen;
+
+  const loading = false; // si en tu caso hay fetch para combo, actualizá este flag
 
   useEffect(() => {
     const options = mainProduct?.productOptions ?? [];
@@ -212,42 +215,34 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   };
 
   // precios
-const baseList = toNum(combo?.basePrice);                              // precio base (lista) del combo
-const baseEff  = toNum(combo?.effectivePrice ?? combo?.basePrice);     // precio base efectivo (promo si aplica)
-const optionExtra = toNum(selectedOption?.precio_extra);
-// Â¿hay promo?
-const hasPromo = Number.isFinite(baseList) && Number.isFinite(baseEff) && baseEff < baseList;
-const promoFactor = hasPromo && baseList > 0 ? Math.max(0, Math.min(1, baseEff / baseList)) : 1;
+  const baseList = toNum(combo?.basePrice);
+  const baseEff  = toNum(combo?.effectivePrice ?? combo?.basePrice);
+  const optionExtra = toNum(selectedOption?.precio_extra);
+  const hasPromo = Number.isFinite(baseList) && Number.isFinite(baseEff) && baseEff < baseList;
+  const promoFactor = hasPromo && baseList > 0 ? Math.max(0, Math.min(1, baseEff / baseList)) : 1;
 
-// total por inclusiones seleccionadas (se mantiene como ya lo teni­as)
-const selectedInclusionsTotal = useMemo(() => {
-  if (!combo) return 0;
-  let total = 0;
-  for (const inc of combo.categoryInclusions ?? []) {
-    const key = String(inc.id);
-    const prods = inclusionsProducts[key] ?? [];
-    const sel = inclusionSelections[key] ?? [];
-    for (const pid of sel) {
-      const p = prods.find((x) => String(x.id) === pid);
-      const raw = toNumber(p?.price);
-      const final = priceWithInclusionRuleAndPromo(raw, inc, promoFactor);
-      if (final) total += final;
+  const selectedInclusionsTotal = useMemo(() => {
+    if (!combo) return 0;
+    let total = 0;
+    for (const inc of combo.categoryInclusions ?? []) {
+      const key = String(inc.id);
+      const prods = inclusionsProducts[key] ?? [];
+      const sel = inclusionSelections[key] ?? [];
+      for (const pid of sel) {
+        const p = prods.find((x) => String(x.id) === pid);
+        const raw = toNumber(p?.price);
+        const final = priceWithInclusionRuleAndPromo(raw, inc, promoFactor);
+        if (final) total += final;
+      }
     }
-  }
-  return total;
-}, [combo, inclusionsProducts, inclusionSelections]);
+    return total;
+  }, [combo, inclusionsProducts, inclusionSelections, promoFactor]);
 
-// totales unitarios (por 1 combo)
-const unitNoPromo = (baseList + optionExtra + selectedInclusionsTotal);
-const unitPromo   = (baseEff  + optionExtra + selectedInclusionsTotal);
+  const unitNoPromo = (baseList + optionExtra + selectedInclusionsTotal);
+  const unitPromo   = (baseEff  + optionExtra + selectedInclusionsTotal);
 
-// totales finales (por cantidad)
-const totalNoPromo = unitNoPromo * qty;
-const totalPromo   = unitPromo   * qty;
-
-
-
-
+  const totalNoPromo = unitNoPromo * qty;
+  const totalPromo   = unitPromo   * qty;
 
   const selectedInclusionItems = useMemo(() => {
     if (!combo) return [];
@@ -279,9 +274,7 @@ const totalPromo   = unitPromo   * qty;
       }
     }
     return out;
-  }, [combo, inclusionsProducts, inclusionSelections]);
-
-  //const total = (comboBase + optionExtra + selectedInclusionsTotal) * qty;
+  }, [combo, inclusionsProducts, inclusionSelections, promoFactor]);
 
   // items
   const mainItem = useMemo(() => combo?.items?.find((i) => i.isMain), [combo]);
@@ -304,9 +297,8 @@ const totalPromo   = unitPromo   * qty;
       selectedOption != null && selectedOption.id != null && !Number.isNaN(Number(selectedOption.id));
 
     // precios para el carrito (ya consideran promo, opciones e inclusiones)
-    const unit = unitPromo;      // unitario efectivo
-    const final = totalPromo;    // total efectivo
-
+    const unit = unitPromo;
+    const final = totalPromo;
 
     const img = heroImg !== "/placeholder.svg" ? heroImg : "";
 
@@ -392,19 +384,15 @@ const totalPromo   = unitPromo   * qty;
       image: img,
       category: "combo",
       quantity: qty,
-
       size: sizeLabelRaw ? sizeLabelRaw.toLowerCase() : undefined,
       observations: notes,
-
       kind: "combo",
       comboName: combo.name,
       comboItems: [...comboItems, ...inclusionAsItems],
-
       productOptionId: hasSelected ? Number(selectedOption!.id) : undefined,
       optionId: hasSelected ? Number((selectedOption as any).option?.id) : undefined,
       optionName: hasSelected ? sizeLabelRaw : undefined,
       priceExtra: optionExtra,
-
       isDefaultCategory: false,
     });
 
@@ -497,7 +485,7 @@ const totalPromo   = unitPromo   * qty;
               {mainProduct?.productOptions?.map((o) => {
                 const active = selectedOptId === o.id;
                 const plus = toNum(o.precio_extra);
-                    return (
+                return (
                   <button
                     key={String(o.id)}
                     disabled={loading}
@@ -511,7 +499,7 @@ const totalPromo   = unitPromo   * qty;
                     <span className="text-sm font-semibold">{plus ? `+${fmt(plus)}` : ""}</span>
                   </button>
                 );
-                })}
+              })}
             </div>
           )}
 
@@ -527,19 +515,9 @@ const totalPromo   = unitPromo   * qty;
                 const isSingle = max <= 1;
                 const title = (inc.name || (inc as any).subcategory?.name || inc.category?.name || "Elige una opcion").toLowerCase();
 
-
-                const optionLabel = (p: any) => {
-                  const raw = toNumber(p.price);
-                  const fin = priceWithInclusionRule(raw, inc);
-                  if (raw === null || fin === null) return p.name;
-                  return raw === fin
-                    ? `${p.name}  ${fmt(fin)}`
-                    : `${p.name}  ${fmt(fin)}  (${fmt(raw)})`;
-                };
-
                 const selectedValue = sel[0] ?? "";
 
-                    return (
+                return (
                   <div key={key} data-inc={key} className="space-y-2">
                     <div className="text-sm font-semibold">
                       {title} <span className="ml-2 text-xs font-normal opacity-60">({min}/{max})</span>
@@ -599,7 +577,7 @@ const totalPromo   = unitPromo   * qty;
                                 const raw = toNumber(p.price);
                                 const fin = priceWithInclusionRule(raw, inc);
                                 const checked = sel.includes(String(p.id));
-                                  return (
+                                return (
                                   <button
                                     key={String(p.id)}
                                     type="button"
@@ -673,7 +651,7 @@ const totalPromo   = unitPromo   * qty;
                               const fin = priceWithInclusionRuleAndPromo(raw, inc, promoFactor);
                               const checked = sel.includes(String(p.id));
 
-                                return (
+                              return (
                                 <label
                                   key={String(p.id)}
                                   className={`flex items-center justify-between gap-3 rounded-lg border p-2 cursor-pointer ${
@@ -714,7 +692,7 @@ const totalPromo   = unitPromo   * qty;
                     )}
                   </div>
                 );
-                })}
+              })}
             </div>
           )}
 
@@ -726,13 +704,13 @@ const totalPromo   = unitPromo   * qty;
             ) : (
               <ul className="list-disc pl-5 text-sm">
                 {extras.map((it) => {
-                const quantity = Number(it.quantity ?? 0);
-                return (
-                  <li key={String(it.id)}>
-                    {it.product?.name ?? "Item"} {quantity > 1 ? `x${quantity}` : ""}
-                  </li>
-                );
-              })}
+                  const quantity = Number(it.quantity ?? 0);
+                  return (
+                    <li key={String(it.id)}>
+                      {it.product?.name ?? "Item"} {quantity > 1 ? `x${quantity}` : ""}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -789,52 +767,33 @@ const totalPromo   = unitPromo   * qty;
                 )}
               </div>
             </div>
-              
+
             <Button
               className={`w-full text-white transition-colors
                           bg-[var(--brand-color)]
                           hover:bg-[color-mix(in_srgb,var(--brand-color),#000_12%)]
                           active:bg-[color-mix(in_srgb,var(--brand-color),#000_18%)]
                           hover:brightness-95 active:brightness-90
-                          disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none
-                          ${!STORE_OPEN ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`}
-              onClick={STORE_OPEN ? handleAdd : undefined}
-              disabled={!STORE_OPEN || loading}
-              title={!STORE_OPEN ? STORE_CLOSED_MSG : undefined}
-              aria-disabled={!STORE_OPEN}
+                          disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none`}
+              onClick={isWebOpen ? handleAdd : undefined}
+              disabled={disabledByStatus || loading}
+              title={
+                disabledByStatus
+                  ? (pickupOnly ? "Solo tomamos pedidos en el local." : STORE_CLOSED_MSG)
+                  : undefined
+              }
+              aria-disabled={disabledByStatus || loading}
             >
-              {!STORE_OPEN ? "Local cerrado" : justAdded ? "Agregado ✔" : "Agregar al Carrito"}
+              {disabledByStatus
+                ? (pickupOnly ? "Solo en el local" : "Local cerrado")
+                : (justAdded ? "Agregado ✔" : "Agregar al Carrito")}
             </Button>
           </div>
         </div>
       </div>
 
-      {/* Overlay bloqueante: solo si NO tengo snapshot */}
+      {/* Overlay bloqueante: si tenés loading real */}
       <BlockingLoader open={loading} message="Cargando combo..." />
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
