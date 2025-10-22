@@ -44,8 +44,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   });
 
   const DELIVERY_ENABLED =
-  (process.env.NEXT_PUBLIC_DELIVERY_ENABLED || "false").toLowerCase() === "true";
-  const [deliveryMethod, setDeliveryMethod] = useState<"delivery"|"pickup">(
+    (process.env.NEXT_PUBLIC_DELIVERY_ENABLED || "false").toLowerCase() === "true";
+  const [deliveryMethod, setDeliveryMethod] = useState<"delivery" | "pickup">(
     DELIVERY_ENABLED ? "delivery" : "pickup"
   );
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "mp">("cash");
@@ -60,7 +60,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
   const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
   const CHECKOUT_NOTES_MAX = 50; // o el número que prefieras
-  
+
 
 
   // ORDEN a usar en Resumen + WhatsApp (considera size u optionName)
@@ -83,9 +83,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     });
   }, [items]);
 
-  
 
-  
+
+
 
   // Cargar / guardar datos del cliente en localStorage
   useEffect(() => {
@@ -109,7 +109,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
   const BASE = process.env.NEXT_PUBLIC_API_URL;
   const STORE_NAME = process.env.NEXT_PUBLIC_STORE_NAME || "SRA. BURGA";
-  
+
 
   /** 🔹 Arma el texto de WhatsApp (usa el mismo orden del resumen) */
   function buildWhatsAppText(orderNumber?: number | string) {
@@ -186,28 +186,28 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
     return lines.join("\n");
   }
-  
+
 
   async function submitOrder() {
     if (items.length === 0) {
-    return (
-      <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-6 text-center">
-        Tu carrito está vacío.
-      </div>
-    );
+      return (
+        <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-6 text-center">
+          Tu carrito está vacío.
+        </div>
+      );
     }
     if (!customer.name.trim()) {
-    setFormError("Ingresá tu nombre y apellido.");
-    nameRef.current?.focus();
-    nameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    return;
+      setFormError("Ingresá tu nombre y apellido.");
+      nameRef.current?.focus();
+      nameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
     }
     if (!isPhoneValid(customer.phone)) {
-    setPhoneTouched(true);
-    setFormError("Revisá el teléfono: solo números (8–15 dígitos). Podés usar espacios, +, (), -.");
-    phoneRef.current?.focus();
-    phoneRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    return;
+      setPhoneTouched(true);
+      setFormError("Revisá el teléfono: solo números (8–15 dígitos). Podés usar espacios, +, (), -.");
+      phoneRef.current?.focus();
+      phoneRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
     }
     // si es delivery, pedimos dirección
     if (DELIVERY_ENABLED && deliveryMethod === "delivery" && !customer.address.trim()) {
@@ -293,15 +293,18 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             };
 
         // body
+        const paymentMethodCode =
+          paymentMethod === "cash"
+            ? "CASH"
+            : paymentMethod === "mp"
+              ? "TRANSFER"
+              : "CARD";
+
         const apiBodyRaw: any = {
           items: itemsForApi,
           combos: combosForApi,
-          payment_method:
-            paymentMethod === "cash"
-              ? "CASH"
-              : paymentMethod === "mp"
-                ? "MERCADOPAGO"
-                : "CARD",
+          // New backend expects id/code. Send code; legacy enum deprecated.
+          paymentMethodCode,
           amount_paid: Math.round(Number(total)),
           delivery_info,
           channel,                  // "WEB"
@@ -344,7 +347,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         }
       }
 
-      
+
       // WhatsApp (con número si lo tenemos)
       const businessPhone = process.env.NEXT_PUBLIC_WA_NUMBER || "";
       const textRaw = buildWhatsAppText(createdOrderNumber);
@@ -352,55 +355,55 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       const msg = encodeURIComponent(textRaw);
 
       if (phone) {
-      const schemeUrl = `whatsapp://send?phone=${phone}&text=${msg}`;
-      const webUrl    = `https://wa.me/${phone}?text=${msg}`;
-      const isMobile  = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-          
-      // En desktop vamos directo a WhatsApp Web
-      if (!isMobile) {
-        window.location.assign(webUrl);
-        // o window.open(webUrl, "_blank");
-        return;
+        const schemeUrl = `whatsapp://send?phone=${phone}&text=${msg}`;
+        const webUrl = `https://wa.me/${phone}?text=${msg}`;
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+        // En desktop vamos directo a WhatsApp Web
+        if (!isMobile) {
+          window.location.assign(webUrl);
+          // o window.open(webUrl, "_blank");
+          return;
+        }
+
+        let launched = false;
+        let timer: number;
+
+        const cleanup = () => {
+          launched = true;
+          clearTimeout(timer);
+          window.removeEventListener("pagehide", onHide);
+          window.removeEventListener("blur", onHide);
+          document.removeEventListener("visibilitychange", onVisibility);
+        };
+
+        const onHide = () => cleanup();
+        const onVisibility = () => {
+          if (document.hidden) cleanup();
+        };
+
+        // Si la app se abre, la pestaña pierde foco/visibilidad → cancelamos fallback
+        window.addEventListener("pagehide", onHide, { once: true });
+        window.addEventListener("blur", onHide, { once: true });
+        document.addEventListener("visibilitychange", onVisibility, { once: true });
+
+        // Abrimos la app
+        window.location.assign(schemeUrl);
+
+        // Fallback SOLO si seguimos en esta pestaña con foco
+        timer = window.setTimeout(() => {
+          const stillHere =
+            !launched && document.visibilityState === "visible" && document.hasFocus();
+          if (stillHere) window.location.assign(webUrl);
+        }, 1200);
+      } else {
+        try {
+          await navigator.clipboard.writeText(textRaw);
+          alert("Configurá NEXT_PUBLIC_WA_NUMBER. El detalle del pedido fue copiado al portapapeles.");
+        } catch {
+          alert("Configurá NEXT_PUBLIC_WA_NUMBER. Copiá y pegá este mensaje:\n\n" + textRaw);
+        }
       }
-    
-      let launched = false;
-      let timer: number;
-    
-      const cleanup = () => {
-        launched = true;
-        clearTimeout(timer);
-        window.removeEventListener("pagehide", onHide);
-        window.removeEventListener("blur", onHide);
-        document.removeEventListener("visibilitychange", onVisibility);
-      };
-    
-      const onHide = () => cleanup();
-      const onVisibility = () => {
-        if (document.hidden) cleanup();
-      };
-    
-      // Si la app se abre, la pestaña pierde foco/visibilidad → cancelamos fallback
-      window.addEventListener("pagehide", onHide, { once: true });
-      window.addEventListener("blur", onHide, { once: true });
-      document.addEventListener("visibilitychange", onVisibility, { once: true });
-    
-      // Abrimos la app
-      window.location.assign(schemeUrl);
-    
-      // Fallback SOLO si seguimos en esta pestaña con foco
-      timer = window.setTimeout(() => {
-        const stillHere =
-          !launched && document.visibilityState === "visible" && document.hasFocus();
-        if (stillHere) window.location.assign(webUrl);
-      }, 1200);
-    } else {
-      try {
-        await navigator.clipboard.writeText(textRaw);
-        alert("Configurá NEXT_PUBLIC_WA_NUMBER. El detalle del pedido fue copiado al portapapeles.");
-      } catch {
-        alert("Configurá NEXT_PUBLIC_WA_NUMBER. Copiá y pegá este mensaje:\n\n" + textRaw);
-      }
-    }
 
 
       clearCart();
@@ -428,7 +431,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {/* Columna izquierda: Datos del cliente */}
       <div className="space-y-4">
-        
+
         {/* Entrega — MOVER ARRIBA */}
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-3">Entrega</div>
@@ -437,23 +440,21 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             <div className="flex gap-2">
               <button
                 onClick={() => setDeliveryMethod("delivery")}
-                className={`px-3 py-2 rounded-lg border ${
-                  deliveryMethod === "delivery"
+                className={`px-3 py-2 rounded-lg border ${deliveryMethod === "delivery"
                     ? "border-[var(--brand-color)] bg-[#fff5f2]"
                     : "border-transparent hover:bg-black/5"
-                }`}
+                  }`}
               >
                 Delivery
               </button>
               <button
                 onClick={() => setDeliveryMethod("pickup")}
-                className={`px-3 py-2 rounded-lg border ${
-                  deliveryMethod === "pickup"
+                className={`px-3 py-2 rounded-lg border ${deliveryMethod === "pickup"
                     ? "border-[var(--brand-color)] bg-[#fff5f2]"
                     : "border-transparent hover:bg-black/5"
-                }`}
+                  }`}
               >
-                Retiro en local 
+                Retiro en local
               </button>
             </div>
           ) : (
@@ -463,7 +464,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             </div>
           )}
         </div>
-        
+
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-3">Datos del cliente</div>
 
@@ -489,11 +490,10 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             autoComplete="tel"
             pattern="[0-9\s()+-]{8,15}"
             title="Ingresá solo números; podés usar espacios, +, (), -. Mínimo 8 dígitos."
-            className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 mb-1 ${
-              phoneTouched && !isPhoneValid(customer.phone)
+            className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 mb-1 ${phoneTouched && !isPhoneValid(customer.phone)
                 ? "border-red-500 focus:ring-red-400"
                 : "focus:ring-[var(--brand-color)]"
-            }`}
+              }`}
             value={customer.phone}
             onChange={(e) => {
               const v = e.target.value;
@@ -505,12 +505,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             aria-invalid={phoneTouched && !isPhoneValid(customer.phone)}
             aria-describedby="phone-help"
           />
-          <p id="phone-help" className={`text-xs mb-3 ${
-            phoneTouched && !isPhoneValid(customer.phone) ? "text-red-600" : "text-muted-foreground"
-          }`}>
+          <p id="phone-help" className={`text-xs mb-3 ${phoneTouched && !isPhoneValid(customer.phone) ? "text-red-600" : "text-muted-foreground"
+            }`}>
             * Solo números; podés usar espacios, +, (), -. Mínimo 8 dígitos.
           </p>
-        
+
           {/* Dirección SOLO si delivery */}
           {deliveryMethod === "delivery" && (
             <>
@@ -530,7 +529,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           )}
         </div>
 
-        
+
 
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-3">Pago</div>
@@ -538,8 +537,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             <button
               onClick={() => setPaymentMethod("cash")}
               className={`px-3 py-2 rounded-lg border ${paymentMethod === "cash"
-                  ? "border-[var(--brand-color)] bg-[#fff5f2]"
-                  : "border-transparent hover:bg-black/5"
+                ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                : "border-transparent hover:bg-black/5"
                 }`}
             >
               Efectivo
@@ -547,8 +546,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             <button
               onClick={() => setPaymentMethod("mp")}
               className={`px-3 py-2 rounded-lg border ${paymentMethod === "mp"
-                  ? "border-[var(--brand-color)] bg-[#fff5f2]"
-                  : "border-transparent hover:bg-black/5"
+                ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                : "border-transparent hover:bg-black/5"
                 }`}
             >
               Mercado Pago
@@ -557,40 +556,40 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         </div>
 
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
-        <div className="text-sm font-semibold mb-2">Observaciones</div>
+          <div className="text-sm font-semibold mb-2">Observaciones</div>
 
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value.slice(0, CHECKOUT_NOTES_MAX))} // hard limit
-          maxLength={CHECKOUT_NOTES_MAX}
-          rows={2} // arranca chico
-          placeholder="Usá este campo para indicar timbre roto, forma de pago, referencias del domicilio, etc."
-          className="w-full rounded-md border px-3 py-2 text-sm outline-none
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value.slice(0, CHECKOUT_NOTES_MAX))} // hard limit
+            maxLength={CHECKOUT_NOTES_MAX}
+            rows={2} // arranca chico
+            placeholder="Usá este campo para indicar timbre roto, forma de pago, referencias del domicilio, etc."
+            className="w-full rounded-md border px-3 py-2 text-sm outline-none
                     focus:ring-2 focus:ring-[var(--brand-color)]
                     resize-none min-h-[40px]"
-          onInput={(e) => {
-            // auto-grow hasta un tope para que no se haga gigante
-            const ta = e.currentTarget;
-            ta.style.height = "auto";
-            ta.style.height = Math.min(ta.scrollHeight, 120) + "px"; // ~4–5 líneas
-          }}
-          aria-describedby="checkout-notes-counter"
-        />
+            onInput={(e) => {
+              // auto-grow hasta un tope para que no se haga gigante
+              const ta = e.currentTarget;
+              ta.style.height = "auto";
+              ta.style.height = Math.min(ta.scrollHeight, 120) + "px"; // ~4–5 líneas
+            }}
+            aria-describedby="checkout-notes-counter"
+          />
 
-        <div
-          id="checkout-notes-counter"
-          className="mt-1 text-xs text-muted-foreground text-right"
-        >
-          {notes.length}/{CHECKOUT_NOTES_MAX}
+          <div
+            id="checkout-notes-counter"
+            className="mt-1 text-xs text-muted-foreground text-right"
+          >
+            {notes.length}/{CHECKOUT_NOTES_MAX}
+          </div>
         </div>
-      </div>
       </div>
 
       {/* Columna derecha: Resumen */}
       <div className="space-y-4">
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4 md:sticky md:top-4">
           <div className="text-sm font-semibold mb-3">Resumen</div>
-                
+
           {/* LISTA SCROLLEABLE */}
           <div className="space-y-2 max-h-[45vh] md:max-h-[55vh] overflow-y-auto pr-1">
             {sortedItems.map((it: any) => {
@@ -598,7 +597,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               const comboData = it as MaybeCombo;
               const isCombo = comboData.kind === "combo" || Array.isArray(comboData.comboItems);
               const sizeLabel = (it.size as string) || (comboData.optionName as string) || undefined;
-            
+
               if (!isCombo) {
                 return (
                   <div key={it.uniqueId} className="flex items-start justify-between">
@@ -617,10 +616,10 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                   </div>
                 );
               }
-            
+
               const main = comboData.comboItems?.find((x) => x.isMain);
               const extras = comboData.comboItems?.filter((x) => !x.isMain) || [];
-            
+
               return (
                 <div key={it.uniqueId} className="flex items-start justify-between">
                   <div className="text-sm">
@@ -631,7 +630,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                       </span>
                     </div>
                     <div className="text-muted-foreground">{it.quantity} x {fmt(unit)}</div>
-              
+
                     <div className="mt-1 text-xs text-muted-foreground space-y-1">
                       {main && (
                         <div>
@@ -656,7 +655,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                       {it.observations?.trim() ? <div>Obs: {it.observations.trim()}</div> : null}
                     </div>
                   </div>
-                    
+
                   <div className="text-sm font-semibold">
                     {fmt(it.finalPrice || it.price * it.quantity)}
                   </div>
@@ -664,7 +663,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               );
             })}
           </div>
-          
+
           {/* FOOTER FIJO DENTRO DE LA CARD */}
           <div className="flex items-center justify-between border-t mt-3 pt-3 bg-white/0">
             <div className="text-sm font-semibold">Total:</div>
@@ -672,20 +671,20 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           </div>
         </div>
 
-              {formError && (
-            <div className="mx-auto w-full max-w-6xl px-4">
-              <div className="mb-3 rounded-xl border border-red-200 bg-red-50 text-red-700 p-3 flex items-start justify-between">
-                <div className="text-sm">⚠️ {formError}</div>
-                <button
-                  onClick={() => setFormError("")}
-                  className="ml-3 rounded-md px-2 py-1 hover:bg-red-100"
-                  aria-label="Cerrar advertencia"
-                >
-                  ✕
-                </button>
-              </div>
+        {formError && (
+          <div className="mx-auto w-full max-w-6xl px-4">
+            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 text-red-700 p-3 flex items-start justify-between">
+              <div className="text-sm">⚠️ {formError}</div>
+              <button
+                onClick={() => setFormError("")}
+                className="ml-3 rounded-md px-2 py-1 hover:bg-red-100"
+                aria-label="Cerrar advertencia"
+              >
+                ✕
+              </button>
             </div>
-          )}
+          </div>
+        )}
 
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4 space-y-2">
           <Button className={`w-full text-white transition-colors
