@@ -33,7 +33,17 @@ export default function HomeScreen({ initialCategories, apiBase }: HomeScreenPro
       setLoading(true);
       try {
         const data = await fetchCategories({ baseUrl: apiBase ?? undefined, signal: controller.signal });
-        if (!cancelled) setCategories(data);
+        if (!cancelled) {
+          // 🔹 Ordenar: primero las categorías de tipo combo
+          const sorted = [...data].sort((a, b) => {
+            const aIsCombo = !!a.isComboCategory;
+            const bIsCombo = !!b.isComboCategory;
+            if (aIsCombo && !bIsCombo) return -1;
+            if (!aIsCombo && bIsCombo) return 1;
+            return 0; // mantiene el orden original del resto
+          });
+          setCategories(sorted);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -49,6 +59,15 @@ export default function HomeScreen({ initialCategories, apiBase }: HomeScreenPro
 
   const handleCartClick = () => router.push("/carrito");
 
+  // 🔹 Aplicar el mismo criterio si las categorías vienen del SSR
+  const sortedCategories = [...categories].sort((a, b) => {
+    const aIsCombo = !!a.isComboCategory;
+    const bIsCombo = !!b.isComboCategory;
+    if (aIsCombo && !bIsCombo) return -1;
+    if (!aIsCombo && bIsCombo) return 1;
+    return 0;
+  });
+
   return (
     <div className="min-h-screen bg-background relative">
       <SiteHeader onCartClick={handleCartClick} />
@@ -57,7 +76,7 @@ export default function HomeScreen({ initialCategories, apiBase }: HomeScreenPro
       <InfoBanner />
 
       <CategoryMenu
-        categories={categories}
+        categories={sortedCategories}
         onCartClick={handleCartClick}
       />
 

@@ -57,8 +57,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const nameRef = useRef<HTMLInputElement>(null);
   const phoneRef = useRef<HTMLInputElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
+  const DELIVERY_FEE = Number(process.env.NEXT_PUBLIC_DELIVERY_FEE || 0);
 
-  const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
+ const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
+
+  const totalWithDelivery = useMemo(() => {
+    return deliveryMethod === "delivery" ? total + DELIVERY_FEE : total;
+  }, [total, deliveryMethod, DELIVERY_FEE]);
   const CHECKOUT_NOTES_MAX = 50; // o el número que prefieras
 
 
@@ -182,7 +187,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     });
 
     lines.push("");
-    lines.push(`*Total:* ${fmt(total)}`);
+    
+    if (deliveryMethod === "delivery" && DELIVERY_FEE > 0) {
+      lines.push(`*Envío:* ${fmt(DELIVERY_FEE)}`);
+    }
+    lines.push(`*Total:* ${fmt(totalWithDelivery)}`);
 
     return lines.join("\n");
   }
@@ -353,11 +362,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       const textRaw = buildWhatsAppText(createdOrderNumber);
       const phone = businessPhone.replace(/[^\d]/g, "");             // E.164 sin +
       const msg = encodeURIComponent(textRaw);
+      
 
       if (phone) {
         const schemeUrl = `whatsapp://send?phone=${phone}&text=${msg}`;
         const webUrl = `https://wa.me/${phone}?text=${msg}`;
         const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        
 
         // En desktop vamos directo a WhatsApp Web
         if (!isMobile) {
@@ -462,6 +473,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--brand-color)] bg-[#fff5f2]">
               <span className="text-sm font-medium">Retiro en local</span>
             </div>
+          )}
+          {deliveryMethod === "delivery" && DELIVERY_FEE > 0 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Se agregará un costo de envío de {fmt(DELIVERY_FEE)} al total.
+            </p>
           )}
         </div>
 
@@ -666,8 +682,20 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
           {/* FOOTER FIJO DENTRO DE LA CARD */}
           <div className="flex items-center justify-between border-t mt-3 pt-3 bg-white/0">
-            <div className="text-sm font-semibold">Total:</div>
-            <div className="text-xl font-extrabold text-[var(--brand-color)]">{fmt(total)}</div>
+            <div className="w-full space-y-1">
+              {deliveryMethod === "delivery" && DELIVERY_FEE > 0 && (
+                <div className="flex items-center justify-between text-sm text-muted-foreground">
+                  <span>Envío</span>
+                  <span>{fmt(DELIVERY_FEE)}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold">Total:</span>
+                <span className="text-xl font-extrabold text-[var(--brand-color)]">
+                  {fmt(totalWithDelivery)}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 
