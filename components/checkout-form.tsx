@@ -189,8 +189,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     lines.push("");
     
     if (deliveryMethod === "delivery" && DELIVERY_FEE > 0) {
+      lines.push(`*Sub Total:* ${fmt(total)}`);
       lines.push(`*Envío:* ${fmt(DELIVERY_FEE)}`);
+      lines.push("");
     }
+    
     lines.push(`*Total:* ${fmt(totalWithDelivery)}`);
 
     return lines.join("\n");
@@ -683,6 +686,12 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           {/* FOOTER FIJO DENTRO DE LA CARD */}
           <div className="flex items-center justify-between border-t mt-3 pt-3 bg-white/0">
             <div className="w-full space-y-1">
+              {deliveryMethod === "delivery" && DELIVERY_FEE > 0 && (
+                <div className="flex items-center justify-between text-sm text-muted-foreground">
+                  <span>Sub Total</span>
+                  <span>{fmt(total)}</span>
+                </div>
+              )}
               {deliveryMethod === "delivery" && DELIVERY_FEE > 0 && (
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                   <span>Envío</span>
