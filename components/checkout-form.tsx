@@ -68,7 +68,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
 
 
-  // ORDEN a usar en Resumen + WhatsApp (considera size u optionName)
+  // ORDEN a usar en Resumen + WhatsApp (considera selectedOptions, size u optionName)
   const sortedItems = useMemo(() => {
     return [...items].sort((a: any, b: any) => {
       // 1) Categorías default primero
@@ -77,8 +77,25 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       if (da !== db) return da - db;
 
       // 2) Tamaño: triple -> doble -> simple (sin tamaño al final)
-      const sa = String((a.size || (a as MaybeCombo).optionName || "")).toLowerCase();
-      const sb = String((b.size || (b as MaybeCombo).optionName || "")).toLowerCase();
+      // Intentar obtener el tamaño desde selectedOptions primero
+      let sa = "";
+      if (a.selectedOptions && a.selectedOptions.length > 0) {
+        const sizeOpt = a.selectedOptions.find((opt: any) => opt.tipo?.toLowerCase() === "tamaño");
+        sa = sizeOpt ? String(sizeOpt.optionName || "").toLowerCase() : "";
+      }
+      if (!sa) {
+        sa = String((a.size || (a as MaybeCombo).optionName || "")).toLowerCase();
+      }
+
+      let sb = "";
+      if (b.selectedOptions && b.selectedOptions.length > 0) {
+        const sizeOpt = b.selectedOptions.find((opt: any) => opt.tipo?.toLowerCase() === "tamaño");
+        sb = sizeOpt ? String(sizeOpt.optionName || "").toLowerCase() : "";
+      }
+      if (!sb) {
+        sb = String((b.size || (b as MaybeCombo).optionName || "")).toLowerCase();
+      }
+
       const ra = SIZE_RANK[sa] ?? 99;
       const rb = SIZE_RANK[sb] ?? 99;
       if (ra !== rb) return ra - rb;
@@ -104,10 +121,54 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       localStorage.setItem("checkout.customer", JSON.stringify(customer));
     } catch { }
   }, [customer]);
-  // válido: entre 8 y 15 dígitos; permite separadores comunes
+  // Validación mejorada de teléfono
   const isPhoneValid = (v: string) => {
+    // Extraer solo dígitos
     const digits = v.replace(/\D/g, "");
-    return digits.length >= 8 && digits.length <= 15 && !/[^0-9\s()+-]/.test(v);
+
+    // Debe tener entre 8 y 15 dígitos
+    if (digits.length < 8 || digits.length > 15) return false;
+
+    // No permitir caracteres inválidos
+    if (!/^[0-9\s()+-]+$/.test(v)) return false;
+
+    // 🚫 RECHAZAR: números que empiecen con 0 (excepto si es +54 al inicio)
+    // Ejemplos rechazados: 03537604893, 0353715604893
+    if (digits.startsWith('0') && !v.trim().startsWith('+')) {
+      return false;
+    }
+
+    // 🚫 RECHAZAR: números con "15" después del código de área
+    // Patrón: 54 + código área + 15 + número (ej: 5411*15*5554444)
+    // o directamente código área + 15 (ej: 11*15*5554444)
+    if (/^(54)?[0-9]{2,4}15/.test(digits)) {
+      return false;
+    }
+
+    return true;
+  };
+
+  // Obtener mensaje de error específico para el teléfono
+  const getPhoneErrorMessage = (v: string) => {
+    const digits = v.replace(/\D/g, "");
+
+    if (digits.startsWith('0') && !v.trim().startsWith('+')) {
+      return "❌ No incluyas el 0 inicial del código de área";
+    }
+
+    if (/^(54)?[0-9]{2,4}15/.test(digits)) {
+      return "❌ No incluyas el 15 antes del número";
+    }
+
+    if (digits.length < 8) {
+      return "El teléfono es muy corto (mín. 8 dígitos)";
+    }
+
+    if (digits.length > 15) {
+      return "El teléfono es muy largo (máx. 15 dígitos)";
+    }
+
+    return "Revisá el formato del teléfono";
   };
   // debajo de isPhoneValid:
   const isNonEmpty = (s: string) => !!s.trim();
@@ -145,15 +206,21 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       const isCombo =
         comboData.kind === "combo" || Array.isArray(comboData.comboItems);
 
-      const sizeLabel =
-        (it.size as string) ||
-        (comboData.optionName as string) ||
-        undefined;
+      // Construir label de opciones
+      let optionsLabel = "";
+      if (it.selectedOptions && it.selectedOptions.length > 0) {
+        // Usar selectedOptions (nuevo formato)
+        const optionNames = it.selectedOptions.map((opt: any) => opt.optionName).join(" + ");
+        optionsLabel = ` (${optionNames})`;
+      } else {
+        // Fallback para compatibilidad
+        const sizeLabel = (it.size as string) || (comboData.optionName as string);
+        if (sizeLabel) optionsLabel = ` (tamaño: ${sizeLabel})`;
+      }
 
       if (!isCombo) {
         lines.push(
-          `• ${it.quantity} x ${it.name}${sizeLabel ? ` (tamaño: ${sizeLabel})` : ""
-          } – ${fmt(unit)} c/u`
+          `• ${it.quantity} x ${it.name}${optionsLabel} – ${fmt(unit)} c/u`
         );
         if (it.observations?.trim()) {
           lines.push(`   Obs: ${it.observations.trim()}`);
@@ -171,8 +238,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
         if (main) {
           lines.push(
-            `   · Principal: ${main.name || "Producto"}${sizeLabel ? ` (tamaño: ${sizeLabel})` : ""
-            }${main.qty && main.qty > 1 ? ` x${main.qty}` : ""}`
+            `   · Principal: ${main.name || "Producto"}${optionsLabel}${main.qty && main.qty > 1 ? ` x${main.qty}` : ""}`
           );
         }
         if (extras.length > 0) {
@@ -216,7 +282,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     }
     if (!isPhoneValid(customer.phone)) {
       setPhoneTouched(true);
-      setFormError("Revisá el teléfono: solo números (8–15 dígitos). Podés usar espacios, +, (), -.");
+      const errorMsg = getPhoneErrorMessage(customer.phone);
+      setFormError(errorMsg);
       phoneRef.current?.focus();
       phoneRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
@@ -255,14 +322,33 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               quantity: Number(it.quantity),
               unit_price: unitCombo,
               comment: it.observations?.trim() || null,
-              items: (it.comboItems || []).map((ci: any) => ({
-                product_id: Number(ci.productId),
-                quantity: Number(ci.qty) || 1,
-                ...(ci.option?.id ? { option_ids: [Number(ci.option.id)] } : {}),
-                ...(ci.isMain && it.observations?.trim()
-                  ? { comment: it.observations.trim() }
-                  : {}),
-              })),
+              items: (it.comboItems || []).map((ci: any) => {
+                // 🔒 CRÍTICO: La cantidad del item interno SIEMPRE es la del backend
+                // NO se multiplica por it.quantity (cantidad de combos)
+                // El backend maneja la multiplicación: combo.quantity × item.quantity
+                const itemQty = Number(ci.qty) || 1;
+
+                const itemPayload: any = {
+                  product_id: Number(ci.productId),
+                  quantity: itemQty,  // Esta qty viene del backend y NO debe cambiar
+                };
+
+                // Si es el producto principal Y el combo tiene selectedOptions, usarlas
+                if (ci.isMain && it.selectedOptions && it.selectedOptions.length > 0) {
+                  itemPayload.option_ids = it.selectedOptions.map((opt: any) => Number(opt.productOptionId));
+                }
+                // Fallback: si tiene opción legacy en el comboItem
+                else if (ci.option?.id) {
+                  itemPayload.option_ids = [Number(ci.option.id)];
+                }
+
+                // Agregar comentario si es el principal
+                if (ci.isMain && it.observations?.trim()) {
+                  itemPayload.comment = it.observations.trim();
+                }
+
+                return itemPayload;
+              }),
             });
           } else {
             // producto normal
@@ -276,7 +362,15 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               unit_price: unit,
             };
             if (it.observations?.trim()) payload.comment = it.observations.trim();
-            if (it.productOptionId) payload.option_ids = [Number(it.productOptionId)];
+
+            // Enviar opciones seleccionadas
+            if (it.selectedOptions && it.selectedOptions.length > 0) {
+              payload.option_ids = it.selectedOptions.map(opt => Number(opt.productOptionId));
+            } else if (it.productOptionId) {
+              // Fallback para compatibilidad
+              payload.option_ids = [Number(it.productOptionId)];
+            }
+
             itemsForApi.push(payload);
           }
         }
@@ -507,8 +601,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             type="tel"
             inputMode="numeric"
             autoComplete="tel"
-            pattern="[0-9\s()+-]{8,15}"
-            title="Ingresá solo números; podés usar espacios, +, (), -. Mínimo 8 dígitos."
+            pattern="[0-9\s()+\-]{8,15}"
+            title="Sin 0 inicial ni 15. Ej: 1155554444 o +541155554444"
             className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 mb-1 ${phoneTouched && !isPhoneValid(customer.phone)
                 ? "border-red-500 focus:ring-red-400"
                 : "focus:ring-[var(--brand-color)]"
@@ -517,16 +611,20 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             onChange={(e) => {
               const v = e.target.value;
               setCustomer({ ...customer, phone: v });
-              if (formError && isPhoneValid(v) && /tel|tel[eé]fono/i.test(formError)) setFormError("");
+              if (formError && isPhoneValid(v)) setFormError("");
             }}
             onBlur={() => setPhoneTouched(true)}
-            placeholder="Ej: 11 5555 5555"
+            placeholder="Ej: 1155554444"
             aria-invalid={phoneTouched && !isPhoneValid(customer.phone)}
             aria-describedby="phone-help"
           />
           <p id="phone-help" className={`text-xs mb-3 ${phoneTouched && !isPhoneValid(customer.phone) ? "text-red-600" : "text-muted-foreground"
             }`}>
-            * Solo números; podés usar espacios, +, (), -. Mínimo 8 dígitos.
+            {phoneTouched && !isPhoneValid(customer.phone) ? (
+              getPhoneErrorMessage(customer.phone)
+            ) : (
+              "* Sin 0 inicial ni 15. Ejemplos: 1155554444 o +541155554444"
+            )}
           </p>
 
           {/* Dirección SOLO si delivery */}

@@ -6,6 +6,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useCart } from "@/components/cart-context";
 import ClosedBanner from "@/components/closed-banner";
 import InfoBanner from "@/components/info-banner";
@@ -126,9 +127,11 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   const inclusionsProducts = initialInclusionProducts;
 
   const [selectedOptId, setSelectedOptId] = useState<string | number | null>(null);
+  const [selectedExtraIds, setSelectedExtraIds] = useState<Set<string | number>>(new Set());
   const [qty, setQty] = useState(1);
   const [notes, setNotes] = useState("");
   const [justAdded, setJustAdded] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [openIncId, setOpenIncId] = useState<string | null>(null);
   const [inclusionSelections, setInclusionSelections] = useState<Record<string, string[]>>(() => {
     const map: Record<string, string[]> = {};
@@ -189,11 +192,31 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     };
   }, []);
 
-  // opcion seleccionada
+  // Separar opciones por tipo
+  const { sizeOptions, extraOptions } = useMemo(() => {
+    if (!mainProduct?.productOptions?.length) {
+      return { sizeOptions: [], extraOptions: [] };
+    }
+    const sizes = mainProduct.productOptions.filter(
+      (opt) => opt.option?.tipo?.toLowerCase() === "tamaño"
+    );
+    const extras = mainProduct.productOptions.filter(
+      (opt) => opt.option?.tipo?.toLowerCase() === "extra"
+    );
+    return { sizeOptions: sizes, extraOptions: extras };
+  }, [mainProduct]);
+
+  // opción de tamaño seleccionada
   const selectedOption = useMemo(() => {
-    if (!mainProduct?.productOptions?.length) return undefined;
-    return mainProduct.productOptions.find((o) => o.id === selectedOptId);
-  }, [mainProduct, selectedOptId]);
+    if (!sizeOptions.length) return undefined;
+    return sizeOptions.find((o) => o.id === selectedOptId);
+  }, [sizeOptions, selectedOptId]);
+
+  // opciones extra seleccionadas
+  const selectedExtras = useMemo(() => {
+    if (!extraOptions.length) return [];
+    return extraOptions.filter((o) => selectedExtraIds.has(o.id));
+  }, [extraOptions, selectedExtraIds]);
 
   // helpers inclusiones
   const toggleSelectInclusion = (inc: CategoryInclusion, prodId: string) => {
@@ -217,7 +240,9 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   // precios
   const baseList = toNum(combo?.basePrice);
   const baseEff  = toNum(combo?.effectivePrice ?? combo?.basePrice);
-  const optionExtra = toNum(selectedOption?.precio_extra);
+  const sizeExtra = toNum(selectedOption?.precio_extra);
+  const extrasTotal = selectedExtras.reduce((sum, opt) => sum + toNum(opt.precio_extra), 0);
+  const optionExtra = sizeExtra + extrasTotal;
   const hasPromo = Number.isFinite(baseList) && Number.isFinite(baseEff) && baseEff < baseList;
   const promoFactor = hasPromo && baseList > 0 ? Math.max(0, Math.min(1, baseEff / baseList)) : 1;
 
@@ -291,6 +316,13 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
 
   const handleAdd = () => {
     if (!combo) return;
+    if (submitting) return; // 🔒 Prevenir doble click
+
+    // Validar que si hay opciones de tamaño, se haya seleccionado una
+    if (sizeOptions.length > 0 && !selectedOptId) {
+      setFormError("Por favor selecciona un tamaño");
+      return;
+    }
 
     const sizeLabelRaw = (selectedOption?.option?.name || "").trim();
     const hasSelected =
@@ -374,7 +406,28 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       basePrice: s.basePrice,
     }));
 
-    addToCart({
+    // Construir array de opciones seleccionadas
+    const selectedOptionsArr = [];
+    if (selectedOption) {
+      selectedOptionsArr.push({
+        productOptionId: Number(selectedOption.id),
+        optionId: Number(selectedOption.option?.id),
+        optionName: selectedOption.option?.name || "",
+        tipo: selectedOption.option?.tipo || "Tamaño",
+        priceExtra: toNum(selectedOption.precio_extra),
+      });
+    }
+    for (const extra of selectedExtras) {
+      selectedOptionsArr.push({
+        productOptionId: Number(extra.id),
+        optionId: Number(extra.option?.id),
+        optionName: extra.option?.name || "",
+        tipo: extra.option?.tipo || "Extra",
+        priceExtra: toNum(extra.precio_extra),
+      });
+    }
+
+    const cartItem = {
       uniqueId: `${combo.id}-${selectedOptId ?? "noopt"}-${Date.now()}`,
       id: Number(combo.id) || 0,
       name: combo.name || "Combo",
@@ -384,31 +437,45 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       image: img,
       category: "combo",
       quantity: qty,
-      size: sizeLabelRaw ? sizeLabelRaw.toLowerCase() : undefined,
       observations: notes,
-      kind: "combo",
+      kind: "combo" as const,
       comboName: combo.name,
       comboItems: [...comboItems, ...inclusionAsItems],
+      selectedOptions: selectedOptionsArr.length > 0 ? selectedOptionsArr : undefined,
+      // Legacy fields para compatibilidad
+      size: sizeLabelRaw ? sizeLabelRaw.toLowerCase() : undefined,
       productOptionId: hasSelected ? Number(selectedOption!.id) : undefined,
       optionId: hasSelected ? Number((selectedOption as any).option?.id) : undefined,
       optionName: hasSelected ? sizeLabelRaw : undefined,
       priceExtra: optionExtra,
       isDefaultCategory: false,
-    });
+    };
+
+    setSubmitting(true); // 🔒 Bloquear mientras se procesa
+    addToCart(cartItem);
 
     setFormError(null);
     setJustAdded(true);
     setTimeout(() => {
       setJustAdded(false);
+      setSubmitting(false);
       router.back();
     }, 600);
     setNotes("");
     setQty(1);
+    setSelectedExtraIds(new Set());
+    // Resetear tamaño a default
+    const defaultSize = sizeOptions.find(o => o.isDefault);
+    if (defaultSize) {
+      setSelectedOptId(defaultSize.id);
+    } else if (sizeOptions.length > 0) {
+      setSelectedOptId(sizeOptions[0].id);
+    }
   };
 
   if (!combo && !loading) {
     return (
-      <div className="min-h-screen bg-background">
+      <div className="bg-background">
         <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
         <div className="h-[6px] w-full bg-white" />
         <div className="mx-auto w-full max-w-6xl p-4">No se encontró  el combo.</div>
@@ -420,7 +487,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     Array.isArray(mainProduct?.productOptions) && mainProduct.productOptions.length > 0;
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="bg-background">
       <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
       <div className="h-[6px] w-full bg-white" />
       <ClosedBanner />
@@ -479,10 +546,13 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
 
         {/* Derecha */}
         <div className="space-y-4">
-          {hasOptions && (
+          {/* Opciones de Tamaño */}
+          {sizeOptions.length > 0 && (
             <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 space-y-2">
-              <div className="text-sm font-semibold mb-2">Tamaño:</div>
-              {mainProduct?.productOptions?.map((o) => {
+              <div className="text-sm font-semibold mb-2">
+                Tamaño: <span className="text-red-500">*</span>
+              </div>
+              {sizeOptions.map((o) => {
                 const active = selectedOptId === o.id;
                 const plus = toNum(o.precio_extra);
                 return (
@@ -491,13 +561,58 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                     disabled={loading}
                     onClick={() => setSelectedOptId(o.id)}
                     className={[
-                      "w-full rounded-lg border px-3 py-2 text-left flex items-center justify-between",
+                      "w-full rounded-lg border px-3 py-2 text-left flex items-center justify-between transition-colors",
                       active ? "border-[var(--brand-color)] bg-[#fff5f2]" : "border-transparent hover:bg-black/5",
                     ].join(" ")}
                   >
                     <span className="text-sm">{o.option?.name || "Opcion"}</span>
                     <span className="text-sm font-semibold">{plus ? `+${fmt(plus)}` : ""}</span>
                   </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Opciones Extra */}
+          {extraOptions.length > 0 && (
+            <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 space-y-2">
+              <div className="text-sm font-semibold mb-2">Extras:</div>
+              {extraOptions.map((o) => {
+                const isChecked = selectedExtraIds.has(o.id);
+                const plus = toNum(o.precio_extra);
+                return (
+                  <div
+                    key={String(o.id)}
+                    onClick={() => {
+                      setSelectedExtraIds(prev => {
+                        const newSet = new Set(prev);
+                        if (newSet.has(o.id)) {
+                          newSet.delete(o.id);
+                        } else {
+                          newSet.add(o.id);
+                        }
+                        return newSet;
+                      });
+                    }}
+                    className={[
+                      "w-full rounded-lg border px-3 py-2 cursor-pointer flex items-center justify-between transition-colors",
+                      isChecked
+                        ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                        : "border-transparent hover:bg-black/5",
+                    ].join(" ")}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Checkbox
+                        checked={isChecked}
+                        onCheckedChange={() => {}}
+                        className="pointer-events-none"
+                      />
+                      <span className="text-sm">{o.option?.name || "Extra"}</span>
+                    </div>
+                    <span className="text-sm font-semibold">
+                      {plus ? `+${fmt(plus)}` : "Gratis"}
+                    </span>
+                  </div>
                 );
               })}
             </div>
@@ -776,13 +891,13 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                           hover:brightness-95 active:brightness-90
                           disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none`}
               onClick={isWebOpen ? handleAdd : undefined}
-              disabled={disabledByStatus || loading}
+              disabled={disabledByStatus || loading || submitting}
               title={
                 disabledByStatus
                   ? (pickupOnly ? "Solo tomamos pedidos en el local." : STORE_CLOSED_MSG)
                   : undefined
               }
-              aria-disabled={disabledByStatus || loading}
+              aria-disabled={disabledByStatus || loading || submitting}
             >
               {disabledByStatus
                 ? (pickupOnly ? "Solo en el local" : "Local cerrado")

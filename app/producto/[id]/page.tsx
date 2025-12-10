@@ -7,6 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCart } from "@/components/cart-context";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import ClosedBanner from "@/components/closed-banner";
 import InfoBanner from "@/components/info-banner";
 import { STORE_CLOSED_MSG } from "@/lib/flags";
@@ -17,7 +18,12 @@ import { fixImageUrl } from "@/lib/img";
 type ProductOption = {
   id: string | number;
   precio_extra?: number | string | null;
-  option?: { id: string | number; name: string };
+  option?: {
+    id: string | number;
+    name: string;
+    tipo?: string | null;
+    description?: string | null;
+  };
   isDefault?: boolean;
 };
 
@@ -144,6 +150,7 @@ export default function ProductDetailPage() {
   const { addToCart } = useCart();
 
   const [justAdded, setJustAdded] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const { data: status } = useBusinessStatusSmart();
   // mientras carga: true => botón habilitado (si preferís bloquear hasta cargar, cambiá a !!status?.web.open)
   const isWebOpen  = status?.web?.open ?? true;
@@ -154,6 +161,7 @@ export default function ProductDetailPage() {
 
   const [prod, setProd] = useState<Product | null>(null);
   const [selectedOptId, setSelectedOptId] = useState<string | number | null>(null);
+  const [selectedExtraIds, setSelectedExtraIds] = useState<Set<string | number>>(new Set());
   const [qty, setQty] = useState(1);
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(true);
@@ -217,16 +225,37 @@ export default function ProductDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // opción elegida
+  // Separar opciones por tipo
+  const { sizeOptions, extraOptions } = useMemo(() => {
+    if (!prod?.productOptions?.length) {
+      return { sizeOptions: [], extraOptions: [] };
+    }
+    const sizes = prod.productOptions.filter(
+      (opt) => opt.option?.tipo?.toLowerCase() === "tamaño"
+    );
+    const extras = prod.productOptions.filter(
+      (opt) => opt.option?.tipo?.toLowerCase() === "extra"
+    );
+    return { sizeOptions: sizes, extraOptions: extras };
+  }, [prod]);
+
+  // opción de tamaño elegida
   const selectedOption = useMemo(() => {
-    if (!prod?.productOptions?.length) return undefined;
-    return prod.productOptions.find((o) => o.id === selectedOptId);
-  }, [prod, selectedOptId]);
+    if (!sizeOptions.length) return undefined;
+    return sizeOptions.find((o) => o.id === selectedOptId);
+  }, [sizeOptions, selectedOptId]);
+
+  // opciones extra elegidas
+  const selectedExtras = useMemo(() => {
+    if (!extraOptions.length) return [];
+    return extraOptions.filter((o) => selectedExtraIds.has(o.id));
+  }, [extraOptions, selectedExtraIds]);
 
   // cálculo local (fallback)
   const base = toNum(prod?.price);
-  const extra = toNum(selectedOption?.precio_extra);
-  const localTotal = (base + extra) * qty;
+  const sizeExtra = toNum(selectedOption?.precio_extra);
+  const extrasTotal = selectedExtras.reduce((sum, opt) => sum + toNum(opt.precio_extra), 0);
+  const localTotal = (base + sizeExtra + extrasTotal) * qty;
 
   // 🔁 Cotizar en el back (promos) cada vez que cambian qty / option / producto
   useEffect(() => {
@@ -236,7 +265,11 @@ export default function ProductDetailPage() {
         setQuotedTotal(null);
         return;
       }
-      const optionIds = selectedOption?.id ? [Number(selectedOption.id)] : [];
+      // Incluir opción de tamaño + opciones extra
+      const optionIds = [
+        ...(selectedOption?.id ? [Number(selectedOption.id)] : []),
+        ...selectedExtras.map(e => Number(e.id))
+      ];
       const qres = await quoteProduct(Number(prod.id), Math.max(1, qty || 1), optionIds, notes?.trim() || undefined);
 
       if (qres) {
@@ -252,29 +285,45 @@ export default function ProductDetailPage() {
         }
       }
       // fallback local si la cotización falla/no aplica
-      const unitLocal = base + extra;
+      const unitLocal = base + sizeExtra + extrasTotal;
       setQuotedUnit(unitLocal);
       setQuotedTotal(unitLocal * qty);
       setHasPromo(false);
       setListUnit(null);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prod?.id, selectedOption?.id, qty]);
+  }, [prod?.id, selectedOption?.id, qty, selectedExtraIds]);
 
   const handleAdd = async () => {
     if (!prod) return;
+    if (submitting) return; // 🔒 Prevenir doble click
+
+    // Validar que si hay opciones de tamaño, se haya seleccionado una
+    if (sizeOptions.length > 0 && !selectedOptId) {
+      alert("Por favor selecciona un tamaño");
+      return;
+    }
+
+    // IMPORTANTE: Capturar los valores ANTES de cualquier estado asíncrono
+    const currentSelectedOption = selectedOption;
+    const currentSelectedExtras = [...selectedExtras];
+    const currentQty = qty;
+    const currentNotes = notes;
 
     // usar cotización ya calculada (si está), con fallback
     let unit = quotedUnit;
     let total = quotedTotal;
 
     if (unit == null || total == null) {
-      const optionIds = selectedOption?.id ? [Number(selectedOption.id)] : [];
+      const optionIds = [
+        ...(currentSelectedOption?.id ? [Number(currentSelectedOption.id)] : []),
+        ...currentSelectedExtras.map(e => Number(e.id))
+      ];
       const qres = await quoteProduct(
         Number(prod.id),
-        Math.max(1, qty || 1),
+        Math.max(1, currentQty || 1),
         optionIds,
-        notes?.trim() || undefined
+        currentNotes?.trim() || undefined
       );
       if (qres) {
         const u = Number(qres.unitPrice);
@@ -288,19 +337,45 @@ export default function ProductDetailPage() {
         // último fallback local
         const baseNum =
           typeof prod.price === "string" ? Number(prod.price) : (prod.price ?? 0);
-        const extraNum =
-          typeof selectedOption?.precio_extra === "string"
-            ? Number(selectedOption?.precio_extra)
-            : (selectedOption?.precio_extra ?? 0);
-        unit = baseNum + extraNum;
-        total = unit * qty;
+        const sizeExtraNum =
+          typeof currentSelectedOption?.precio_extra === "string"
+            ? Number(currentSelectedOption?.precio_extra)
+            : (currentSelectedOption?.precio_extra ?? 0);
+        const extrasNum = currentSelectedExtras.reduce((sum, opt) =>
+          sum + (typeof opt.precio_extra === "string" ? Number(opt.precio_extra) : (opt.precio_extra ?? 0)),
+          0
+        );
+        unit = baseNum + sizeExtraNum + extrasNum;
+        total = unit * currentQty;
       }
     }
 
-    const extraNum =
-      typeof selectedOption?.precio_extra === "string"
-        ? Number(selectedOption?.precio_extra)
-        : (selectedOption?.precio_extra ?? 0);
+    // Construir array de opciones seleccionadas
+    const selectedOptionsArr = [];
+    if (currentSelectedOption) {
+      selectedOptionsArr.push({
+        productOptionId: Number(currentSelectedOption.id),
+        optionId: Number(currentSelectedOption.option?.id),
+        optionName: currentSelectedOption.option?.name || "",
+        tipo: currentSelectedOption.option?.tipo || "Tamaño",
+        priceExtra: typeof currentSelectedOption.precio_extra === "string"
+          ? Number(currentSelectedOption.precio_extra)
+          : (currentSelectedOption.precio_extra ?? 0),
+      });
+    }
+    for (const extra of currentSelectedExtras) {
+      selectedOptionsArr.push({
+        productOptionId: Number(extra.id),
+        optionId: Number(extra.option?.id),
+        optionName: extra.option?.name || "",
+        tipo: extra.option?.tipo || "Extra",
+        priceExtra: typeof extra.precio_extra === "string"
+          ? Number(extra.precio_extra)
+          : (extra.precio_extra ?? 0),
+      });
+    }
+
+    setSubmitting(true); // 🔒 Bloquear mientras se procesa
 
     addToCart({
       uniqueId: `${prod.id}-${selectedOptId}-${Date.now()}`,
@@ -311,28 +386,41 @@ export default function ProductDetailPage() {
       finalPrice: total,           // 💰 total efectivo
       image: prod.imageUrl || "",
       category: "",
-      quantity: qty,
-      size: selectedOption?.option?.name?.toLowerCase() as any,
-      observations: notes,
-      productOptionId: Number(selectedOption?.id) || undefined,
-      optionId: Number(selectedOption?.option?.id) || undefined,
-      optionName: selectedOption?.option?.name || undefined,
-      priceExtra: extraNum,
+      quantity: currentQty,
+      observations: currentNotes,
+      selectedOptions: selectedOptionsArr.length > 0 ? selectedOptionsArr : undefined,
+      // Legacy fields para compatibilidad
+      size: currentSelectedOption?.option?.name?.toLowerCase() as any,
+      productOptionId: Number(currentSelectedOption?.id) || undefined,
+      optionId: Number(currentSelectedOption?.option?.id) || undefined,
+      optionName: currentSelectedOption?.option?.name || undefined,
+      priceExtra: typeof currentSelectedOption?.precio_extra === "string"
+        ? Number(currentSelectedOption?.precio_extra)
+        : (currentSelectedOption?.precio_extra ?? 0),
       isDefaultCategory: !!prod?.category?.isDefault,
     });
 
     setJustAdded(true);
     setTimeout(() => {
       setJustAdded(false);
+      setSubmitting(false);
       router.back();
     }, 600);
     setNotes("");
     setQty(1);
+    setSelectedExtraIds(new Set());
+    // Resetear tamaño a default
+    const defaultSize = sizeOptions.find(o => o.isDefault);
+    if (defaultSize) {
+      setSelectedOptId(defaultSize.id);
+    } else if (sizeOptions.length > 0) {
+      setSelectedOptId(sizeOptions[0].id);
+    }
   };
 
   // ⬇️ Render SIEMPRE; overlay solo si no hubo warm
   return (
-    <div className="min-h-screen bg-background relative">
+    <div className="bg-background relative">
       <SiteHeader
         showBack
         onBack={() => router.back()}
@@ -375,10 +463,13 @@ export default function ProductDetailPage() {
 
           {/* Derecha */}
           <div className="space-y-4">
-            {!!prod?.productOptions?.length && (
+            {/* Opciones de Tamaño */}
+            {!!sizeOptions.length && (
               <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 space-y-2">
-                <div className="text-sm font-semibold mb-2">Tamaño:</div>
-                {prod.productOptions.map((o) => {
+                <div className="text-sm font-semibold mb-2">
+                  Tamaño: <span className="text-red-500">*</span>
+                </div>
+                {sizeOptions.map((o) => {
                   const active = selectedOptId === o.id;
                   const plus = toNum(o.precio_extra);
                   return (
@@ -387,7 +478,7 @@ export default function ProductDetailPage() {
                       onClick={() => setSelectedOptId(o.id)}
                       disabled={loading && !prod}
                       className={[
-                        "w-full rounded-lg border px-3 py-2 text-left flex items-center justify-between",
+                        "w-full rounded-lg border px-3 py-2 text-left flex items-center justify-between transition-colors",
                         active
                           ? "border-[var(--brand-color)] bg-[#fff5f2]"
                           : "border-transparent hover:bg-black/5",
@@ -398,6 +489,51 @@ export default function ProductDetailPage() {
                         {plus ? `+${fmt(plus)}` : ""}
                       </span>
                     </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Opciones Extra */}
+            {!!extraOptions.length && (
+              <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 space-y-2">
+                <div className="text-sm font-semibold mb-2">Extras:</div>
+                {extraOptions.map((o) => {
+                  const isChecked = selectedExtraIds.has(o.id);
+                  const plus = toNum(o.precio_extra);
+                  return (
+                    <div
+                      key={String(o.id)}
+                      onClick={() => {
+                        setSelectedExtraIds(prev => {
+                          const newSet = new Set(prev);
+                          if (newSet.has(o.id)) {
+                            newSet.delete(o.id);
+                          } else {
+                            newSet.add(o.id);
+                          }
+                          return newSet;
+                        });
+                      }}
+                      className={[
+                        "w-full rounded-lg border px-3 py-2 cursor-pointer flex items-center justify-between transition-colors",
+                        isChecked
+                          ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                          : "border-transparent hover:bg-black/5",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Checkbox
+                          checked={isChecked}
+                          onCheckedChange={() => {}}
+                          className="pointer-events-none"
+                        />
+                        <span className="text-sm">{o.option?.name || "Extra"}</span>
+                      </div>
+                      <span className="text-sm font-semibold">
+                        {plus ? `+${fmt(plus)}` : "Gratis"}
+                      </span>
+                    </div>
                   );
                 })}
               </div>
@@ -474,13 +610,13 @@ export default function ProductDetailPage() {
                   hover:brightness-95 active:brightness-90
                   disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none`}
                 onClick={isWebOpen ? handleAdd : undefined}
-                disabled={disabledByStatus || (loading && !prod)}
+                disabled={disabledByStatus || (loading && !prod) || submitting}
                 title={
                   disabledByStatus
                     ? (pickupOnly ? "Solo tomamos pedidos en el local." : STORE_CLOSED_MSG)
                     : undefined
                 }
-                aria-disabled={disabledByStatus || (loading && !prod)}
+                aria-disabled={disabledByStatus || (loading && !prod) || submitting}
               >
                 {disabledByStatus
                   ? (pickupOnly ? "Solo en el local" : "Local cerrado")

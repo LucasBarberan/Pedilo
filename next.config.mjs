@@ -8,13 +8,13 @@ const nextConfig = {
   },
   images: {
     remotePatterns: [
-      { protocol: "http", hostname: "localhost",     port: "5000", pathname: "/**" },
-      { protocol: "http", hostname: "192.168.0.168", port: "5000", pathname: "/**" }, // tu IP
+      { protocol: "http", hostname: "localhost", port: "5000", pathname: "/**" },
+      { protocol: "https", hostname: "api.demo.keltron.app", pathname: "/**" },
     ],
     // o, temporalmente en LAN: unoptimized: true
   },
   // permití acceder al dev server desde tu IP de LAN
-  allowedDevOrigins: ['192.168.0.168'],
+  allowedDevOrigins: ['api.demo.keltron.app'],
 }
 
 export default nextConfig

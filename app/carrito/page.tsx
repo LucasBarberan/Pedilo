@@ -67,7 +67,7 @@ export default function CartPage() {
   }, [items]);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="bg-background">
       <SiteHeader showBack onBack={() => router.back()} onCartClick={() => {}} />
       <div className="h-[6px] w-full bg-white" />
 
@@ -139,11 +139,29 @@ export default function CartPage() {
                       </div>
 
                       {/* Detalles producto suelto */}
-                      {!isCombo && sizeLabel && (
-                        <div className="text-xs text-muted-foreground">Tamaño: {sizeLabel}</div>
-                      )}
-                      {!isCombo && it.observations && (
-                        <div className="text-xs text-muted-foreground">Obs: {it.observations}</div>
+                      {!isCombo && (
+                        <>
+                          {/* Mostrar opciones seleccionadas (nuevo formato) */}
+                          {it.selectedOptions && it.selectedOptions.length > 0 ? (
+                            <div className="text-xs text-muted-foreground">
+                              {it.selectedOptions.map((opt: any, idx: number) => (
+                                <span key={idx}>
+                                  {opt.optionName}
+                                  {opt.priceExtra > 0 && ` (+$${opt.priceExtra.toLocaleString()})`}
+                                  {idx < it.selectedOptions.length - 1 && " + "}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            /* Fallback legacy */
+                            sizeLabel && (
+                              <div className="text-xs text-muted-foreground">Tamaño: {sizeLabel}</div>
+                            )
+                          )}
+                          {it.observations && (
+                            <div className="text-xs text-muted-foreground">Obs: {it.observations}</div>
+                          )}
+                        </>
                       )}
 
                       {/* Detalles combo */}
@@ -153,7 +171,20 @@ export default function CartPage() {
                             <div>
                               <span className="font-medium">Principal:</span>{" "}
                               {main.name || "Producto"}
-                              {sizeLabel ? ` · Tamaño: ${sizeLabel}` : ""}
+                              {/* Mostrar opciones del combo (nuevo formato) */}
+                              {it.selectedOptions && it.selectedOptions.length > 0 ? (
+                                <span>
+                                  {" · "}
+                                  {it.selectedOptions.map((opt: any, idx: number) => (
+                                    <span key={idx}>
+                                      {opt.optionName}
+                                      {idx < it.selectedOptions.length - 1 && " + "}
+                                    </span>
+                                  ))}
+                                </span>
+                              ) : (
+                                sizeLabel && ` · Tamaño: ${sizeLabel}`
+                              )}
                               {main.qty && main.qty > 1 ? ` x${main.qty}` : ""}
                             </div>
                           )}

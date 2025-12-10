@@ -36,10 +36,19 @@ export interface CartItem {
   isDefaultCategory?: boolean;
 
   // opción elegida (para productos o para el principal del combo)
-  productOptionId?: number;      // id de productOptions (productOptions.id)
-  optionId?: number;             // id de Option (option.id)
-  optionName?: string;           // p.ej. "Simple" | "Doble" | "Triple"
-  priceExtra?: number | string;  // extra aplicado a esa opción
+  productOptionId?: number;      // id de productOptions (productOptions.id) - DEPRECATED: usar selectedOptions
+  optionId?: number;             // id de Option (option.id) - DEPRECATED: usar selectedOptions
+  optionName?: string;           // p.ej. "Simple" | "Doble" | "Triple" - DEPRECATED: usar selectedOptions
+  priceExtra?: number | string;  // extra aplicado a esa opción - DEPRECATED: usar selectedOptions
+
+  // —— NUEVO: soporte para múltiples opciones ——
+  selectedOptions?: Array<{
+    productOptionId: number;     // id de productOptions
+    optionId: number;            // id de Option
+    optionName: string;          // nombre de la opción
+    tipo: string;                // "Tamaño", "Extra", etc.
+    priceExtra: number;          // extra aplicado
+  }>;
 
   // —— NUEVO: soporte para combos ——
   kind?: "product" | "combo";    // si no viene, asumimos "product"
@@ -71,8 +80,19 @@ function getMergeSignature(it: CartItem): string | null {
   const kind = it.kind || "product";
 
   if (kind !== "combo") {
-    // Producto suelto: mismo product_id + misma opción + mismo tamaño/alias
+    // Producto suelto: mismo product_id + mismas opciones seleccionadas
     const prodId = Number(it.id) || 0;
+
+    // Si tiene selectedOptions, usamos eso
+    if (it.selectedOptions && it.selectedOptions.length > 0) {
+      const opts = it.selectedOptions
+        .map(o => `${o.productOptionId}`)
+        .sort()
+        .join(',');
+      return `prod|${prodId}|opts:${opts}`;
+    }
+
+    // Fallback para compatibilidad con código legacy
     const optId  = Number(it.productOptionId || it.optionId || 0) || 0;
     const size   = String(it.size || it.optionName || "").toLowerCase();
     return `prod|${prodId}|${optId}|${size}`;
@@ -141,6 +161,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
         ...curr,
         quantity: currQty + addQty,
         finalPrice: Math.round(unit * (currQty + addQty)),
+        // 🔒 IMPORTANTE: Deep copy de comboItems para evitar mutaciones
+        comboItems: curr.comboItems ? [...curr.comboItems.map(ci => ({ ...ci }))] : undefined,
       };
 
       const copy = [...prev];
@@ -166,6 +188,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
               quantity,
               // conserva el precio unitario actual (con redondeo)
               finalPrice: Math.round((item.finalPrice / item.quantity) * quantity),
+              // 🔒 IMPORTANTE: Deep copy de comboItems para preservar qty original
+              comboItems: item.comboItems ? [...item.comboItems.map(ci => ({ ...ci }))] : undefined,
             }
           : item
       )

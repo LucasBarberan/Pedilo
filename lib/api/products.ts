@@ -2,7 +2,12 @@
   id: string | number;
   precio_extra?: number | string | null;
   isDefault?: boolean | null;
-  option?: { id: string | number; name?: string | null };
+  option?: {
+    id: string | number;
+    name?: string | null;
+    tipo?: string | null;  // "Tamaño", "Extra", etc.
+    description?: string | null;
+  };
 };
 
 export type Product = {
@@ -76,6 +81,8 @@ function normalizeProductOption(raw: any): ProductOption | null {
       ? {
           id: raw.option.id ?? raw.optionId ?? raw.option_id ?? raw.option?.code ?? raw.option?.uuid ?? id,
           name: raw.option.name ?? raw.option.label ?? raw.option.descripcion ?? null,
+          tipo: raw.option.tipo ?? raw.option.type ?? null,
+          description: raw.option.description ?? raw.option.desc ?? null,
         }
       : undefined;
 
