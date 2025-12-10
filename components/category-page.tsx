@@ -216,7 +216,7 @@ export default function CategoryPageClient({
   const handleCartClick = () => router.push("/carrito");
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="bg-background">
       <SiteHeader
         showBack
         onBack={() => router.back()}

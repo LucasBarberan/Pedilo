@@ -4,6 +4,7 @@ import { GeistSans } from "geist/font/sans"
 import { GeistMono } from "geist/font/mono"
 import { Analytics } from "@vercel/analytics/next"
 import { CartProvider } from "@/components/cart-context"
+import { DeveloperFooter } from "@/components/developer-footer"
 import { Suspense } from "react"
 import "./globals.css"
 import type { Viewport } from "next";
@@ -31,12 +32,17 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en"
+    <html lang="en" className="h-full"
     // definimos la variable CSS accesible en toda la app
       style={{ ["--brand-color" as any]: BRAND_COLOR }}>
-      <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable}`}>
+      <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable} h-full flex flex-col`}>
         <Suspense fallback={null}>
-          <CartProvider>{children}</CartProvider>
+          <CartProvider>
+            <div className="flex-1 overflow-auto">
+              {children}
+            </div>
+            <DeveloperFooter />
+          </CartProvider>
         </Suspense>
         <Analytics />
       </body>

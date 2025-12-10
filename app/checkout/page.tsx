@@ -9,7 +9,7 @@ export default function CheckoutPage() {
   const router = useRouter();
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="bg-background">
       <SiteHeader showBack onBack={() => router.back()} />
       <div className="h-[6px] w-full bg-white" />
 

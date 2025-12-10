@@ -135,7 +135,7 @@ export default function CombosListScreen({ initialCombos, categoryName, category
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="bg-background">
       <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
       <div className="h-[6px] w-full bg-white" />
       <ClosedBanner />
