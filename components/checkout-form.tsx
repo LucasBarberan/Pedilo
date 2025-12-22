@@ -59,7 +59,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const addressRef = useRef<HTMLInputElement>(null);
   const DELIVERY_FEE = Number(process.env.NEXT_PUBLIC_DELIVERY_FEE || 0);
 
- const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
+  const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+
 
   const totalWithDelivery = useMemo(() => {
     return deliveryMethod === "delivery" ? total + DELIVERY_FEE : total;
@@ -121,6 +123,25 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       localStorage.setItem("checkout.customer", JSON.stringify(customer));
     } catch { }
   }, [customer]);
+  // Normaliza teléfonos AR para guardar/enviar sin "0" inicial ni "15".
+  // Ej: "03537327969" -> "3537327969"
+  // Ej: "11 15 5555-4444" -> "1155554444"
+  // Ej: "+54 9 11 5555-4444" -> "91155554444" (dejamos el 9 si el user lo puso)
+  const normalizePhoneAR = (raw: string) => {
+    let digits = (raw || "").replace(/\D/g, "");
+
+    // Si viene con 54 adelante, lo sacamos para quedarnos con formato nacional
+    if (digits.startsWith("54")) digits = digits.slice(2);
+
+    // Sacar 0 inicial (prefijo nacional)
+    if (digits.startsWith("0")) digits = digits.slice(1);
+
+    // Sacar "15" después del código de área (2 a 4 dígitos)
+    // 11 15 55554444 -> 11 55554444
+    digits = digits.replace(/^(\d{2,4})15(\d+)$/, "$1$2");
+
+    return digits;
+  };
   // Validación mejorada de teléfono
   const isPhoneValid = (v: string) => {
     // Extraer solo dígitos
@@ -376,12 +397,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         }
         const channel = "WEB" as const;
         const fulfillment = deliveryMethod === "delivery" ? "DELIVERY" : "TAKEAWAY";
+        const phoneNormalized = normalizePhoneAR(customer.phone);
         // 4) Delivery info (siempre provider WEB)
         const delivery_info =
           deliveryMethod === "delivery"
             ? {
               customerName: customer.name.trim(),
-              customerPhone: customer.phone.trim(),
+              customerPhone: phoneNormalized,
               addressText: customer.address.trim(),
               notes: notes?.trim() || null,
               scheduledAt: null,
@@ -390,7 +412,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             }
             : {
               customerName: customer.name.trim(),
-              customerPhone: customer.phone.trim(),
+              customerPhone: phoneNormalized,
               addressText: "", // vacío en retiro
               notes: notes?.trim() || null,
               scheduledAt: null,
@@ -453,7 +475,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         }
       }
 
-
+      setShowWhatsAppModal(true);
       // WhatsApp (con número si lo tenemos)
       const businessPhone = process.env.NEXT_PUBLIC_WA_NUMBER || "";
       const textRaw = buildWhatsAppText(createdOrderNumber);
@@ -465,18 +487,16 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         const schemeUrl = `whatsapp://send?phone=${phone}&text=${msg}`;
         const webUrl = `https://wa.me/${phone}?text=${msg}`;
         const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-        
-
+            
         // En desktop vamos directo a WhatsApp Web
         if (!isMobile) {
           window.location.assign(webUrl);
-          // o window.open(webUrl, "_blank");
           return;
         }
-
+      
         let launched = false;
         let timer: number;
-
+      
         const cleanup = () => {
           launched = true;
           clearTimeout(timer);
@@ -484,26 +504,38 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           window.removeEventListener("blur", onHide);
           document.removeEventListener("visibilitychange", onVisibility);
         };
-
+      
         const onHide = () => cleanup();
         const onVisibility = () => {
           if (document.hidden) cleanup();
         };
-
+      
         // Si la app se abre, la pestaña pierde foco/visibilidad → cancelamos fallback
         window.addEventListener("pagehide", onHide, { once: true });
         window.addEventListener("blur", onHide, { once: true });
         document.addEventListener("visibilitychange", onVisibility, { once: true });
-
-        // Abrimos la app
-        window.location.assign(schemeUrl);
-
-        // Fallback SOLO si seguimos en esta pestaña con foco
-        timer = window.setTimeout(() => {
-          const stillHere =
-            !launched && document.visibilityState === "visible" && document.hasFocus();
-          if (stillHere) window.location.assign(webUrl);
-        }, 1200);
+      
+        // ✅ MOSTRAR CARTEL ANTES DE SALIR
+        setShowWhatsAppModal(true);
+      
+        // ✅ Esperar a que React renderice (2 frames) + delay cortito
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        );
+      
+        // Abrimos la app (con delay chico para que se vea)
+        window.setTimeout(() => {
+          window.location.assign(schemeUrl);
+        
+          // Fallback SOLO si seguimos en esta pestaña con foco
+          timer = window.setTimeout(() => {
+            const stillHere =
+              !launched && document.visibilityState === "visible" && document.hasFocus();
+            if (stillHere) window.location.assign(webUrl);
+          }, 2400); // dejé tu mismo tiempo
+        }, 1600);
+      
+        return;
       } else {
         try {
           await navigator.clipboard.writeText(textRaw);
@@ -613,7 +645,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               setCustomer({ ...customer, phone: v });
               if (formError && isPhoneValid(v)) setFormError("");
             }}
-            onBlur={() => setPhoneTouched(true)}
+            onBlur={() => {
+                setPhoneTouched(true);
+                const normalized = normalizePhoneAR(customer.phone);
+                if (normalized !== customer.phone) {
+                  setCustomer({ ...customer, phone: normalized });
+                }
+              }}
             placeholder="Ej: 1155554444"
             aria-invalid={phoneTouched && !isPhoneValid(customer.phone)}
             aria-describedby="phone-help"
@@ -841,6 +879,19 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             Cancelar
           </Button>
         </div>
+        {showWhatsAppModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+            <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center">
+              <div className="text-3xl mb-2">📲</div>
+              <h3 className="text-lg font-bold mb-2">Pedido casi listo</h3>
+              <p className="text-sm text-gray-700 mb-4">
+                No olvides <strong>enviar el mensaje por WhatsApp</strong> para que podamos
+                <strong> confirmar tu pedido</strong>.
+              </p>
+              <p className="text-xs text-gray-500">Te estamos redirigiendo…</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -87,6 +87,7 @@ export default function CombosListScreen({ initialCombos, categoryName, category
       controller.abort();
     };
   }, [initialCombos.length, apiBase, categoryId, categoryName]);
+  
 
   const title = useMemo(() => {
     if (titleOverride) return titleOverride.toUpperCase();
@@ -145,7 +146,7 @@ export default function CombosListScreen({ initialCombos, categoryName, category
         <h2 className="text-2xl font-extrabold uppercase">{title}</h2>
       </div>
 
-      <div className="mx-auto w-full max-w-6xl px-4 py-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="mx-auto w-full max-w-6xl px-4 py-4 pb-28 grid grid-cols-1 gap-4 md:grid-cols-2">
         {!loading &&
           combos
             .filter((combo) => {
