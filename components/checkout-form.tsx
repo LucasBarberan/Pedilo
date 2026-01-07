@@ -123,74 +123,62 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       localStorage.setItem("checkout.customer", JSON.stringify(customer));
     } catch { }
   }, [customer]);
-  // Normaliza teléfonos AR para guardar/enviar sin "0" inicial ni "15".
-  // Ej: "03537327969" -> "3537327969"
-  // Ej: "11 15 5555-4444" -> "1155554444"
-  // Ej: "+54 9 11 5555-4444" -> "91155554444" (dejamos el 9 si el user lo puso)
+  // Normaliza teléfonos AR para guardar/enviar en formato "nacional limpio":
+  // - sin 54, sin 0 inicial, sin 9 de móvil internacional, sin 15.
   const normalizePhoneAR = (raw: string) => {
     let digits = (raw || "").replace(/\D/g, "");
-
-    // Si viene con 54 adelante, lo sacamos para quedarnos con formato nacional
+  
+    // Si viene con 54 adelante, lo sacamos
     if (digits.startsWith("54")) digits = digits.slice(2);
-
-    // Sacar 0 inicial (prefijo nacional)
+  
+    // Si viene con 0 adelante, lo sacamos (prefijo nacional)
     if (digits.startsWith("0")) digits = digits.slice(1);
-
+  
+    // Si viene con 9 adelante (móvil internacional: +54 9 ...), lo sacamos
+    // Ej: 93537327969 -> 3537327969
+    if (digits.startsWith("9")) digits = digits.slice(1);
+  
     // Sacar "15" después del código de área (2 a 4 dígitos)
     // 11 15 55554444 -> 11 55554444
     digits = digits.replace(/^(\d{2,4})15(\d+)$/, "$1$2");
-
+  
     return digits;
   };
-  // Validación mejorada de teléfono
+  
   const isPhoneValid = (v: string) => {
-    // Extraer solo dígitos
-    const digits = v.replace(/\D/g, "");
-
-    // Debe tener entre 8 y 15 dígitos
-    if (digits.length < 8 || digits.length > 15) return false;
-
-    // No permitir caracteres inválidos
-    if (!/^[0-9\s()+-]+$/.test(v)) return false;
-
-    // 🚫 RECHAZAR: números que empiecen con 0 (excepto si es +54 al inicio)
-    // Ejemplos rechazados: 03537604893, 0353715604893
-    if (digits.startsWith('0') && !v.trim().startsWith('+')) {
-      return false;
-    }
-
-    // 🚫 RECHAZAR: números con "15" después del código de área
-    // Patrón: 54 + código área + 15 + número (ej: 5411*15*5554444)
-    // o directamente código área + 15 (ej: 11*15*5554444)
-    if (/^(54)?[0-9]{2,4}15/.test(digits)) {
-      return false;
-    }
-
-    return true;
+    // Permitimos mientras tipean
+    if (!/^[0-9\s()+-]*$/.test(v)) return false;
+  
+    const digits = normalizePhoneAR(v);
+  
+    // AR típico: 10 dígitos (área 2-4 + local 6-8) pero dejamos rango flexible
+    return digits.length >= 8 && digits.length <= 15;
   };
-
-  // Obtener mensaje de error específico para el teléfono
+  
   const getPhoneErrorMessage = (v: string) => {
-    const digits = v.replace(/\D/g, "");
-
-    if (digits.startsWith('0') && !v.trim().startsWith('+')) {
+    if (!/^[0-9\s()+-]*$/.test(v)) return "Solo números y símbolos válidos (+ - espacios)";
+  
+    const rawDigits = (v || "").replace(/\D/g, "");
+    const digits = normalizePhoneAR(v);
+  
+    // Mensajes más específicos
+    if (rawDigits.startsWith("0") && !v.trim().startsWith("+")) {
       return "❌ No incluyas el 0 inicial del código de área";
     }
-
-    if (/^(54)?[0-9]{2,4}15/.test(digits)) {
+    if (/^(54)?9?0/.test(rawDigits) && v.trim().startsWith("+")) {
+      // raro pero por si meten +540...
+      return "❌ No incluyas el 0 después de +54";
+    }
+    if (/^(54)?9?\d{2,4}15/.test(rawDigits)) {
       return "❌ No incluyas el 15 antes del número";
     }
-
-    if (digits.length < 8) {
-      return "El teléfono es muy corto (mín. 8 dígitos)";
-    }
-
-    if (digits.length > 15) {
-      return "El teléfono es muy largo (máx. 15 dígitos)";
-    }
-
+  
+    if (digits.length < 8) return "El teléfono es muy corto (mín. 8 dígitos)";
+    if (digits.length > 15) return "El teléfono es muy largo (máx. 15 dígitos)";
+  
     return "Revisá el formato del teléfono";
   };
+
   // debajo de isPhoneValid:
   const isNonEmpty = (s: string) => !!s.trim();
 
