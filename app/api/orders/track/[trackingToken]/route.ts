@@ -6,51 +6,43 @@ export async function GET(
 ) {
     const { trackingToken } = params;
 
-    // Mock logic to simulate different states based on the token
-    // Current time for reference
-    const now = new Date();
+    try {
+        const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+        const res = await fetch(`${backendUrl}/orders/track/${trackingToken}`);
+        console.log(res)
+        if (!res.ok) {
+            if (res.status === 404) {
+                return NextResponse.json(
+                    { error: "Order not found" },
+                    { status: 404 }
+                );
+            }
+            return NextResponse.json(
+                { error: "Backend error" },
+                { status: res.status }
+            );
+        }
 
-    let orderData = {
-        orderNumber: 12345,
-        type: "DELIVERY", // DELIVERY | TAKEAWAY
-        clientStatus: "PENDING", // PENDING | PREPARING | READY | OUT_FOR_DELIVERY | DELIVERED | CANCELED
-        createdAt: new Date(now.getTime() - 30 * 60000).toISOString(), // 30 mins ago
-        completedAt: null as string | null,
-        cancelled: false,
-    };
+        const json = await res.json();
+        console.log("JSON from backend:", json);
 
-    // Simulating states based on token keywords for testing purposes
-    // 1. Determine Type
-    if (trackingToken.includes("takeaway")) {
-        orderData.type = "TAKEAWAY";
+        // Extract data if backend wraps response in { success, data }
+        const orderData = json.data || json;
+        console.log("Order data to return:", orderData);
+
+        const response = NextResponse.json(orderData);
+
+        // Disable caching for tracking endpoint
+        response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+        response.headers.set("Pragma", "no-cache");
+        response.headers.set("Expires", "0");
+
+        return response;
+    } catch (error) {
+        console.error("Error fetching order from backend:", error);
+        return NextResponse.json(
+            { error: "Failed to fetch order" },
+            { status: 500 }
+        );
     }
-
-    // 2. Determine Status
-    if (trackingToken.includes("pending")) {
-        orderData.clientStatus = "PENDING";
-    } else if (trackingToken.includes("preparing")) {
-        orderData.clientStatus = "PREPARING";
-    } else if (trackingToken.includes("ready")) {
-        orderData.clientStatus = "READY";
-    } else if (trackingToken.includes("way") && orderData.type !== "TAKEAWAY") {
-        orderData.clientStatus = "OUT_FOR_DELIVERY";
-        orderData.completedAt = new Date(now.getTime() - 10 * 60000).toISOString();
-    } else if (trackingToken.includes("delivered")) {
-        orderData.clientStatus = "DELIVERED";
-        orderData.completedAt = new Date(now.getTime() - 90 * 60000).toISOString();
-    } else if (trackingToken.includes("canceled")) {
-        orderData.clientStatus = "CANCELED";
-        orderData.cancelled = true;
-    } else if (trackingToken.includes("notfound")) {
-        return NextResponse.json({ error: "Order not found" }, { status: 404 });
-    } else if (orderData.type === "TAKEAWAY" && trackingToken.includes("completed")) {
-        // Special case for takeaway completed logic test
-        orderData.clientStatus = "DELIVERED";
-        orderData.completedAt = new Date(now.getTime() - 10 * 60000).toISOString();
-    } else {
-        // Default
-        orderData.clientStatus = "PENDING";
-    }
-
-    return NextResponse.json(orderData);
 }

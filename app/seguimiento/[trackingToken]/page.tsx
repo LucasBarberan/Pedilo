@@ -1,62 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import SiteHeader from "@/components/site-header";
 import { useRouter } from "next/navigation";
+import SiteHeader from "@/components/site-header";
 import OrderTimeline, { OrderState } from "@/components/order-timeline";
 import TrackingStatus from "@/components/tracking-status";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
-
-interface OrderData {
-    orderNumber: number;
-    type: "DELIVERY" | "TAKEAWAY";
-    clientStatus: OrderState;
-    createdAt: string;
-    completedAt: string | null;
-    cancelled: boolean;
-    error?: string;
-}
+import { useOrderTracking, type OrderData } from "@/lib/useOrderTracking";
 
 export default function TrackingPage({ params }: { params: { trackingToken: string } }) {
     const router = useRouter();
-    const [data, setData] = useState<OrderData | null>(null);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        // Polling every 30 seconds to keep it simple as per requirements (or just fetch once)
-        // Requirements said "No processes in background", but "WebSocket reuse" or "poll on request".
-        // For specific requirement "The logic is evaluated in each request of the tracking endpoint",
-        // we fetch now.
-
-        // We can implement a simple polling or just basic effect.
-        // Let's do a simple fetch first.
-
-        const fetchStatus = async () => {
-            try {
-                const res = await fetch(`/api/orders/track/${params.trackingToken}`);
-                if (!res.ok) {
-                    if (res.status === 404) {
-                        setData({ error: "Pedido no encontrado" } as any);
-                    }
-                    return;
-                }
-                const json = await res.json();
-                setData(json);
-            } catch (e) {
-                console.error("Error fetching order status", e);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchStatus();
-
-        // Optional polling
-        const interval = setInterval(fetchStatus, 15000);
-        return () => clearInterval(interval);
-
-    }, [params.trackingToken]);
+    const { data, loading, connected, usingFallback } = useOrderTracking(params.trackingToken);
 
     if (loading) {
         return (
@@ -104,6 +58,21 @@ export default function TrackingPage({ params }: { params: { trackingToken: stri
                 <div className="text-center mt-4">
                     <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Seguimiento</p>
                     <h1 className="text-2xl font-bold">Pedido #{data.orderNumber}</h1>
+
+                    {/* Connection status indicator */}
+                    <div className="mt-2 flex items-center justify-center gap-2">
+                        {connected ? (
+                            <>
+                                <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                                <p className="text-xs text-gray-500">Sincronizado con la cocina</p>
+                            </>
+                        ) : usingFallback ? (
+                            <>
+                                <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
+                                <p className="text-xs text-gray-500">Verificando estado</p>
+                            </>
+                        ) : null}
+                    </div>
                 </div>
 
                 {/* Status Card */}

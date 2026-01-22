@@ -184,10 +184,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
   const BASE = process.env.NEXT_PUBLIC_API_URL;
   const STORE_NAME = process.env.NEXT_PUBLIC_STORE_NAME || "SRA. BURGA";
+  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 
   /** 🔹 Arma el texto de WhatsApp (usa el mismo orden del resumen) */
-  function buildWhatsAppText(orderNumber?: number | string) {
+  function buildWhatsAppText(orderNumber?: number | string, trackingToken?: string) {
     const lines: string[] = [];
 
     const headerSuffix = orderNumber ? ` – Pedido #${orderNumber}` : "";
@@ -262,14 +263,21 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     });
 
     lines.push("");
-    
+
     if (deliveryMethod === "delivery" && DELIVERY_FEE > 0) {
       lines.push(`*Sub Total:* ${fmt(total)}`);
       lines.push(`*Envío:* ${fmt(DELIVERY_FEE)}`);
       lines.push("");
     }
-    
+
     lines.push(`*Total:* ${fmt(totalWithDelivery)}`);
+
+    // Agregar link de seguimiento si existe
+    if (trackingToken) {
+      lines.push("");
+      const trackingUrl = `${window.location.origin}/seguimiento/${trackingToken}`;
+      lines.push(`*Seguimiento:* ${trackingUrl}`);
+    }
 
     return lines.join("\n");
   }
@@ -313,6 +321,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         (process.env.NEXT_PUBLIC_SEND_ORDERS || "").toLowerCase() === "true";
 
       let createdOrderNumber: number | string | undefined;
+      let createdTrackingToken: string | undefined;
 
       if (SEND_TO_API) {
         if (!BASE) throw new Error("Falta NEXT_PUBLIC_API_URL");
@@ -450,13 +459,17 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         }
         console.log("✅ Orden creada:", text);
 
-        // intentar extraer el número de pedido para WhatsApp
+        // intentar extraer el número de pedido y tracking token para WhatsApp
         try {
           const parsed = JSON.parse(text);
           createdOrderNumber =
             parsed?.data?.orderNumber ??
             parsed?.orderNumber ??
             parsed?.data?.order?.orderNumber ??
+            undefined;
+          createdTrackingToken =
+            parsed?.data?.trackingToken ??
+            parsed?.trackingToken ??
             undefined;
         } catch {
           // si no es JSON, dejamos undefined
@@ -466,7 +479,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       setShowWhatsAppModal(true);
       // WhatsApp (con número si lo tenemos)
       const businessPhone = process.env.NEXT_PUBLIC_WA_NUMBER || "";
-      const textRaw = buildWhatsAppText(createdOrderNumber);
+      const textRaw = buildWhatsAppText(createdOrderNumber, createdTrackingToken);
       const phone = businessPhone.replace(/[^\d]/g, "");             // E.164 sin +
       const msg = encodeURIComponent(textRaw);
       
@@ -478,7 +491,16 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             
         // En desktop vamos directo a WhatsApp Web
         if (!isMobile) {
-          window.location.assign(webUrl);
+          window.open(webUrl, "_blank");
+          // Limpiar y redirigir a seguimiento
+          clearCart();
+          if (createdTrackingToken) {
+            setTimeout(() => {
+              window.location.href = `${APP_URL}/seguimiento/${createdTrackingToken}`;
+            }, 500);
+          } else {
+            onSuccess?.();
+          }
           return;
         }
       
@@ -514,7 +536,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         // Abrimos la app (con delay chico para que se vea)
         window.setTimeout(() => {
           window.location.assign(schemeUrl);
-        
+
           // Fallback SOLO si seguimos en esta pestaña con foco
           timer = window.setTimeout(() => {
             const stillHere =
@@ -522,7 +544,19 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             if (stillHere) window.location.assign(webUrl);
           }, 2400); // dejé tu mismo tiempo
         }, 1600);
-      
+
+        // Después de un tiempo, redirigir a la página de seguimiento
+        clearCart();
+        if (createdTrackingToken) {
+          setTimeout(() => {
+            window.location.href = `${APP_URL}/seguimiento/${createdTrackingToken}`;
+          }, 5000); // 5 segundos para que el usuario vea que se abre WhatsApp
+        } else {
+          setTimeout(() => {
+            onSuccess?.();
+          }, 5000);
+        }
+
         return;
       } else {
         try {
@@ -532,10 +566,6 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           alert("Configurá NEXT_PUBLIC_WA_NUMBER. Copiá y pegá este mensaje:\n\n" + textRaw);
         }
       }
-
-
-      clearCart();
-      onSuccess?.();
     } catch (e) {
       console.error("❌ Error en submitOrder:", e);
       alert("Ocurrió un error al procesar el pedido. Revisá consola.");
