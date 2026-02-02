@@ -17,6 +17,23 @@ interface SocketOrderEvent {
     updatedAt: string;
 }
 
+// Traduce estados a mensajes amigables para notificaciones
+function getNotificationMessage(status: string, orderNumber: number, type: string): { title: string; body: string } {
+    const statusMessages: Record<string, string> = {
+        'PENDING': 'Tu pedido está pendiente',
+        'PREPARING': 'Se está preparando tu pedido',
+        'READY': type === 'DELIVERY' ? 'Tu pedido está listo para enviar' : 'Tu pedido está listo para retirar',
+        'OUT_FOR_DELIVERY': 'Tu pedido está en camino',
+        'DELIVERED': type === 'DELIVERY' ? 'Tu pedido ha sido entregado' : 'Tu pedido está listo',
+        'CANCELED': 'Tu pedido ha sido cancelado',
+    };
+
+    return {
+        title: `Pedido #${orderNumber}`,
+        body: statusMessages[status] || `Estado: ${status}`
+    };
+}
+
 // Normaliza datos del backend al formato esperado por el frontend
 function normalizeOrderData(data: any): OrderData {
     const type = data.type || 'TAKEAWAY';
@@ -82,6 +99,11 @@ export function useOrderTracking(trackingToken: string) {
     useEffect(() => {
         let socket: Socket | null = null;
         let pollInterval: number | null = null;
+
+        // Request notification permission on mount
+        if ("Notification" in window && Notification.permission === "default") {
+            Notification.requestPermission();
+        }
 
         // Fallback: HTTP polling
         const startPolling = () => {
@@ -155,6 +177,16 @@ export function useOrderTracking(trackingToken: string) {
                         console.log("Setting data to:", normalizedData);
                         setData(normalizedData);
                         setLoading(false);
+
+                        // Send browser notification
+                        if ("Notification" in window && Notification.permission === "granted") {
+                            const { title, body } = getNotificationMessage(event.status, event.orderNumber, normalizedData.type);
+                            new Notification(title, {
+                                body,
+                                icon: "/brand/SraBurgaLogo.png",
+                                badge: "/brand/SraBurgaLogo.png"
+                            });
+                        }
                     })
                     .catch((e) => console.error("Error fetching fresh data after WS event:", e));
             });
