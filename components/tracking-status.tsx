@@ -16,13 +16,13 @@ export default function TrackingStatus({ status, type }: TrackingStatusProps) {
             color: "text-orange-500",
         },
         PREPARING: {
-            title: "Manos a la obra 👨‍🍳",
+            title: "Manos a la obra",
             subtitle: "Estamos preparando tu pedido.",
             icon: ChefHat,
             color: "text-blue-500",
         },
         READY: {
-            title: type === "TAKEAWAY" ? "¡Listo para retirar! 🛍️" : "Pedido preparado ✅",
+            title: type === "TAKEAWAY" ? "¡Listo para retirar!" : "Pedido preparado",
             subtitle: type === "TAKEAWAY"
                 ? "Podés pasar a buscarlo por el local."
                 : "Estamos esperando al repartidor.",
@@ -30,19 +30,19 @@ export default function TrackingStatus({ status, type }: TrackingStatusProps) {
             color: "text-green-600",
         },
         OUT_FOR_DELIVERY: {
-            title: "¡Tu pedido está en camino! 🛵",
+            title: "¡Tu pedido está en camino!",
             subtitle: "El repartidor está yendo a tu domicilio.",
             icon: Truck,
             color: "text-[var(--brand-color)]",
         },
         DELIVERED: {
-            title: "¡Pedido entregado! 🎉",
+            title: "¡Pedido entregado!",
             subtitle: "Gracias por elegirnos. ¡Que lo disfrutes!",
             icon: CheckCircle2,
             color: "text-green-600",
         },
         CANCELED: {
-            title: "Pedido cancelado ❌",
+            title: "Pedido cancelado",
             subtitle: "Si tenés dudas, comunicate con nosotros.",
             icon: XCircle,
             color: "text-red-500",
