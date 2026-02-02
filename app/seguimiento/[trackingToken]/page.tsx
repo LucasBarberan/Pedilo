@@ -14,7 +14,7 @@ export default function TrackingPage({ params }: { params: { trackingToken: stri
 
     if (loading) {
         return (
-            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+            <div className="flex-1 bg-gray-50 flex items-center justify-center">
                 <Loader2 className="animate-spin text-[var(--brand-color)] w-8 h-8" />
             </div>
         );
@@ -23,11 +23,11 @@ export default function TrackingPage({ params }: { params: { trackingToken: stri
     if (!data || data.error) {
         if (!data || data.error) {
             return (
-                <div className="min-h-screen bg-gray-50">
+                <div className="flex flex-col flex-1 bg-gray-50">
                     <SiteHeader showBack={false} />
                     <div className="h-[6px] w-full bg-white" />
 
-                    <main className="max-w-md mx-auto p-4 space-y-6">
+                    <main className="flex-1 max-w-md mx-auto p-4 space-y-6 w-full">
                         <div className="text-center mt-4">
                             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Seguimiento</p>
                         </div>
@@ -47,12 +47,12 @@ export default function TrackingPage({ params }: { params: { trackingToken: stri
     }
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="flex flex-col flex-1 bg-gray-50">
             <SiteHeader showBack={false} />
             {/* Brand strip */}
             <div className="h-[6px] w-full bg-white" />
 
-            <main className="max-w-md mx-auto p-4 space-y-6">
+            <main className="flex-1 max-w-md mx-auto p-4 space-y-6 w-full">
 
                 {/* Header simple */}
                 <div className="text-center mt-4">
