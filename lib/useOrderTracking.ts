@@ -88,7 +88,8 @@ export function useOrderTracking(trackingToken: string) {
             setUsingFallback(true);
             const fetchStatus = async () => {
                 try {
-                    const res = await fetch(`/api/orders/track/${trackingToken}?t=${Date.now()}`, {
+                    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+                    const res = await fetch(`${apiUrl}/orders/track/${trackingToken}?t=${Date.now()}`, {
                         cache: "no-store",
                     });
                     if (!res.ok) {
@@ -139,7 +140,8 @@ export function useOrderTracking(trackingToken: string) {
                 console.log("Order status changed via WebSocket:", event);
 
                 // Fetch fresh data from API to get all fields
-                fetch(`/api/orders/track/${trackingToken}?t=${Date.now()}`, {
+                const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+                fetch(`${apiUrl}/orders/track/${trackingToken}?t=${Date.now()}`, {
                     cache: "no-store",
                 })
                     .then((res) => {
@@ -176,7 +178,8 @@ export function useOrderTracking(trackingToken: string) {
             // Initial fetch via HTTP while waiting for WebSocket
             (async () => {
                 try {
-                    const res = await fetch(`/api/orders/track/${trackingToken}?t=${Date.now()}`, {
+                    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+                    const res = await fetch(`${apiUrl}/orders/track/${trackingToken}?t=${Date.now()}`, {
                         cache: "no-store",
                     });
                     if (!res.ok) {
