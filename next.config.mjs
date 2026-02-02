@@ -15,6 +15,7 @@ const nextConfig = {
   },
   // permití acceder al dev server desde tu IP de LAN
   allowedDevOrigins: ['api.demo.keltron.app'],
+  output: 'standalone',
 }
 
 export default nextConfig
