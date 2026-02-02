@@ -127,40 +127,40 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   // - sin 54, sin 0 inicial, sin 9 de móvil internacional, sin 15.
   const normalizePhoneAR = (raw: string) => {
     let digits = (raw || "").replace(/\D/g, "");
-  
+
     // Si viene con 54 adelante, lo sacamos
     if (digits.startsWith("54")) digits = digits.slice(2);
-  
+
     // Si viene con 0 adelante, lo sacamos (prefijo nacional)
     if (digits.startsWith("0")) digits = digits.slice(1);
-  
+
     // Si viene con 9 adelante (móvil internacional: +54 9 ...), lo sacamos
     // Ej: 93537327969 -> 3537327969
     if (digits.startsWith("9")) digits = digits.slice(1);
-  
+
     // Sacar "15" después del código de área (2 a 4 dígitos)
     // 11 15 55554444 -> 11 55554444
     digits = digits.replace(/^(\d{2,4})15(\d+)$/, "$1$2");
-  
+
     return digits;
   };
-  
+
   const isPhoneValid = (v: string) => {
     // Permitimos mientras tipean
     if (!/^[0-9\s()+-]*$/.test(v)) return false;
-  
+
     const digits = normalizePhoneAR(v);
-  
+
     // AR típico: 10 dígitos (área 2-4 + local 6-8) pero dejamos rango flexible
     return digits.length >= 8 && digits.length <= 15;
   };
-  
+
   const getPhoneErrorMessage = (v: string) => {
     if (!/^[0-9\s()+-]*$/.test(v)) return "Solo números y símbolos válidos (+ - espacios)";
-  
+
     const rawDigits = (v || "").replace(/\D/g, "");
     const digits = normalizePhoneAR(v);
-  
+
     // Mensajes más específicos
     if (rawDigits.startsWith("0") && !v.trim().startsWith("+")) {
       return "❌ No incluyas el 0 inicial del código de área";
@@ -172,10 +172,10 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     if (/^(54)?9?\d{2,4}15/.test(rawDigits)) {
       return "❌ No incluyas el 15 antes del número";
     }
-  
+
     if (digits.length < 8) return "El teléfono es muy corto (mín. 8 dígitos)";
     if (digits.length > 15) return "El teléfono es muy largo (máx. 15 dígitos)";
-  
+
     return "Revisá el formato del teléfono";
   };
 
@@ -276,7 +276,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     if (trackingToken) {
       lines.push("");
       const trackingUrl = `${window.location.origin}/seguimiento/${trackingToken}`;
-      lines.push(`*Seguimiento:* ${trackingUrl}`);
+      lines.push(`*Seguí tu pedido acá:* ${trackingUrl}`);
     }
 
     return lines.join("\n");
@@ -482,13 +482,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       const textRaw = buildWhatsAppText(createdOrderNumber, createdTrackingToken);
       const phone = businessPhone.replace(/[^\d]/g, "");             // E.164 sin +
       const msg = encodeURIComponent(textRaw);
-      
+
 
       if (phone) {
         const schemeUrl = `whatsapp://send?phone=${phone}&text=${msg}`;
         const webUrl = `https://wa.me/${phone}?text=${msg}`;
         const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-            
+
         // En desktop vamos directo a WhatsApp Web
         if (!isMobile) {
           window.open(webUrl, "_blank");
@@ -503,10 +503,10 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           }
           return;
         }
-      
+
         let launched = false;
         let timer: number;
-      
+
         const cleanup = () => {
           launched = true;
           clearTimeout(timer);
@@ -514,25 +514,25 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           window.removeEventListener("blur", onHide);
           document.removeEventListener("visibilitychange", onVisibility);
         };
-      
+
         const onHide = () => cleanup();
         const onVisibility = () => {
           if (document.hidden) cleanup();
         };
-      
+
         // Si la app se abre, la pestaña pierde foco/visibilidad → cancelamos fallback
         window.addEventListener("pagehide", onHide, { once: true });
         window.addEventListener("blur", onHide, { once: true });
         document.addEventListener("visibilitychange", onVisibility, { once: true });
-      
+
         // ✅ MOSTRAR CARTEL ANTES DE SALIR
         setShowWhatsAppModal(true);
-      
+
         // ✅ Esperar a que React renderice (2 frames) + delay cortito
         await new Promise<void>((resolve) =>
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
         );
-      
+
         // Abrimos la app (con delay chico para que se vea)
         window.setTimeout(() => {
           window.location.assign(schemeUrl);
@@ -599,8 +599,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               <button
                 onClick={() => setDeliveryMethod("delivery")}
                 className={`px-3 py-2 rounded-lg border ${deliveryMethod === "delivery"
-                    ? "border-[var(--brand-color)] bg-[#fff5f2]"
-                    : "border-transparent hover:bg-black/5"
+                  ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                  : "border-transparent hover:bg-black/5"
                   }`}
               >
                 Delivery
@@ -608,8 +608,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               <button
                 onClick={() => setDeliveryMethod("pickup")}
                 className={`px-3 py-2 rounded-lg border ${deliveryMethod === "pickup"
-                    ? "border-[var(--brand-color)] bg-[#fff5f2]"
-                    : "border-transparent hover:bg-black/5"
+                  ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                  : "border-transparent hover:bg-black/5"
                   }`}
               >
                 Retiro en local
@@ -654,8 +654,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             pattern="[0-9\s()+\-]{8,15}"
             title="Sin 0 inicial ni 15. Ej: 1155554444 o +541155554444"
             className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 mb-1 ${phoneTouched && !isPhoneValid(customer.phone)
-                ? "border-red-500 focus:ring-red-400"
-                : "focus:ring-[var(--brand-color)]"
+              ? "border-red-500 focus:ring-red-400"
+              : "focus:ring-[var(--brand-color)]"
               }`}
             value={customer.phone}
             onChange={(e) => {
@@ -664,12 +664,12 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               if (formError && isPhoneValid(v)) setFormError("");
             }}
             onBlur={() => {
-                setPhoneTouched(true);
-                const normalized = normalizePhoneAR(customer.phone);
-                if (normalized !== customer.phone) {
-                  setCustomer({ ...customer, phone: normalized });
-                }
-              }}
+              setPhoneTouched(true);
+              const normalized = normalizePhoneAR(customer.phone);
+              if (normalized !== customer.phone) {
+                setCustomer({ ...customer, phone: normalized });
+              }
+            }}
             placeholder="Ej: 1155554444"
             aria-invalid={phoneTouched && !isPhoneValid(customer.phone)}
             aria-describedby="phone-help"
