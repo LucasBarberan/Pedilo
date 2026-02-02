@@ -38,9 +38,9 @@ export default function RootLayout({
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable} h-full flex flex-col`}>
         <Suspense fallback={null}>
           <CartProvider>
-            <div id="app-scroll" className="flex-1 overflow-auto">
+            <div id="app-scroll" className="flex-1 overflow-auto flex flex-col">
               {children}
-              <DeveloperFooter scrollRootId="app-scroll" />
+              <DeveloperFooter />
             </div>
           </CartProvider>
         </Suspense>
