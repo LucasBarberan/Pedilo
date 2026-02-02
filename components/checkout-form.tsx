@@ -493,12 +493,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         if (!isMobile) {
           window.open(webUrl, "_blank");
           // Limpiar y redirigir a seguimiento
-          clearCart();
           if (createdTrackingToken) {
             setTimeout(() => {
+              clearCart();
               window.location.href = `${APP_URL}/seguimiento/${createdTrackingToken}`;
             }, 500);
           } else {
+            clearCart();
             onSuccess?.();
           }
           return;
@@ -546,13 +547,14 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         }, 1600);
 
         // Después de un tiempo, redirigir a la página de seguimiento
-        clearCart();
         if (createdTrackingToken) {
           setTimeout(() => {
+            clearCart();
             window.location.href = `${APP_URL}/seguimiento/${createdTrackingToken}`;
           }, 5000); // 5 segundos para que el usuario vea que se abre WhatsApp
         } else {
           setTimeout(() => {
+            clearCart();
             onSuccess?.();
           }, 5000);
         }
