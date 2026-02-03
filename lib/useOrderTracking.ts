@@ -4,7 +4,7 @@ import io, { Socket } from "socket.io-client";
 export interface OrderData {
     orderNumber: number;
     type: "DELIVERY" | "TAKEAWAY";
-    clientStatus: "PENDING" | "PREPARING" | "READY" | "OUT_FOR_DELIVERY" | "DELIVERED" | "CANCELED";
+    clientStatus: "PENDING" | "CONFIRMED" | "PREPARING" | "READY" | "OUT_FOR_DELIVERY" | "DELIVERED" | "CANCELED";
     createdAt: string;
     completedAt: string | null;
     cancelled: boolean;
@@ -23,11 +23,13 @@ function normalizeOrderData(data: any): OrderData {
     let backendStatus = data.status || data.clientStatus || 'PENDING';
     let cancelled = data.cancelled || false;
 
-    let clientStatus: "PENDING" | "PREPARING" | "READY" | "OUT_FOR_DELIVERY" | "DELIVERED" | "CANCELED";
+    let clientStatus: "PENDING" | "CONFIRMED" | "PREPARING" | "READY" | "OUT_FOR_DELIVERY" | "DELIVERED" | "CANCELED";
 
     // Map backend status to frontend clientStatus
     if (backendStatus === 'PENDING') {
         clientStatus = 'PENDING';
+    } else if (backendStatus === 'CONFIRMED') {
+        clientStatus = 'CONFIRMED';
     } else if (backendStatus === 'PREPARING') {
         clientStatus = 'PREPARING';
     } else if (backendStatus === 'READY') {

@@ -1,6 +1,6 @@
 import { CheckCircle2, XCircle, Clock, ChefHat, ShoppingBag, Truck } from "lucide-react";
 
-type ClientStatus = "PENDING" | "PREPARING" | "READY" | "OUT_FOR_DELIVERY" | "DELIVERED" | "CANCELED";
+type ClientStatus = "PENDING" | "CONFIRMED" | "PREPARING" | "READY" | "OUT_FOR_DELIVERY" | "DELIVERED" | "CANCELED";
 
 interface TrackingStatusProps {
     status: ClientStatus;
@@ -8,7 +8,10 @@ interface TrackingStatusProps {
 }
 
 export default function TrackingStatus({ status, type }: TrackingStatusProps) {
-    const messages: Record<ClientStatus, { title: string; subtitle: string; icon: any; color: string }> = {
+    // Mapear CONFIRMED a PENDING para mostrar la misma etapa visual
+    const visualStatus = status === "CONFIRMED" ? "PENDING" : status;
+
+    const messages: Record<Exclude<ClientStatus, "CONFIRMED">, { title: string; subtitle: string; icon: any; color: string }> = {
         PENDING: {
             title: "Recibimos tu pedido",
             subtitle: "Estamos confirmando los detalles.",
@@ -49,7 +52,7 @@ export default function TrackingStatus({ status, type }: TrackingStatusProps) {
         },
     };
 
-    const current = messages[status] || messages.PENDING;
+    const current = messages[visualStatus] || messages.PENDING;
     const Icon = current.icon;
 
     return (

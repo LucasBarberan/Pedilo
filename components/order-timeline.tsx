@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 
 type StepStatus = "pending" | "current" | "completed";
 
-export type OrderState = "PENDING" | "PREPARING" | "READY" | "OUT_FOR_DELIVERY" | "DELIVERED" | "CANCELED";
+export type OrderState = "PENDING" | "CONFIRMED" | "PREPARING" | "READY" | "OUT_FOR_DELIVERY" | "DELIVERED" | "CANCELED";
 
 interface TimelineStepProps {
     icon: React.ElementType;
@@ -81,6 +81,7 @@ export default function OrderTimeline({ status, type }: OrderTimelineProps) {
     // Determine active step index
     /*
       PENDING -> index 0 (current)
+      CONFIRMED -> index 0 (current) - Mismo estado visual que PENDING
       PREPARING -> index 1 (current), 0 completed
       READY -> index 2 (current), 0-1 completed
       OUT_FOR_DELIVERY -> index 3 (current for delivery), 0-2 completed
@@ -88,6 +89,7 @@ export default function OrderTimeline({ status, type }: OrderTimelineProps) {
     */
 
     let currentIndex = 0;
+    if (status === "CONFIRMED") currentIndex = 0; // Mapped to PENDING state visually
     if (status === "PREPARING") currentIndex = 1;
     if (status === "READY") currentIndex = 2;
     if (status === "OUT_FOR_DELIVERY") currentIndex = 3;
