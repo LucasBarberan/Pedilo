@@ -11,6 +11,7 @@ import { Trash2 } from "lucide-react";
 import ClosedBanner from "@/components/closed-banner";
 import InfoBanner from "@/components/info-banner";
 import { STORE_CLOSED_MSG } from "@/lib/flags";
+import { fixImageUrl } from "@/lib/img";
 import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 
 const fmt = (n: number) => `$${n.toLocaleString("es-AR")}`;
@@ -125,7 +126,7 @@ export default function CartPage() {
                     {/* Imagen */}
                     <div className="relative w-14 h-14 overflow-hidden rounded-md bg-black/5 flex-shrink-0">
                       <Image
-                        src={it.image?.trim() ? it.image : "/placeholder.svg"}
+                        src={fixImageUrl(it.image) || "/placeholder.svg"}
                         alt={it.name}
                         fill
                         className="object-cover"
