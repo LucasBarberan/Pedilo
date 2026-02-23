@@ -134,104 +134,94 @@ export default function CartPage() {
 
                     {/* Texto / detalles */}
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold leading-tight whitespace-normal break-words">
-                        {it.name}
-                      </div>
-
-                      {/* Detalles producto suelto */}
+                      {/* PRODUCTO SIMPLE */}
                       {!isCombo && (
-                        <>
-                          {/* Mostrar opciones seleccionadas (nuevo formato) */}
+                        <div className="space-y-0.5">
+                          <p className="text-sm font-semibold text-gray-900 leading-snug whitespace-normal break-words">
+                            {it.name}
+                          </p>
                           {it.selectedOptions && it.selectedOptions.length > 0 ? (
-                            <div className="text-xs text-muted-foreground">
-                              {it.selectedOptions.map((opt: any, idx: number) => (
-                                <span key={idx}>
-                                  {opt.optionName}
-                                  {opt.priceExtra > 0 && ` (+$${opt.priceExtra.toLocaleString()})`}
-                                  {idx < it.selectedOptions.length - 1 && " + "}
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            /* Fallback legacy */
-                            sizeLabel && (
-                              <div className="text-xs text-muted-foreground">Tamaño: {sizeLabel}</div>
-                            )
+                            <p className="text-xs text-gray-500">
+                              {it.selectedOptions.map((opt: any) => opt.optionName).join(" + ")}
+                            </p>
+                          ) : sizeLabel && (
+                            <p className="text-xs text-gray-500">{sizeLabel}</p>
                           )}
-                          {it.observations && (
-                            <div className="text-xs text-muted-foreground">Obs: {it.observations}</div>
+                          {it.observations?.trim() && (
+                            <p className="text-xs text-gray-400 italic">Obs: {it.observations}</p>
                           )}
-                        </>
+                        </div>
                       )}
 
-                      {/* Detalles combo */}
+                      {/* COMBO */}
                       {isCombo && (
-                        <div className="mt-1 text-xs text-muted-foreground space-y-1">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-semibold text-gray-900 leading-snug whitespace-normal break-words">
+                              {it.name}
+                            </p>
+                            <span
+                              className="inline-flex items-center text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full border leading-none shrink-0"
+                              style={{
+                                backgroundColor: "color-mix(in srgb, var(--brand-color) 10%, white)",
+                                borderColor: "color-mix(in srgb, var(--brand-color) 30%, transparent)",
+                                color: "var(--brand-color)"
+                              }}
+                            >
+                              COMBO
+                            </span>
+                          </div>
                           {main && (
-                            <div>
-                              <span className="font-medium">Principal:</span>{" "}
-                              {main.name || "Producto"}
-                              {/* Mostrar opciones del combo (nuevo formato) */}
-                              {it.selectedOptions && it.selectedOptions.length > 0 ? (
-                                <span>
-                                  {" · "}
-                                  {it.selectedOptions.map((opt: any, idx: number) => (
-                                    <span key={idx}>
-                                      {opt.optionName}
-                                      {idx < it.selectedOptions.length - 1 && " + "}
+                            <div
+                              className="pl-2 border-l-2 space-y-0.5"
+                              style={{ borderColor: "color-mix(in srgb, var(--brand-color) 35%, transparent)" }}
+                            >
+                              <p className="text-xs text-gray-600 leading-snug">
+                                {main.name || "Producto"}
+                                {it.selectedOptions && it.selectedOptions.length > 0 ? (
+                                  <span className="text-gray-400">
+                                    {" "}({it.selectedOptions.map((opt: any) => opt.optionName).join(" + ")})
+                                  </span>
+                                ) : sizeLabel && (
+                                  <span className="text-gray-400"> ({sizeLabel})</span>
+                                )}
+                                {main.qty && main.qty > 1 ? ` x${main.qty}` : ""}
+                              </p>
+                              {fixedExtras.length > 0 && (
+                                <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                                  {fixedExtras.map((e, idx) => (
+                                    <span key={idx} className="text-xs text-gray-500">
+                                      {e.name || "Ítem"}{e.qty && e.qty > 1 ? ` x${e.qty}` : ""}
                                     </span>
                                   ))}
-                                </span>
-                              ) : (
-                                sizeLabel && ` · Tamaño: ${sizeLabel}`
+                                </div>
                               )}
-                              {main.qty && main.qty > 1 ? ` x${main.qty}` : ""}
-                            </div>
-                          )}
-
-                          {fixedExtras.length > 0 && (
-                            <div>
-                              <span className="font-medium">Incluye:</span>
-                              <ul className="list-disc pl-5">
-                                {fixedExtras.map((e, idx) => (
-                                  <li key={idx}>
-                                    {e.name || "Ítem"}
-                                    {e.qty && e.qty > 1 ? ` x${e.qty}` : ""}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-
-                          {inclusionsChosen.length > 0 && (
-                            <div>
-                              <span className="font-medium">Elegiste:</span>
-                              <ul className="list-disc pl-5">
-                                {inclusionsChosen.map((ci, idx) => (
-                                  <li key={idx}>
-                                    <span>{ci.name}</span>
-                                    {typeof ci.unitPrice === "number" ? (
-                                      <>
-                                        {" "}
-                                        {typeof ci.basePrice === "number" && ci.basePrice !== ci.unitPrice ? (
-                                          <>
-                                            <span className="line-through opacity-50 mr-1">
-                                              {fmt(ci.basePrice)}
-                                            </span>
+                              {inclusionsChosen.length > 0 && (
+                                <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                                  {inclusionsChosen.map((ci, idx) => (
+                                    <span key={idx} className="inline-flex items-center gap-0.5 text-xs text-gray-500">
+                                      {ci.name}
+                                      {typeof ci.unitPrice === "number" && (
+                                        <span className="ml-0.5">
+                                          {typeof ci.basePrice === "number" && ci.basePrice !== ci.unitPrice ? (
+                                            <>
+                                              <span className="line-through opacity-50 mr-0.5">{fmt(ci.basePrice)}</span>
+                                              <span className="font-medium">{fmt(ci.unitPrice)}</span>
+                                            </>
+                                          ) : (
                                             <span className="font-medium">{fmt(ci.unitPrice)}</span>
-                                          </>
-                                        ) : (
-                                          <span className="font-medium">{fmt(ci.unitPrice)}</span>
-                                        )}
-                                      </>
-                                    ) : null}
-                                  </li>
-                                ))}
-                              </ul>
+                                          )}
+                                        </span>
+                                      )}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           )}
-
-                          {it.observations && <div>Obs: {String(it.observations)}</div>}
+                          {it.observations?.trim() && (
+                            <p className="text-xs text-gray-400 italic pl-2">Obs: {String(it.observations)}</p>
+                          )}
                         </div>
                       )}
                     </div>
@@ -244,19 +234,6 @@ export default function CartPage() {
                         md:w-auto md:flex-row md:items-center md:gap-3
                       "
                     >
-                      {isCombo && (
-                        <span
-                          className="
-                            self-end md:self-auto
-                            text-[10px] px-2 py-0.5 rounded-full
-                            bg-[#fff5f2] border border-[var(--brand-color)]/30 text-[var(--brand-color)]
-                            font-semibold
-                          "
-                        >
-                          COMBO
-                        </span>
-                      )}
-
                       {/* Controles de cantidad */}
                       <div className="flex items-center gap-2">
                         <Button

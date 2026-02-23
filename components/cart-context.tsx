@@ -72,37 +72,40 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
    Helpers para mergeo
    ======================= */
 
-// Firma para saber si dos items pueden mergearse (solo si NO tienen observaciones)
+// Firma estricta: dos items se mergean SOLO si son exactamente iguales
+// (mismo producto + mismas opciones + sin observaciones).
+// Igual al POS: "Doble + Bacon" nunca mergea con "Doble".
 function getMergeSignature(it: CartItem): string | null {
-  // si hay observaciones, NO se mergea
+  // con observaciones nunca se mergea
   if (it.observations && it.observations.trim() !== "") return null;
 
   const kind = it.kind || "product";
 
   if (kind !== "combo") {
-    // Producto suelto: mismo product_id + mismas opciones seleccionadas
     const prodId = Number(it.id) || 0;
 
-    // Si tiene selectedOptions, usamos eso
-    if (it.selectedOptions && it.selectedOptions.length > 0) {
-      const opts = it.selectedOptions
-        .map(o => `${o.productOptionId}`)
-        .sort()
-        .join(',');
-      return `prod|${prodId}|opts:${opts}`;
-    }
+    // Firma basada en TODOS los productOptionId ordenados numéricamente.
+    // Sin fallback legacy: si dos items tienen distintas opciones (aunque sea
+    // solo el extra "Bacon") producen firmas distintas y NO se mergean.
+    const allOptIds = (it.selectedOptions ?? [])
+      .map(o => Number(o.productOptionId))
+      .filter(id => Number.isFinite(id) && id > 0)
+      .sort((a, b) => a - b)
+      .join(',');
 
-    // Fallback para compatibilidad con código legacy
-    const optId  = Number(it.productOptionId || it.optionId || 0) || 0;
-    const size   = String(it.size || it.optionName || "").toLowerCase();
-    return `prod|${prodId}|${optId}|${size}`;
+    return `prod|${prodId}|opts:${allOptIds}`;
   }
 
-  // Combo: firmamos por combo id, opción principal y composición interna
+  // Combo: firmamos por combo id + selectedOptions (extras como Bacon) + composición interna
   const comboId = Number(it.id) || 0;
-  const optId   = Number(it.productOptionId || it.optionId || 0) || 0;
 
-  // Normalizamos items internos para que el orden no afecte
+  // selectedOptions captura tamaño + extras del combo (ej: Doble, Bacon)
+  const comboOptIds = (it.selectedOptions ?? [])
+    .map(o => Number(o.productOptionId))
+    .filter(id => Number.isFinite(id) && id > 0)
+    .sort((a, b) => a - b)
+    .join(',');
+
   const inner = (it.comboItems || [])
     .map(ci => ({
       pid: Number(ci.productId) || 0,
@@ -112,7 +115,7 @@ function getMergeSignature(it: CartItem): string | null {
     }))
     .sort((a, b) => a.pid - b.pid || a.opt - b.opt || (a.inc === b.inc ? 0 : a.inc ? 1 : -1));
 
-  return `combo|${comboId}|${optId}|${JSON.stringify(inner)}`;
+  return `combo|${comboId}|opts:${comboOptIds}|${JSON.stringify(inner)}`;
 }
 
 // Precio unitario robusto a partir del item actual
@@ -159,6 +162,16 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
       const merged: CartItem = {
         ...curr,
+        // 🔒 CRÍTICO: opciones siempre del NUEVO item (igual que el POS).
+        // Si usáramos ...curr, el item existente "ganaría" con sus opciones
+        // aunque el nuevo tenga opciones distintas (ej: bacon vs sin bacon).
+        selectedOptions: newItem.selectedOptions,
+        productOptionId: newItem.productOptionId,
+        optionId:        newItem.optionId,
+        optionName:      newItem.optionName,
+        priceExtra:      newItem.priceExtra,
+        size:            newItem.size,
+        price:           newItem.price,
         quantity: currQty + addQty,
         finalPrice: Math.round(unit * (currQty + addQty)),
         // 🔒 IMPORTANTE: Deep copy de comboItems para evitar mutaciones

@@ -207,7 +207,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     );
     if (notes?.trim()) lines.push(`*Obs generales:* ${notes.trim()}`);
     lines.push("");
-    lines.push("*Items:*");
+    lines.push("*Detalle:*");
 
     // 👇 usar el ordenamiento y desglosar combos
     sortedItems.forEach((it: any) => {
@@ -225,19 +225,19 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       } else {
         // Fallback para compatibilidad
         const sizeLabel = (it.size as string) || (comboData.optionName as string);
-        if (sizeLabel) optionsLabel = ` (tamaño: ${sizeLabel})`;
+        if (sizeLabel) optionsLabel = ` (${sizeLabel})`;
       }
 
       if (!isCombo) {
         lines.push(
-          `• ${it.quantity} x ${it.name}${optionsLabel} – ${fmt(unit)} c/u`
+          `• ${it.quantity} x ${it.name}${optionsLabel} – ${fmt(unit)}${it.quantity > 1 ? " c/u" : ""}`
         );
         if (it.observations?.trim()) {
           lines.push(`   Obs: ${it.observations.trim()}`);
         }
       } else {
         lines.push(
-          `• ${it.quantity} x ${it.name} – ${fmt(unit)} c/u`
+          `• ${it.quantity} x ${it.name} – ${fmt(unit)}${it.quantity > 1 ? " c/u" : ""}`
         );
         if (it.observations?.trim()) {
           lines.push(`   Obs: ${it.observations.trim()}`);
@@ -248,17 +248,14 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
         if (main) {
           lines.push(
-            `   · Principal: ${main.name || "Producto"}${optionsLabel}${main.qty && main.qty > 1 ? ` x${main.qty}` : ""}`
+            `\t\t${main.name || "Producto"}${optionsLabel}${main.qty && main.qty > 1 ? ` x${main.qty}` : ""}`
           );
         }
-        if (extras.length > 0) {
-          lines.push(`   · Incluye:`);
-          extras.forEach((e) => {
-            lines.push(
-              `     - ${e.name || "Ítem"}${e.qty && e.qty > 1 ? ` x${e.qty}` : ""}`
-            );
-          });
-        }
+        extras.forEach((e) => {
+          lines.push(
+            `\t\t${e.name || "Ítem"}${e.qty && e.qty > 1 ? ` x${e.qty}` : ""}`
+          );
+        });
       }
     });
 
@@ -775,19 +772,25 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
               if (!isCombo) {
                 return (
-                  <div key={it.uniqueId} className="flex items-start justify-between">
-                    <div className="text-sm">
-                      <div className="font-semibold">{it.name}</div>
-                      <div className="text-muted-foreground">
-                        {it.quantity} x {fmt(unit)}{sizeLabel ? ` · Tamaño: ${sizeLabel}` : ""}
-                      </div>
-                      {it.observations?.trim() ? (
-                        <div className="text-muted-foreground">Obs: {it.observations.trim()}</div>
+                  <div key={it.uniqueId} className="flex items-start justify-between gap-3 py-1">
+                    <div className="flex-1 min-w-0 space-y-0.5">
+                      <p className="text-sm font-semibold text-gray-900 leading-snug">
+                        {it.name}{it.quantity > 1 ? ` ×${it.quantity}` : ""}
+                      </p>
+                      {(it.selectedOptions && it.selectedOptions.length > 0) || sizeLabel ? (
+                        <p className="text-xs text-gray-500">
+                          {it.selectedOptions && it.selectedOptions.length > 0
+                            ? it.selectedOptions.map((o: any) => o.optionName).join(" + ")
+                            : sizeLabel}
+                        </p>
                       ) : null}
+                      {it.observations?.trim() && (
+                        <p className="text-xs text-gray-400 italic">Obs: {it.observations.trim()}</p>
+                      )}
                     </div>
-                    <div className="text-sm font-semibold">
+                    <p className="text-sm font-bold text-gray-900 tabular-nums shrink-0 pt-0.5">
                       {fmt(it.finalPrice || it.price * it.quantity)}
-                    </div>
+                    </p>
                   </div>
                 );
               }
@@ -796,43 +799,56 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               const extras = comboData.comboItems?.filter((x) => !x.isMain) || [];
 
               return (
-                <div key={it.uniqueId} className="flex items-start justify-between">
-                  <div className="text-sm">
-                    <div className="font-semibold">
-                      {it.name}{" "}
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#fff5f2] border border-[var(--brand-color)]/30 text-[var(--brand-color)] font-semibold align-middle">
-                        COMBO
-                      </span>
-                    </div>
-                    <div className="text-muted-foreground">{it.quantity} x {fmt(unit)}</div>
-
-                    <div className="mt-1 text-xs text-muted-foreground space-y-1">
+                <div key={it.uniqueId} className="py-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-gray-900 leading-snug">{it.name}</p>
+                        <span
+                          className="inline-flex items-center text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full border leading-none shrink-0"
+                          style={{
+                            backgroundColor: "color-mix(in srgb, var(--brand-color) 10%, white)",
+                            borderColor: "color-mix(in srgb, var(--brand-color) 30%, transparent)",
+                            color: "var(--brand-color)"
+                          }}
+                        >
+                          COMBO
+                        </span>
+                      </div>
                       {main && (
-                        <div>
-                          <span className="font-medium">Principal:</span>{" "}
-                          {main.name || "Producto"}
-                          {sizeLabel ? ` · Tamaño: ${sizeLabel}` : ""}
-                          {main.qty && main.qty > 1 ? ` x${main.qty}` : ""}
+                        <div
+                          className="pl-2 border-l-2 space-y-0.5 mt-0.5"
+                          style={{ borderColor: "color-mix(in srgb, var(--brand-color) 35%, transparent)" }}
+                        >
+                          <p className="text-xs text-gray-600 leading-snug">
+                            {main.name || "Producto"}
+                            {(it.selectedOptions && it.selectedOptions.length > 0) || sizeLabel ? (
+                              <span className="text-gray-400">
+                                {" "}({it.selectedOptions && it.selectedOptions.length > 0
+                                  ? it.selectedOptions.map((o: any) => o.optionName).join(" + ")
+                                  : sizeLabel})
+                              </span>
+                            ) : null}
+                            {main.qty && main.qty > 1 ? ` x${main.qty}` : ""}
+                          </p>
+                          {extras.length > 0 && (
+                            <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                              {extras.map((e, idx) => (
+                                <span key={idx} className="text-xs text-gray-500">
+                                  {e.name || "Ítem"}{e.qty && e.qty > 1 ? ` x${e.qty}` : ""}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
-                      {extras.length > 0 && (
-                        <div>
-                          <span className="font-medium">Incluye:</span>
-                          <ul className="list-disc pl-5">
-                            {extras.map((e, idx) => (
-                              <li key={idx}>
-                                {e.name || "Ítem"}{e.qty && e.qty > 1 ? ` x${e.qty}` : ""}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
+                      {it.observations?.trim() && (
+                        <p className="text-xs text-gray-400 italic pl-2">Obs: {it.observations.trim()}</p>
                       )}
-                      {it.observations?.trim() ? <div>Obs: {it.observations.trim()}</div> : null}
                     </div>
-                  </div>
-
-                  <div className="text-sm font-semibold">
-                    {fmt(it.finalPrice || it.price * it.quantity)}
+                    <p className="text-sm font-bold text-gray-900 tabular-nums shrink-0 pt-0.5">
+                      {fmt(it.finalPrice || it.price * it.quantity)}
+                    </p>
                   </div>
                 </div>
               );
