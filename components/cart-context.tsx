@@ -61,6 +61,7 @@ interface CartContextType {
   addToCart: (item: CartItem) => void;
   removeFromCart: (uniqueId: string) => void;
   updateQuantity: (uniqueId: string, quantity: number) => void;
+  updateItemPrice: (uniqueId: string, price: number, finalPrice: number) => void;
   clearCart: () => void;
   getTotalItems: () => number;
   getTotalPrice: () => number;
@@ -188,6 +189,14 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setItems((prev) => prev.filter((item) => item.uniqueId !== uniqueId));
   };
 
+  const updateItemPrice = (uniqueId: string, price: number, finalPrice: number) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.uniqueId === uniqueId ? { ...item, price, finalPrice } : item
+      )
+    );
+  };
+
   const updateQuantity = (uniqueId: string, quantity: number) => {
     if (quantity <= 0) {
       removeFromCart(uniqueId);
@@ -228,6 +237,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         addToCart,
         removeFromCart,
         updateQuantity,
+        updateItemPrice,
         clearCart,
         getTotalItems,
         getTotalPrice,

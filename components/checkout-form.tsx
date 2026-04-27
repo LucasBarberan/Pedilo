@@ -5,6 +5,7 @@ import { useCart, CartComboItem } from "@/components/cart-context";
 import { Button } from "@/components/ui/button";
 import { useRef, useEffect, useMemo, useState } from "react";
 import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
+import { useCartRefresh } from "@/hooks/useCartRefresh";
 
 type Customer = {
   name: string;
@@ -51,6 +52,12 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "mp">("cash");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const { refreshCartPrices, isRefreshing } = useCartRefresh();
+
+  useEffect(() => {
+    refreshCartPrices();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [phoneTouched, setPhoneTouched] = useState(false);
   const [formError, setFormError] = useState<string>("");
@@ -188,7 +195,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
 
   /** 🔹 Arma el texto de WhatsApp (usa el mismo orden del resumen) */
-  function buildWhatsAppText(orderNumber?: number | string, trackingToken?: string) {
+  function buildWhatsAppText(orderNumber?: number | string, trackingToken?: string, confirmedTotal?: number) {
     const lines: string[] = [];
 
     const headerSuffix = orderNumber ? ` – Pedido #${orderNumber}` : "";
@@ -261,13 +268,16 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
     lines.push("");
 
+    const confirmedSubtotal = confirmedTotal ?? total;
+    const confirmedTotalWithDelivery = deliveryMethod === "delivery" ? confirmedSubtotal + DELIVERY_FEE : confirmedSubtotal;
+
     if (deliveryMethod === "delivery" && DELIVERY_FEE > 0) {
-      lines.push(`*Sub Total:* ${fmt(total)}`);
+      lines.push(`*Sub Total:* ${fmt(confirmedSubtotal)}`);
       lines.push(`*Envío:* ${fmt(DELIVERY_FEE)}`);
       lines.push("");
     }
 
-    lines.push(`*Total:* ${fmt(totalWithDelivery)}`);
+    lines.push(`*Total:* ${fmt(confirmedTotalWithDelivery)}`);
 
     // Agregar link de seguimiento si existe
     if (trackingToken) {
@@ -319,6 +329,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
       let createdOrderNumber: number | string | undefined;
       let createdTrackingToken: string | undefined;
+      let createdTotal: number | undefined;
 
       if (SEND_TO_API) {
         if (!BASE) throw new Error("Falta NEXT_PUBLIC_API_URL");
@@ -468,6 +479,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             parsed?.data?.trackingToken ??
             parsed?.trackingToken ??
             undefined;
+          const rawTotal = parsed?.data?.total ?? parsed?.total;
+          if (rawTotal != null) createdTotal = Number(rawTotal);
         } catch {
           // si no es JSON, dejamos undefined
         }
@@ -476,7 +489,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       setShowWhatsAppModal(true);
       // WhatsApp (con número si lo tenemos)
       const businessPhone = process.env.NEXT_PUBLIC_WA_NUMBER || "";
-      const textRaw = buildWhatsAppText(createdOrderNumber, createdTrackingToken);
+      const textRaw = buildWhatsAppText(createdOrderNumber, createdTrackingToken, createdTotal);
       const phone = businessPhone.replace(/[^\d]/g, "");             // E.164 sin +
       const msg = encodeURIComponent(textRaw);
 
@@ -903,8 +916,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                                     hover:brightness-95 active:brightness-90
                                     disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none
                                     ${!STORE_OPEN ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`
-          } onClick={submitOrder} disabled={submitting}>
-            {submitting ? "Enviando..." : "Enviar Pedido"}
+          } onClick={submitOrder} disabled={submitting || isRefreshing}>
+            {isRefreshing ? "Verificando precios..." : submitting ? "Enviando..." : "Enviar Pedido"}
           </Button>
           <Button
             className="w-full"

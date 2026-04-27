@@ -6,7 +6,9 @@ import SiteHeader from "@/components/site-header";
 import { Button } from "@/components/ui/button";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
+import { useCartRefresh } from "@/hooks/useCartRefresh";
+import { quoteProduct } from "@/lib/pricing";
 import { Trash2 } from "lucide-react";
 import ClosedBanner from "@/components/closed-banner";
 import InfoBanner from "@/components/info-banner";
@@ -38,8 +40,47 @@ type MaybeCombo = {
 
 export default function CartPage() {
   const router = useRouter();
-  const { items, updateQuantity, removeFromCart, clearCart, getTotalPrice } =
+  const { items, updateQuantity, updateItemPrice, removeFromCart, clearCart, getTotalPrice } =
     useCart();
+  const { refreshCartPrices, isRefreshing } = useCartRefresh();
+
+  useEffect(() => {
+    refreshCartPrices();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleIncrease = async (it: any) => {
+    const newQty = Number(it.quantity) + 1;
+    updateQuantity(it.uniqueId, newQty);
+    if (it.kind !== "combo") {
+      const optionIds = (it.selectedOptions ?? []).map((o: any) => o.productOptionId);
+      const quote = await quoteProduct({ productId: it.id, qty: newQty, optionIds, comment: it.observations });
+      if (quote) {
+        const unit = Number(quote.unitPrice);
+        const total = Number(quote.total);
+        if (Number.isFinite(unit) && unit > 0) updateItemPrice(it.uniqueId, unit, Math.round(total));
+      }
+    }
+  };
+
+  const handleDecrease = async (it: any) => {
+    const q = Number(it.quantity) || 0;
+    if (q <= 1) {
+      removeFromCart(it.uniqueId);
+      return;
+    }
+    const newQty = q - 1;
+    updateQuantity(it.uniqueId, newQty);
+    if (it.kind !== "combo") {
+      const optionIds = (it.selectedOptions ?? []).map((o: any) => o.productOptionId);
+      const quote = await quoteProduct({ productId: it.id, qty: newQty, optionIds, comment: it.observations });
+      if (quote) {
+        const unit = Number(quote.unitPrice);
+        const total = Number(quote.total);
+        if (Number.isFinite(unit) && unit > 0) updateItemPrice(it.uniqueId, unit, Math.round(total));
+      }
+    }
+  };
 
   // === Estado comercial (igual que en producto/combos) ===
   const { data: status } = useBusinessStatusSmart();
@@ -241,14 +282,7 @@ export default function CartPage() {
                           variant="outline"
                           size="icon"
                           className="h-8 w-8 p-0 sm:h-9 sm:w-9"
-                          onClick={() => {
-                            const q = Number(it.quantity) || 0;
-                            if (q <= 1) {
-                              removeFromCart(it.uniqueId);
-                            } else {
-                              updateQuantity(it.uniqueId, q - 1);
-                            }
-                          }}
+                          onClick={() => handleDecrease(it)}
                           aria-label="Restar"
                         >
                           −
@@ -262,7 +296,7 @@ export default function CartPage() {
                           variant="outline"
                           size="icon"
                           className="h-8 w-8 p-0 sm:h-9 sm:w-9"
-                          onClick={() => updateQuantity(it.uniqueId, Number(it.quantity) + 1)}
+                          onClick={() => handleIncrease(it)}
                           aria-label="Sumar"
                         >
                           ＋
@@ -297,7 +331,11 @@ export default function CartPage() {
               <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4 flex items-center justify-between">
                 <div className="text-sm font-semibold">Total:</div>
                 <div className="text-xl font-extrabold text-[var(--brand-color)]">
-                  {fmt(getTotalPrice())}
+                  {isRefreshing ? (
+                    <span className="text-sm font-normal text-gray-400 animate-pulse">Actualizando...</span>
+                  ) : (
+                    fmt(getTotalPrice())
+                  )}
                 </div>
               </div>
 
