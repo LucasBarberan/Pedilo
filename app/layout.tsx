@@ -5,11 +5,12 @@ import { GeistMono } from "geist/font/mono"
 import { CartProvider } from "@/components/cart-context"
 import { DeveloperFooter } from "@/components/developer-footer"
 import { Suspense } from "react"
+import LayoutShell from "@/components/layout-shell"
 import "./globals.css"
 import type { Viewport } from "next";
 
-const STORE_NAME = process.env.NEXT_PUBLIC_STORE_NAME ?? 'NombreEmpresa';
-const SITE_TITLE = `Keltron GO - ${STORE_NAME}`;
+// Metadatos estáticos — se usan en SSR/SEO
+const SITE_TITLE = "Keltron GO";
 const BRAND_COLOR = process.env.NEXT_PUBLIC_BRAND_COLOR ?? "#EA562F";
 
 export const metadata: Metadata = {
@@ -18,9 +19,6 @@ export const metadata: Metadata = {
     template: `%s | ${SITE_TITLE}`,
   },
   icons: { icon: "/favicon.ico?=v2", shortcut: "/favicon.ico?=v2" },
-  // opcional, para que la barra del navegador tome el color
-
-
 };
 
 export const viewport: Viewport = { themeColor: BRAND_COLOR };
@@ -31,16 +29,13 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className="h-full"
-      // definimos la variable CSS accesible en toda la app
-      style={{ ["--brand-color" as any]: BRAND_COLOR }}>
+    <html lang="en" className="h-full" style={{ "--brand-color": BRAND_COLOR } as React.CSSProperties}>
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable} h-full flex flex-col`}>
         <Suspense fallback={null}>
           <CartProvider>
-            <div id="app-scroll" className="flex-1 overflow-auto flex flex-col">
+            <LayoutShell>
               {children}
-              <DeveloperFooter />
-            </div>
+            </LayoutShell>
           </CartProvider>
         </Suspense>
       </body>

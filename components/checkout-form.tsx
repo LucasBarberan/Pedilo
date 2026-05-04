@@ -4,7 +4,8 @@
 import { useCart, CartComboItem } from "@/components/cart-context";
 import { Button } from "@/components/ui/button";
 import { useRef, useEffect, useMemo, useState } from "react";
-import { STORE_OPEN, STORE_CLOSED_MSG } from "@/lib/flags";
+import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
+import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import { useCartRefresh } from "@/hooks/useCartRefresh";
 
 type Customer = {
@@ -37,6 +38,12 @@ type MaybeCombo = {
 
 export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const { items, getTotalPrice, clearCart } = useCart();
+  const { config } = useOnlineConfig();
+  const { data: businessStatus } = useBusinessStatusSmart();
+  const DELIVERY_ENABLED = config.deliveryEnabled;
+  const DELIVERY_FEE = config.deliveryFee;
+  const storeOpen = businessStatus?.web?.open ?? true;
+
   // 🪝 TODOS LOS HOOKS VAN ACÁ
   const [customer, setCustomer] = useState<Customer>({
     name: "",
@@ -44,8 +51,6 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     address: "",
   });
 
-  const DELIVERY_ENABLED =
-    (process.env.NEXT_PUBLIC_DELIVERY_ENABLED || "false").toLowerCase() === "true";
   const [deliveryMethod, setDeliveryMethod] = useState<"delivery" | "pickup">(
     DELIVERY_ENABLED ? "delivery" : "pickup"
   );
@@ -64,7 +69,6 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const nameRef = useRef<HTMLInputElement>(null);
   const phoneRef = useRef<HTMLInputElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
-  const DELIVERY_FEE = Number(process.env.NEXT_PUBLIC_DELIVERY_FEE || 0);
 
   const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
@@ -190,7 +194,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const isNonEmpty = (s: string) => !!s.trim();
 
   const BASE = process.env.NEXT_PUBLIC_API_URL;
-  const STORE_NAME = process.env.NEXT_PUBLIC_STORE_NAME || "SRA. BURGA";
+  const STORE_NAME = config.storeName || "SRA. BURGA";
   const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 
@@ -915,7 +919,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                                     active:bg-[color-mix(in_srgb,var(--brand-color),#000_18%)]
                                     hover:brightness-95 active:brightness-90
                                     disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none
-                                    ${!STORE_OPEN ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`
+                                    ${!storeOpen ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`
           } onClick={submitOrder} disabled={submitting || isRefreshing}>
             {isRefreshing ? "Verificando precios..." : submitting ? "Enviando..." : "Enviar Pedido"}
           </Button>

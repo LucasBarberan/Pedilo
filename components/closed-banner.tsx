@@ -2,10 +2,11 @@
 "use client";
 
 import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
-import { STORE_CLOSED_MSG, PICKUP_ONLY_MSG } from "@/lib/flags";
+import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
 
 export default function ClosedBanner() {
   const { data: status, error } = useBusinessStatusSmart();
+  const { config } = useOnlineConfig();
   if (error || !status) return null;
 
   const tz = status.timezone || "America/Argentina/Cordoba";
@@ -31,7 +32,7 @@ export default function ClosedBanner() {
     return (
       <div className="mx-auto w-full max-w-6xl px-4">
         <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          {PICKUP_ONLY_MSG || "El local está abierto, pero sólo tomamos pedidos en el local por ahora."}
+          {config.pickupOnlyMsg || "El local está abierto, pero sólo tomamos pedidos en el local por ahora."}
         </div>
       </div>
     );
@@ -66,7 +67,7 @@ export default function ClosedBanner() {
   return (
     <div className="mx-auto w-full max-w-6xl px-4">
       <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-        {STORE_CLOSED_MSG} {extra}
+        {config.closedMessage} {extra}
       </div>
     </div>
   );

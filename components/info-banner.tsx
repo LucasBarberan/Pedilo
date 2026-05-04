@@ -1,7 +1,7 @@
 // components/info-banner.tsx
 "use client";
 
-import { INFO_BANNER_ENABLED, INFO_BANNER_MSG, INFO_BANNER_LEVEL } from "@/lib/flags";
+import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
 
 const levelClasses: Record<string, {wrap: string; text: string; border: string; bg: string}> = {
   info:    { wrap: "border-sky-200",    text: "text-sky-800",    border: "border", bg: "bg-sky-50" },
@@ -10,12 +10,14 @@ const levelClasses: Record<string, {wrap: string; text: string; border: string; 
 };
 
 export default function InfoBanner() {
-  if (!INFO_BANNER_ENABLED) return null;
+  const { config } = useOnlineConfig();
 
-  const msg = INFO_BANNER_MSG?.trim();
+  if (!config.infoBannerEnabled) return null;
+
+  const msg = config.infoBannerMsg?.trim();
   if (!msg) return null;
 
-  const lc = levelClasses[INFO_BANNER_LEVEL] ?? levelClasses.info;
+  const lc = levelClasses[config.infoBannerLevel] ?? levelClasses.info;
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4">

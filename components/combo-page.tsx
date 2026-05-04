@@ -10,7 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useCart } from "@/components/cart-context";
 import ClosedBanner from "@/components/closed-banner";
 import InfoBanner from "@/components/info-banner";
-import { STORE_CLOSED_MSG } from "@/lib/flags";
+import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
 import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import { fixImageUrl } from "@/lib/img";
 import BlockingLoader from "@/components/blocking-loader";
@@ -145,6 +145,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
 
   // Igual que en producto: estado comercial
   const { data: status } = useBusinessStatusSmart();
+  const { config: onlineConfig } = useOnlineConfig();
   const isWebOpen  = status?.web?.open ?? true; // mientras carga, asumimos abierto
   const pickupOnly = !!(status?.pos?.open && status?.web?.open === false);
   const disabledByStatus = !isWebOpen;
@@ -894,7 +895,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
               disabled={disabledByStatus || loading || submitting}
               title={
                 disabledByStatus
-                  ? (pickupOnly ? "Solo tomamos pedidos en el local." : STORE_CLOSED_MSG)
+                  ? (pickupOnly ? "Solo tomamos pedidos en el local." : onlineConfig.closedMessage)
                   : undefined
               }
               aria-disabled={disabledByStatus || loading || submitting}

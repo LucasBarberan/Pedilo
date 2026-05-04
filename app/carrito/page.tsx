@@ -12,7 +12,7 @@ import { quoteProduct } from "@/lib/pricing";
 import { Trash2 } from "lucide-react";
 import ClosedBanner from "@/components/closed-banner";
 import InfoBanner from "@/components/info-banner";
-import { STORE_CLOSED_MSG } from "@/lib/flags";
+import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
 import { fixImageUrl } from "@/lib/img";
 import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 
@@ -84,6 +84,7 @@ export default function CartPage() {
 
   // === Estado comercial (igual que en producto/combos) ===
   const { data: status } = useBusinessStatusSmart();
+  const { config: onlineConfig } = useOnlineConfig();
   const isWebOpen  = status?.web?.open ?? true;                       // mientras carga, asumimos abierto
   const pickupOnly = !!(status?.pos?.open && status?.web?.open === false);
   const disabledByStatus = !isWebOpen;
@@ -351,7 +352,7 @@ export default function CartPage() {
                   disabled={disabledByStatus}
                   title={
                     disabledByStatus
-                      ? (pickupOnly ? "Solo tomamos pedidos en el local." : STORE_CLOSED_MSG)
+                      ? (pickupOnly ? "Solo tomamos pedidos en el local." : onlineConfig.closedMessage)
                       : undefined
                   }
                   aria-disabled={disabledByStatus}
