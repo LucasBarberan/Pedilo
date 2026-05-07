@@ -7,10 +7,12 @@ import TrackingStatus from "@/components/tracking-status";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { useOrderTracking, type OrderData } from "@/lib/useOrderTracking";
+import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
 
 export default function TrackingPage({ params }: { params: { trackingToken: string } }) {
     const router = useRouter();
     const { data, loading, connected, usingFallback } = useOrderTracking(params.trackingToken);
+    const { config } = useOnlineConfig();
 
     if (loading) {
         return (
@@ -91,8 +93,8 @@ export default function TrackingPage({ params }: { params: { trackingToken: stri
                         variant="outline"
                         className="w-full rounded-xl"
                         onClick={() => {
-                            const phone = process.env.NEXT_PUBLIC_WA_NUMBER || "";
-                            window.open(`https://wa.me/${phone.replace(/\D/g, "")}`, "_blank");
+                            const phone = (config.waNumber || "").replace(/\D/g, "");
+                            window.open(`https://wa.me/${phone}`, "_blank");
                         }}
                     >
                         ¿Necesitás ayuda? Contactanos

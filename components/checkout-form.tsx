@@ -488,7 +488,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
       setShowWhatsAppModal(true);
       // WhatsApp (con número si lo tenemos)
-      const businessPhone = process.env.NEXT_PUBLIC_WA_NUMBER || "";
+      const businessPhone = config.waNumber || "";
       const textRaw = buildWhatsAppText(createdOrderNumber, createdTrackingToken, createdTotal);
       const phone = businessPhone.replace(/[^\d]/g, "");             // E.164 sin +
       const msg = encodeURIComponent(textRaw);
@@ -573,9 +573,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       } else {
         try {
           await navigator.clipboard.writeText(textRaw);
-          alert("Configurá NEXT_PUBLIC_WA_NUMBER. El detalle del pedido fue copiado al portapapeles.");
+          alert("Número de WhatsApp no configurado. El detalle del pedido fue copiado al portapapeles.");
         } catch {
-          alert("Configurá NEXT_PUBLIC_WA_NUMBER. Copiá y pegá este mensaje:\n\n" + textRaw);
+          alert("Número de WhatsApp no configurado. Copiá y pegá este mensaje:\n\n" + textRaw);
         }
       }
     } catch (e) {
