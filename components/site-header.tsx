@@ -4,9 +4,8 @@ import { ShoppingCart, ChevronLeft } from "lucide-react";
 import { useCart } from "@/components/cart-context";
 import Link from "next/link";
 import Image from "next/image";
-
-const STORE_NAME = process.env.NEXT_PUBLIC_STORE_NAME || "SRA. BURGA";
-const STORE_LOGO = process.env.NEXT_PUBLIC_STORE_LOGO || "";
+import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
+import { useState } from "react";
 
 type Props = {
   showBack?: boolean;
@@ -22,6 +21,9 @@ export default function SiteHeader({
   title,
 }: Props) {
   const { getTotalItems } = useCart();
+  const { config } = useOnlineConfig();
+  const [logoError, setLogoError] = useState(false);
+  const STORE_NAME = config.storeName || "SRA. BURGA";
 
   return (
     <div
@@ -59,13 +61,14 @@ export default function SiteHeader({
             focus-visible:outline-2 focus-visible:outline-white/70 focus-visible:outline-offset-2
           "
         >
-          {STORE_LOGO ? (
+          {!logoError ? (
             <Image
-              src={STORE_LOGO}
+              src="/brand/logo-letras.png"
               alt={STORE_NAME}
               width={240}
               height={64}
               priority
+              onError={() => setLogoError(true)}
               className="
                 object-contain
                 max-h-[56px] sm:max-h-[64px]

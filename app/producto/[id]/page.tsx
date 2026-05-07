@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import ClosedBanner from "@/components/closed-banner";
 import InfoBanner from "@/components/info-banner";
-import { STORE_CLOSED_MSG } from "@/lib/flags";
+import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
 import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import BlockingLoader from "@/components/blocking-loader";
 import { fixImageUrl } from "@/lib/img";
@@ -152,6 +152,7 @@ export default function ProductDetailPage() {
   const [justAdded, setJustAdded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const { data: status } = useBusinessStatusSmart();
+  const { config: onlineConfig } = useOnlineConfig();
   // mientras carga: true => botón habilitado (si preferís bloquear hasta cargar, cambiá a !!status?.web.open)
   const isWebOpen  = status?.web?.open ?? true;
   const pickupOnly = !!(status?.pos?.open && status?.web?.open === false);
@@ -613,7 +614,7 @@ export default function ProductDetailPage() {
                 disabled={disabledByStatus || (loading && !prod) || submitting}
                 title={
                   disabledByStatus
-                    ? (pickupOnly ? "Solo tomamos pedidos en el local." : STORE_CLOSED_MSG)
+                    ? (pickupOnly ? "Solo tomamos pedidos en el local." : onlineConfig.closedMessage)
                     : undefined
                 }
                 aria-disabled={disabledByStatus || (loading && !prod) || submitting}

@@ -5,17 +5,18 @@ import { useEffect } from "react";
 
 type Props = {
   open: boolean;
-  imageSrc?: string;     // /brand/loader-logo.png en /public
+  imageSrc?: string;
   message?: string;
-  zIndex?: number;       // por si necesitás elevarlo
+  zIndex?: number;
 };
 
 export default function BlockingLoader({
   open,
-  imageSrc = "/brand/SraBurga.png",
+  imageSrc,
   message = "Cargando…",
   zIndex = 9999,
 }: Props) {
+  const resolvedSrc = imageSrc ?? "/brand/logo.png";
   // Evitar scroll del body mientras está abierto
   useEffect(() => {
     if (!open) return;
@@ -40,7 +41,7 @@ export default function BlockingLoader({
       <div className="relative z-10 w-[320px] max-w-[86vw] rounded-2xl p-6
                       bg-white/85 ring-1 ring-black/10 shadow-xl text-center select-none">
         <div className="relative mx-auto h-28 w-28 overflow-hidden rounded-xl bg-neutral-100 animate-[float_2.4s_ease-in-out_infinite]">
-          <Image src={imageSrc} alt="Cargando" fill className="object-contain" priority />
+          <Image src={resolvedSrc} alt="Cargando" fill className="object-contain" priority />
         </div>
 
         <div className="mt-4 text-sm font-medium text-neutral-700">{message}</div>

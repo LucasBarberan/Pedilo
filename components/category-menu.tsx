@@ -1,8 +1,9 @@
-﻿"use client";
+"use client";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { useCallback } from "react";
 import type { Category as CategoryModel } from "@/lib/categories";
+import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
 
 export type Category = CategoryModel;
 
@@ -21,6 +22,7 @@ function slugify(s: string) {
 
 export default function CategoryMenu({ categories, onCategorySelect }: CategoryMenuProps) {
   const router = useRouter();
+  const fallbackLogo = "/brand/logo.png";
 
   // URL destino para cada categoria
   const targetFor = useCallback((c: Category) => {
@@ -40,8 +42,7 @@ export default function CategoryMenu({ categories, onCategorySelect }: CategoryM
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-4 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
       {categories.map((c) => {
-        const imgSrc =
-          (c.imageUrl && c.imageUrl.trim()) ? c.imageUrl : "/brand/SraBurga.png"; // fallback
+        const imgSrc = (c.imageUrl && c.imageUrl.trim()) ? c.imageUrl : fallbackLogo;
         const url = targetFor(c);
 
         return (
