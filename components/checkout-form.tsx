@@ -61,7 +61,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
   useEffect(() => {
     refreshCartPrices();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [phoneTouched, setPhoneTouched] = useState(false);
@@ -328,166 +328,162 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     setSubmitting(true);
 
     try {
-      const SEND_TO_API =
-        (process.env.NEXT_PUBLIC_SEND_ORDERS || "").toLowerCase() === "true";
-
       let createdOrderNumber: number | string | undefined;
       let createdTrackingToken: string | undefined;
       let createdTotal: number | undefined;
 
-      if (SEND_TO_API) {
-        if (!BASE) throw new Error("Falta NEXT_PUBLIC_API_URL");
 
-        const itemsForApi: any[] = [];
-        const combosForApi: any[] = [];
+      if (!BASE) throw new Error("Falta NEXT_PUBLIC_API_URL");
 
-        for (const it of items) {
-          if (it.kind === "combo") {
-            // precio unitario del combo (el back prorratea internamente)
-            const unitCombo = Math.round(Number(it.price));
+      const itemsForApi: any[] = [];
+      const combosForApi: any[] = [];
 
-            combosForApi.push({
-              combo_id: Number(it.id),
-              name: it.comboName || it.name,
-              quantity: Number(it.quantity),
-              unit_price: unitCombo,
-              comment: it.observations?.trim() || null,
-              items: (it.comboItems || []).map((ci: any) => {
-                // 🔒 CRÍTICO: La cantidad del item interno SIEMPRE es la del backend
-                // NO se multiplica por it.quantity (cantidad de combos)
-                // El backend maneja la multiplicación: combo.quantity × item.quantity
-                const itemQty = Number(ci.qty) || 1;
+      for (const it of items) {
+        if (it.kind === "combo") {
+          // precio unitario del combo (el back prorratea internamente)
+          const unitCombo = Math.round(Number(it.price));
 
-                const itemPayload: any = {
-                  product_id: Number(ci.productId),
-                  quantity: itemQty,  // Esta qty viene del backend y NO debe cambiar
-                };
+          combosForApi.push({
+            combo_id: Number(it.id),
+            name: it.comboName || it.name,
+            quantity: Number(it.quantity),
+            unit_price: unitCombo,
+            comment: it.observations?.trim() || null,
+            items: (it.comboItems || []).map((ci: any) => {
+              // 🔒 CRÍTICO: La cantidad del item interno SIEMPRE es la del backend
+              // NO se multiplica por it.quantity (cantidad de combos)
+              // El backend maneja la multiplicación: combo.quantity × item.quantity
+              const itemQty = Number(ci.qty) || 1;
 
-                // Si es el producto principal Y el combo tiene selectedOptions, usarlas
-                if (ci.isMain && it.selectedOptions && it.selectedOptions.length > 0) {
-                  itemPayload.option_ids = it.selectedOptions.map((opt: any) => Number(opt.productOptionId));
-                }
-                // Fallback: si tiene opción legacy en el comboItem
-                else if (ci.option?.id) {
-                  itemPayload.option_ids = [Number(ci.option.id)];
-                }
+              const itemPayload: any = {
+                product_id: Number(ci.productId),
+                quantity: itemQty,  // Esta qty viene del backend y NO debe cambiar
+              };
 
-                // Agregar comentario si es el principal
-                if (ci.isMain && it.observations?.trim()) {
-                  itemPayload.comment = it.observations.trim();
-                }
+              // Si es el producto principal Y el combo tiene selectedOptions, usarlas
+              if (ci.isMain && it.selectedOptions && it.selectedOptions.length > 0) {
+                itemPayload.option_ids = it.selectedOptions.map((opt: any) => Number(opt.productOptionId));
+              }
+              // Fallback: si tiene opción legacy en el comboItem
+              else if (ci.option?.id) {
+                itemPayload.option_ids = [Number(ci.option.id)];
+              }
 
-                return itemPayload;
-              }),
-            });
-          } else {
-            // producto normal
-            const unit = Math.round(
-              (Number(it.finalPrice) || Number(it.price) * Number(it.quantity)) /
-              Number(it.quantity)
-            );
-            const payload: any = {
-              product_id: Number(it.id),
-              quantity: Number(it.quantity),
-              unit_price: unit,
-            };
-            if (it.observations?.trim()) payload.comment = it.observations.trim();
+              // Agregar comentario si es el principal
+              if (ci.isMain && it.observations?.trim()) {
+                itemPayload.comment = it.observations.trim();
+              }
 
-            // Enviar opciones seleccionadas
-            if (it.selectedOptions && it.selectedOptions.length > 0) {
-              payload.option_ids = it.selectedOptions.map(opt => Number(opt.productOptionId));
-            } else if (it.productOptionId) {
-              // Fallback para compatibilidad
-              payload.option_ids = [Number(it.productOptionId)];
-            }
+              return itemPayload;
+            }),
+          });
+        } else {
+          // producto normal
+          const unit = Math.round(
+            (Number(it.finalPrice) || Number(it.price) * Number(it.quantity)) /
+            Number(it.quantity)
+          );
+          const payload: any = {
+            product_id: Number(it.id),
+            quantity: Number(it.quantity),
+            unit_price: unit,
+          };
+          if (it.observations?.trim()) payload.comment = it.observations.trim();
 
-            itemsForApi.push(payload);
+          // Enviar opciones seleccionadas
+          if (it.selectedOptions && it.selectedOptions.length > 0) {
+            payload.option_ids = it.selectedOptions.map(opt => Number(opt.productOptionId));
+          } else if (it.productOptionId) {
+            // Fallback para compatibilidad
+            payload.option_ids = [Number(it.productOptionId)];
           }
+
+          itemsForApi.push(payload);
         }
-        const channel = "WEB" as const;
-        const fulfillment = deliveryMethod === "delivery" ? "DELIVERY" : "TAKEAWAY";
-        const phoneNormalized = normalizePhoneAR(customer.phone);
-        // 4) Delivery info (siempre provider WEB)
-        const delivery_info =
-          deliveryMethod === "delivery"
-            ? {
-              customerName: customer.name.trim(),
-              customerPhone: phoneNormalized,
-              addressText: customer.address.trim(),
-              notes: notes?.trim() || null,
-              scheduledAt: null,
-              provider: "WEB",
-              mapUrl: null,
-            }
-            : {
-              customerName: customer.name.trim(),
-              customerPhone: phoneNormalized,
-              addressText: "", // vacío en retiro
-              notes: notes?.trim() || null,
-              scheduledAt: null,
-              provider: "WEB",
-              mapUrl: null,
-            };
+      }
+      const channel = "WEB" as const;
+      const fulfillment = deliveryMethod === "delivery" ? "DELIVERY" : "TAKEAWAY";
+      const phoneNormalized = normalizePhoneAR(customer.phone);
+      // 4) Delivery info (siempre provider WEB)
+      const delivery_info =
+        deliveryMethod === "delivery"
+          ? {
+            customerName: customer.name.trim(),
+            customerPhone: phoneNormalized,
+            addressText: customer.address.trim(),
+            notes: notes?.trim() || null,
+            scheduledAt: null,
+            provider: "WEB",
+            mapUrl: null,
+          }
+          : {
+            customerName: customer.name.trim(),
+            customerPhone: phoneNormalized,
+            addressText: "", // vacío en retiro
+            notes: notes?.trim() || null,
+            scheduledAt: null,
+            provider: "WEB",
+            mapUrl: null,
+          };
 
-        // body
-        const paymentMethodCode =
-          paymentMethod === "cash"
-            ? "CASH"
-            : paymentMethod === "mp"
-              ? "TRANSFER"
-              : "CARD";
+      // body
+      const paymentMethodCode =
+        paymentMethod === "cash"
+          ? "CASH"
+          : paymentMethod === "mp"
+            ? "TRANSFER"
+            : "CARD";
 
-        const apiBodyRaw: any = {
-          items: itemsForApi,
-          combos: combosForApi,
-          // New backend expects id/code. Send code; legacy enum deprecated.
-          paymentMethodCode,
-          amount_paid: Math.round(Number(total)),
-          delivery_info,
-          channel,                  // "WEB"
-          fulfillment,              // "DELIVERY" | "TAKEAWAY"
-        };
+      const apiBodyRaw: any = {
+        items: itemsForApi,
+        combos: combosForApi,
+        // New backend expects id/code. Send code; legacy enum deprecated.
+        paymentMethodCode,
+        amount_paid: Math.round(Number(total)),
+        delivery_info,
+        channel,                  // "WEB"
+        fulfillment,              // "DELIVERY" | "TAKEAWAY"
+      };
 
-        // limpieza defensiva (sin 'options' y sin undefined)
-        const apiBody = JSON.parse(
-          JSON.stringify(apiBodyRaw, (k, v) =>
-            k === "options" || v === undefined ? undefined : v
-          )
-        );
+      // limpieza defensiva (sin 'options' y sin undefined)
+      const apiBody = JSON.parse(
+        JSON.stringify(apiBodyRaw, (k, v) =>
+          k === "options" || v === undefined ? undefined : v
+        )
+      );
 
-        console.log("POST /orders body =>\n", JSON.stringify(apiBody, null, 2));
+      console.log("POST /orders body =>\n", JSON.stringify(apiBody, null, 2));
 
-        const res = await fetch(`${BASE}/orders`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(apiBody),
-        });
+      const res = await fetch(`${BASE}/orders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(apiBody),
+      });
 
-        const text = await res.text();
-        if (!res.ok) {
-          console.error("❌ POST /orders failed", res.status, text);
-          alert(`No se pudo guardar el pedido (HTTP ${res.status}).\n${text}`);
-          return;
-        }
-        console.log("✅ Orden creada:", text);
+      const text = await res.text();
+      if (!res.ok) {
+        console.error("❌ POST /orders failed", res.status, text);
+        alert(`No se pudo guardar el pedido (HTTP ${res.status}).\n${text}`);
+        return;
+      }
+      console.log("✅ Orden creada:", text);
 
-        // intentar extraer el número de pedido y tracking token para WhatsApp
-        try {
-          const parsed = JSON.parse(text);
-          createdOrderNumber =
-            parsed?.data?.orderNumber ??
-            parsed?.orderNumber ??
-            parsed?.data?.order?.orderNumber ??
-            undefined;
-          createdTrackingToken =
-            parsed?.data?.trackingToken ??
-            parsed?.trackingToken ??
-            undefined;
-          const rawTotal = parsed?.data?.total ?? parsed?.total;
-          if (rawTotal != null) createdTotal = Number(rawTotal);
-        } catch {
-          // si no es JSON, dejamos undefined
-        }
+      // intentar extraer el número de pedido y tracking token para WhatsApp
+      try {
+        const parsed = JSON.parse(text);
+        createdOrderNumber =
+          parsed?.data?.orderNumber ??
+          parsed?.orderNumber ??
+          parsed?.data?.order?.orderNumber ??
+          undefined;
+        createdTrackingToken =
+          parsed?.data?.trackingToken ??
+          parsed?.trackingToken ??
+          undefined;
+        const rawTotal = parsed?.data?.total ?? parsed?.total;
+        if (rawTotal != null) createdTotal = Number(rawTotal);
+      } catch {
+        // si no es JSON, dejamos undefined
       }
 
       setShowWhatsAppModal(true);

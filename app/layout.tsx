@@ -9,14 +9,24 @@ import LayoutShell from "@/components/layout-shell"
 import "./globals.css"
 import type { Viewport } from "next";
 
-// Metadatos estáticos — se usan en SSR/SEO
-const SITE_TITLE = "Keltron GO";
+const SITE_TITLE = process.env.NEXT_PUBLIC_STORE_NAME ?? "Keltron GO";
+const SITE_DESCRIPTION = process.env.NEXT_PUBLIC_STORE_DESCRIPTION ?? "Pedidos online";
+const SITE_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
 const BRAND_COLOR = process.env.NEXT_PUBLIC_BRAND_COLOR ?? "#EA562F";
 
 export const metadata: Metadata = {
   title: {
     default: SITE_TITLE,
     template: `%s | ${SITE_TITLE}`,
+  },
+  description: SITE_DESCRIPTION,
+  openGraph: {
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    url: SITE_URL,
+    siteName: SITE_TITLE,
+    locale: "es_AR",
+    type: "website",
   },
   icons: { icon: "/favicon.ico?=v2", shortcut: "/favicon.ico?=v2" },
 };
@@ -29,7 +39,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className="h-full" style={{ "--brand-color": BRAND_COLOR } as React.CSSProperties}>
+    <html lang="es" className="h-full" style={{ "--brand-color": BRAND_COLOR } as React.CSSProperties}>
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable} h-full flex flex-col`}>
         <Suspense fallback={null}>
           <CartProvider>
