@@ -38,7 +38,7 @@ type MaybeCombo = {
 
 export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const { items, getTotalPrice, clearCart } = useCart();
-  const { config } = useOnlineConfig();
+  const { config, isLoading: configLoading } = useOnlineConfig();
   const { data: businessStatus } = useBusinessStatusSmart();
   const DELIVERY_ENABLED = config.deliveryEnabled;
   const DELIVERY_FEE = config.deliveryFee;
@@ -51,8 +51,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     address: "",
   });
 
-  const [deliveryMethod, setDeliveryMethod] = useState<"delivery" | "pickup">(
-    DELIVERY_ENABLED ? "delivery" : "pickup"
+  const [deliveryMethod, setDeliveryMethod] = useState<"delivery" | "pickup" | null>(
+    DELIVERY_ENABLED ? null : "pickup"
   );
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "mp">("cash");
   const [notes, setNotes] = useState("");
@@ -63,6 +63,15 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     refreshCartPrices();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Cuando la config carga, si delivery está habilitado reseteamos a null
+  // para que el usuario tenga que elegir explícitamente
+  useEffect(() => {
+    if (!configLoading && DELIVERY_ENABLED) {
+      setDeliveryMethod(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configLoading]);
 
   const [phoneTouched, setPhoneTouched] = useState(false);
   const [formError, setFormError] = useState<string>("");
@@ -314,6 +323,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       setFormError(errorMsg);
       phoneRef.current?.focus();
       phoneRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    // validar que eligió un método de envío
+    if (DELIVERY_ENABLED && deliveryMethod === null) {
+      setFormError("Seleccioná un método de entrega: Delivery o Retiro en el local.");
       return;
     }
     // si es delivery, pedimos dirección
@@ -603,13 +617,15 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       <div className="space-y-4">
 
         {/* Entrega — MOVER ARRIBA */}
-        <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
+        <div className={`rounded-2xl ring-1 bg-white/60 p-4 ${
+          formError.includes("método de entrega") ? "ring-red-400" : "ring-black/5"
+        }`}>
           <div className="text-sm font-semibold mb-3">Entrega</div>
 
           {DELIVERY_ENABLED ? (
             <div className="flex gap-2">
               <button
-                onClick={() => setDeliveryMethod("delivery")}
+                onClick={() => { setDeliveryMethod("delivery"); setFormError(""); }}
                 className={`px-3 py-2 rounded-lg border ${deliveryMethod === "delivery"
                   ? "border-[var(--brand-color)] bg-[#fff5f2]"
                   : "border-transparent hover:bg-black/5"
@@ -618,13 +634,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                 Delivery
               </button>
               <button
-                onClick={() => setDeliveryMethod("pickup")}
+                onClick={() => { setDeliveryMethod("pickup"); setFormError(""); }}
                 className={`px-3 py-2 rounded-lg border ${deliveryMethod === "pickup"
                   ? "border-[var(--brand-color)] bg-[#fff5f2]"
                   : "border-transparent hover:bg-black/5"
                   }`}
               >
-                Retiro en local
+                Retiro en el local
               </button>
             </div>
           ) : (
