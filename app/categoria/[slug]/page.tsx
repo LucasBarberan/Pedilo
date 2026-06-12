@@ -3,7 +3,6 @@
 import CategoryPageClient from "@/components/category-page";
 import { fetchCategories } from "@/lib/categories";
 import { fetchProductsByCategory } from "@/lib/api/products";
-import { quoteProductsBatch, type QuoteProductsBatchMap } from "@/lib/pricing";
 import type { Product } from "@/lib/api/products";
 import type { Category } from "@/lib/categories";
 
@@ -45,18 +44,9 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
   }
 
   let products: Product[] = [];
-  let promoMap: QuoteProductsBatchMap = {};
 
   if (category) {
     products = await fetchProductsByCategory(category.id, { baseUrl: apiBase ?? undefined });
-
-    const ids = products
-      .map((p) => Number(p.id))
-      .filter((n) => Number.isFinite(n)) as number[];
-
-    if (ids.length > 0) {
-      promoMap = await quoteProductsBatch(ids, { baseUrl: apiBase ?? undefined });
-    }
   }
 
   return (
@@ -64,7 +54,6 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
       slug={slug}
       category={category}
       initialProducts={products}
-      initialPromoMap={promoMap}
       apiBase={apiBase}
     />
   );

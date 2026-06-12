@@ -1,0 +1,23 @@
+services:
+  pedilo:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_API_URL: "https://api.sraburga.keltron.app/api"
+        NEXT_PUBLIC_SOCKET_URL: "https://api.sraburga.keltron.app"
+        NEXT_PUBLIC_APP_URL: "https://sraburga.keltron.app"
+        NEXT_PUBLIC_WA_NUMBER: "5493537327969"
+        NEXT_PUBLIC_STORE_NAME: "Sra. Burga"
+        NEXT_PUBLIC_BRAND_COLOR: "#ff903b"
+        NEXT_PUBLIC_STORE_DESCRIPTION: "App de pedidos online de Sra. Burga."
+    container_name: sra-pedido-web
+    environment:
+      NODE_ENV: "production"
+    restart: unless-stopped
+    networks:
+      - web
+
+networks:
+  web:
+    external: true
+    name: keltron_web

@@ -57,7 +57,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "mp">("cash");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const { refreshCartPrices, isRefreshing } = useCartRefresh();
+  const { refreshCartPrices, isRefreshing, cartSummary } = useCartRefresh();
 
   useEffect(() => {
     refreshCartPrices();
@@ -231,7 +231,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
     // 👇 usar el ordenamiento y desglosar combos
     sortedItems.forEach((it: any) => {
-      const unit = it.finalPrice / it.quantity || it.price;
+      const unit = Math.round((it.finalPrice / it.quantity || it.price) * 100) / 100;
       const comboData = it as MaybeCombo;
       const isCombo =
         comboData.kind === "combo" || Array.isArray(comboData.comboItems);
@@ -281,13 +281,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
     lines.push("");
 
-    const confirmedSubtotal = confirmedTotal ?? total;
-    const confirmedTotalWithDelivery = deliveryMethod === "delivery" ? confirmedSubtotal + DELIVERY_FEE : confirmedSubtotal;
+    // Prioridad: total del quote (con promo) > total confirmado por API > total del carrito
+    const baseTotal = cartSummary?.total ?? confirmedTotal ?? total;
+    const confirmedTotalWithDelivery = Math.round(deliveryMethod === "delivery" ? baseTotal + DELIVERY_FEE : baseTotal);
 
     if (deliveryMethod === "delivery" && DELIVERY_FEE > 0) {
-      lines.push(`*Sub Total:* ${fmt(confirmedSubtotal)}`);
+      lines.push(`*Subtotal:* ${fmt(Math.round(baseTotal))}`);
       lines.push(`*Envío:* ${fmt(DELIVERY_FEE)}`);
-      lines.push("");
     }
 
     lines.push(`*Total:* ${fmt(confirmedTotalWithDelivery)}`);
@@ -801,10 +801,10 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
               if (!isCombo) {
                 return (
-                  <div key={it.uniqueId} className="flex items-start justify-between gap-3 py-1">
+                  <div key={it.uniqueId} className="flex items-stretch justify-between gap-3 py-1">
                     <div className="flex-1 min-w-0 space-y-0.5">
                       <p className="text-sm font-semibold text-gray-900 leading-snug">
-                        {it.name}{it.quantity > 1 ? ` ×${it.quantity}` : ""}
+                        {it.name}
                       </p>
                       {(it.selectedOptions && it.selectedOptions.length > 0) || sizeLabel ? (
                         <p className="text-xs text-gray-500">
@@ -817,9 +817,14 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                         <p className="text-xs text-gray-400 italic">Obs: {it.observations.trim()}</p>
                       )}
                     </div>
-                    <p className="text-sm font-bold text-gray-900 tabular-nums shrink-0 pt-0.5">
-                      {fmt(it.finalPrice || it.price * it.quantity)}
-                    </p>
+                    <div className="flex flex-col justify-between items-end shrink-0 pt-0.5">
+                      <p className="text-sm font-bold text-gray-900 tabular-nums">
+                        {fmt(it.finalPrice || it.price * it.quantity)}
+                      </p>
+                      {it.quantity > 1 && (
+                        <span className="text-xs text-gray-400 tabular-nums">×{it.quantity}</span>
+                      )}
+                    </div>
                   </div>
                 );
               }
@@ -829,7 +834,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
               return (
                 <div key={it.uniqueId} className="py-1">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-stretch justify-between gap-3">
                     <div className="flex-1 min-w-0 space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-sm font-semibold text-gray-900 leading-snug">{it.name}</p>
@@ -875,9 +880,14 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                         <p className="text-xs text-gray-400 italic pl-2">Obs: {it.observations.trim()}</p>
                       )}
                     </div>
-                    <p className="text-sm font-bold text-gray-900 tabular-nums shrink-0 pt-0.5">
-                      {fmt(it.finalPrice || it.price * it.quantity)}
-                    </p>
+                    <div className="flex flex-col justify-between items-end shrink-0 pt-0.5">
+                      <p className="text-sm font-bold text-gray-900 tabular-nums">
+                        {fmt(it.finalPrice || it.price * it.quantity)}
+                      </p>
+                      {it.quantity > 1 && (
+                        <span className="text-xs text-gray-400 tabular-nums">×{it.quantity}</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -886,13 +896,22 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
           {/* FOOTER FIJO DENTRO DE LA CARD */}
           <div className="flex items-center justify-between border-t mt-3 pt-3 bg-white/0">
-            <div className="w-full space-y-1">
-              {deliveryMethod === "delivery" && DELIVERY_FEE > 0 && (
+            <div className="w-full space-y-1.5">
+              {/* Subtotal sin promo — solo si hay promo o delivery */}
+              {(cartSummary || (deliveryMethod === "delivery" && DELIVERY_FEE > 0)) && (
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
-                  <span>Sub Total</span>
-                  <span>{fmt(total)}</span>
+                  <span>Subtotal</span>
+                  <span>{fmt(cartSummary ? cartSummary.originalSubtotal : total)}</span>
                 </div>
               )}
+              {/* Descuento promo */}
+              {cartSummary && (
+                <div className="flex items-center justify-between text-sm" style={{ color: "var(--brand-color)" }}>
+                  <span className="font-medium truncate pr-2">{cartSummary.promoName ?? "Descuento promo"}</span>
+                  <span className="font-semibold shrink-0">−{fmt(cartSummary.savings)}</span>
+                </div>
+              )}
+              {/* Envío */}
               {deliveryMethod === "delivery" && DELIVERY_FEE > 0 && (
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                   <span>Envío</span>

@@ -1,6 +1,6 @@
 import { isAllowedForDelivery } from "@/lib/channel";
 import type { Product } from "@/lib/api/products";
-import { normalizeProduct, fetchProductById, fetchProductsByCategory, fetchProductsBySubcategory  } from "@/lib/api/products";
+import { normalizeProduct, fetchProductById } from "@/lib/api/products";
 
 export type ComboItem = {
   id: string | number;
@@ -254,11 +254,6 @@ export async function fetchCombos({
   baseUrl,
   signal,
   categoryId,
-  withItems = false,
-  withCategoryInclusions = false,
-  withEffectivePrice = true,
-  page,
-  limit,
   onlyActive = false,
   onlyDeliveryAllowed = false,
   onlyComboCategory = false,
@@ -266,16 +261,7 @@ export async function fetchCombos({
   const base = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
   if (!base) return [];
 
-  const search = new URLSearchParams();
-  if (withItems) search.set("withItems", "true");
-  if (withCategoryInclusions) search.set("withCategoryInclusions", "true");
-  if (withEffectivePrice) search.set("withEffectivePrice", "true");
-  if (categoryId !== undefined && categoryId !== null) search.set("category", String(categoryId));
-  if (page) search.set("page", String(page));
-  if (limit) search.set("limit", String(limit));
-
-  const qs = search.toString();
-  const url = `${base}/combo${qs ? `?${qs}` : ""}`;
+  const url = `${base}/catalog/combos?channel=WEB`;
 
   try {
     const res = await fetch(url, { cache: "no-store", signal });
@@ -315,7 +301,10 @@ export async function fetchComboById(
   const search = new URLSearchParams();
   if (withItems) search.set("withItems", "true");
   if (withCategoryInclusions) search.set("withCategoryInclusions", "true");
-  if (withEffectivePrice) search.set("withEffectivePrice", "true");
+  if (withEffectivePrice) {
+    search.set("withEffectivePrice", "true");
+    search.set("pricingChannel", "WEB");
+  }
 
   const qs = search.toString();
   const url = `${base}/combo/${encodeURIComponent(String(id))}${qs ? `?${qs}` : ""}`;
@@ -346,83 +335,55 @@ export async function fetchComboDetail(
   mainProduct: Product | null;
   inclusionProducts: Record<string, Product[]>;
 }> {
-  const combo = await fetchComboById(comboId, {
-    baseUrl,
-    signal,
-    withItems: true,
-    withCategoryInclusions: true,
-    withEffectivePrice: true,
-  });
+  const base = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  if (!base) return { combo: null, mainProduct: null, inclusionProducts: {} };
 
-  if (!combo) {
+  try {
+    const res = await fetch(
+      `${base}/catalog/combos/${encodeURIComponent(String(comboId))}?channel=WEB&withInclusionProducts=true`,
+      { cache: "no-store", signal }
+    );
+    if (!res.ok) return { combo: null, mainProduct: null, inclusionProducts: {} };
+
+    const json = await res.json();
+    const raw = json?.data ?? json;
+    if (!raw) return { combo: null, mainProduct: null, inclusionProducts: {} };
+
+    const combo = normalizeCombo(raw);
+    if (!combo) return { combo: null, mainProduct: null, inclusionProducts: {} };
+
+    // mainProduct: hidratar desde items con modifiers
+    const mainItem = (combo.items ?? []).find((item) => item?.isMain);
+    let mainProduct = mainItem?.product ?? null;
+    const mainProductId = mainItem?.productId;
+
+    const needsHydration =
+      mainProductId !== undefined &&
+      mainProductId !== null &&
+      (!mainProduct || !Array.isArray(mainProduct.productOptions) || mainProduct.productOptions.length === 0);
+
+    if (needsHydration) {
+      const fetched = await fetchProductById(mainProductId, { baseUrl, signal });
+      if (fetched) {
+        mainProduct = mainProduct
+          ? { ...mainProduct, ...fetched, productOptions: fetched.productOptions ?? mainProduct.productOptions }
+          : fetched;
+      }
+    }
+
+    // inclusionProducts ya vienen pre-hidratados del backend
+    const rawInclusionProducts = raw.inclusionProducts ?? {};
+    const inclusionProducts: Record<string, Product[]> = {};
+    for (const [key, minimalProducts] of Object.entries(rawInclusionProducts)) {
+      inclusionProducts[key] = (minimalProducts as any[])
+        .map((p: any) => normalizeProduct(p))
+        .filter((p): p is Product => p !== null && p.isActive !== false);
+    }
+
+    return { combo, mainProduct, inclusionProducts };
+  } catch {
     return { combo: null, mainProduct: null, inclusionProducts: {} };
   }
-
-  const mainItem = (combo.items ?? []).find((item) => item?.isMain);
-  let mainProduct = mainItem?.product ?? null;
-  const mainProductId = mainItem?.productId;
-
-  const needsHydratedMainProduct =
-    mainProductId !== undefined &&
-    mainProductId !== null &&
-    (!mainProduct || !Array.isArray(mainProduct.productOptions) || mainProduct.productOptions.length === 0);
-
-  if (needsHydratedMainProduct) {
-    const fetchedMain = await fetchProductById(mainProductId, { baseUrl, signal });
-    if (fetchedMain) {
-      mainProduct = mainProduct
-        ? {
-            ...mainProduct,
-            ...fetchedMain,
-            productOptions: fetchedMain.productOptions ?? mainProduct.productOptions,
-          }
-        : fetchedMain;
-    }
-  }
-
-  const inclusionProductsEntries = await Promise.all(
-    (combo.categoryInclusions ?? []).map(async (inc) => {
-      if (!inc?.id) return null;
-
-      // Preferimos subcategoría si está seteada
-      const subId = inc.subcategoryId ?? inc.subcategory?.id ?? null;
-      const catId = inc.categoryId ?? inc.category?.id ?? null;
-
-      let products: Product[] = [];
-      try {
-        if (subId != null) {
-          products = await fetchProductsBySubcategory(subId, {
-            baseUrl,
-            signal,
-            limit: 100,
-            includeInactive: false,
-          });
-        } else if (catId != null) {
-          products = await fetchProductsByCategory(catId, {
-            baseUrl,
-            signal,
-            limit: 100,
-            includeInactive: false,
-          });
-        } else {
-          return null; // nada que buscar
-        }
-      } catch {
-        products = [];
-      }
-
-      return [String(inc.id), products.filter((p) => p.isActive !== false)] as const;
-    })
-  );
-
-  const inclusionProducts: Record<string, Product[]> = {};
-  for (const entry of inclusionProductsEntries) {
-    if (!entry) continue;
-    const [key, products] = entry as [string, Product[]];
-    inclusionProducts[key] = products;
-  }
-
-  return { combo, mainProduct, inclusionProducts };
 }
 
 

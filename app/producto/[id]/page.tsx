@@ -14,28 +14,8 @@ import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
 import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import BlockingLoader from "@/components/blocking-loader";
 import { fixImageUrl } from "@/lib/img";
-
-type ProductOption = {
-  id: string | number;
-  precio_extra?: number | string | null;
-  option?: {
-    id: string | number;
-    name: string;
-    tipo?: string | null;
-    description?: string | null;
-  };
-  isDefault?: boolean;
-};
-
-type Product = {
-  id: string | number;
-  name: string;
-  description?: string;
-  price?: number | string;
-  imageUrl?: string;
-  productOptions?: ProductOption[];
-  category?: { isDefault?: boolean };
-};
+import { fetchProductById, type Product, type ProductOption } from "@/lib/api/products";
+import { buildPromoLabel } from "@/lib/pricing";
 
 // ===== Helpers de formato y cálculos =====
 const MAX_NOTES = 50;
@@ -52,7 +32,7 @@ const normalize = (s?: string) =>
   (s || "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
 
 const rankByName = (o: ProductOption) => {
-  const n = normalize(o.option?.name);
+  const n = normalize(o.option?.name ?? undefined);
   if (n.includes("simple")) return 0;
   if (n.includes("doble")) return 1;
   if (n.includes("triple")) return 2;
@@ -172,6 +152,7 @@ export default function ProductDetailPage() {
   const [quotedTotal, setQuotedTotal] = useState<number | null>(null);
   const [listUnit, setListUnit] = useState<number | null>(null);   // precio de lista (sin promo) por unidad
   const [hasPromo, setHasPromo] = useState(false);                 // flag si hay promo aplicada
+  const [promoLabel, setPromoLabel] = useState<string | null>(null);
 
   // 1) al montar en el CLIENTE, intento leer el warm cache
   useEffect(() => {
@@ -195,13 +176,8 @@ export default function ProductDetailPage() {
     try {
       // si no hubo warm, mostramos loader; si hubo, puede quedar en false
       setLoading(prev => prev || !prod);
-      const res = await fetch(`${BASE}/products/${id}`, { cache: "no-store" });
-      if (!res.ok) throw new Error("not ok");
-      const raw = await res.json();
-      const product: Product =
-        raw?.data && !Array.isArray(raw.data) ? raw.data :
-        raw?.data?.data && !Array.isArray(raw.data.data) ? raw.data.data :
-        raw;
+      const product: Product | null = await fetchProductById(id, { baseUrl: BASE });
+      if (!product) throw new Error("not found");
 
       const ordered = product.productOptions?.length ? [...product.productOptions].sort(optionSorter) : [];
       const productOrdered: Product = { ...product, productOptions: ordered };
@@ -281,7 +257,8 @@ export default function ProductDetailPage() {
           setQuotedUnit(unit);
           setQuotedTotal(tot);
           setListUnit(Number.isFinite(list) ? list : null);
-          setHasPromo(!!qres.promo);        // 👈 si el back marcó promo
+          setHasPromo(!!qres.promo);
+          setPromoLabel(qres.promo ? buildPromoLabel(qres.promo) : null);
           return;
         }
       }
@@ -290,6 +267,7 @@ export default function ProductDetailPage() {
       setQuotedUnit(unitLocal);
       setQuotedTotal(unitLocal * qty);
       setHasPromo(false);
+      setPromoLabel(null);
       setListUnit(null);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -398,7 +376,7 @@ export default function ProductDetailPage() {
       priceExtra: typeof currentSelectedOption?.precio_extra === "string"
         ? Number(currentSelectedOption?.precio_extra)
         : (currentSelectedOption?.precio_extra ?? 0),
-      isDefaultCategory: !!prod?.category?.isDefault,
+      isDefaultCategory: false,
     });
 
     setJustAdded(true);
@@ -464,6 +442,19 @@ export default function ProductDetailPage() {
 
           {/* Derecha */}
           <div className="space-y-4">
+            {/* Banner de promo — siempre visible si alguna opción la activa */}
+            {(() => {
+              const allOpts = [...sizeOptions, ...extraOptions];
+              const promoOpt = allOpts.find((o) => o.activatesPromo);
+              const label = promoOpt?.activatesPromo?.label ?? (hasPromo && promoLabel ? promoLabel : null);
+              return label ? (
+                <div className="rounded-xl bg-green-50 ring-1 ring-green-200 px-3 py-2 flex items-center gap-2">
+                  <span className="text-base leading-none">🏷️</span>
+                  <span className="text-sm font-semibold text-green-700">{label}</span>
+                </div>
+              ) : null;
+            })()}
+
             {/* Opciones de Tamaño */}
             {!!sizeOptions.length && (
               <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 space-y-2">
@@ -485,7 +476,14 @@ export default function ProductDetailPage() {
                           : "border-transparent hover:bg-black/5",
                       ].join(" ")}
                     >
-                      <span className="text-sm">{o.option?.name || "Opción"}</span>
+                      <span className="text-sm flex items-center gap-1.5">
+                        {o.option?.name || "Opción"}
+                        {o.activatesPromo && (
+                          <span className="text-[10px] font-bold bg-green-100 text-green-700 rounded px-1.5 py-0.5 leading-none">
+                            Aplica promo
+                          </span>
+                        )}
+                      </span>
                       <span className="text-sm font-semibold">
                         {plus ? `+${fmt(plus)}` : ""}
                       </span>
@@ -529,7 +527,14 @@ export default function ProductDetailPage() {
                           onCheckedChange={() => {}}
                           className="pointer-events-none"
                         />
-                        <span className="text-sm">{o.option?.name || "Extra"}</span>
+                        <span className="text-sm flex items-center gap-1.5">
+                            {o.option?.name || "Extra"}
+                            {o.activatesPromo && (
+                              <span className="text-[10px] font-bold bg-green-100 text-green-700 rounded px-1.5 py-0.5 leading-none">
+                                Aplica promo
+                              </span>
+                            )}
+                          </span>
                       </div>
                       <span className="text-sm font-semibold">
                         {plus ? `+${fmt(plus)}` : "Gratis"}

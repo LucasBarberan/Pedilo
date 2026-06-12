@@ -8,7 +8,6 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useMemo, useEffect } from "react";
 import { useCartRefresh } from "@/hooks/useCartRefresh";
-import { quoteProduct } from "@/lib/pricing";
 import { Trash2 } from "lucide-react";
 import ClosedBanner from "@/components/closed-banner";
 import InfoBanner from "@/components/info-banner";
@@ -42,7 +41,7 @@ export default function CartPage() {
   const router = useRouter();
   const { items, updateQuantity, updateItemPrice, removeFromCart, clearCart, getTotalPrice } =
     useCart();
-  const { refreshCartPrices, isRefreshing } = useCartRefresh();
+  const { refreshCartPrices, isRefreshing, cartSummary } = useCartRefresh();
 
   useEffect(() => {
     refreshCartPrices();
@@ -52,15 +51,10 @@ export default function CartPage() {
   const handleIncrease = async (it: any) => {
     const newQty = Number(it.quantity) + 1;
     updateQuantity(it.uniqueId, newQty);
-    if (it.kind !== "combo") {
-      const optionIds = (it.selectedOptions ?? []).map((o: any) => o.productOptionId);
-      const quote = await quoteProduct({ productId: it.id, qty: newQty, optionIds, comment: it.observations });
-      if (quote) {
-        const unit = Number(quote.unitPrice);
-        const total = Number(quote.total);
-        if (Number.isFinite(unit) && unit > 0) updateItemPrice(it.uniqueId, unit, Math.round(total));
-      }
-    }
+    const updatedItems = items.map((item: any) =>
+      item.uniqueId === it.uniqueId ? { ...item, quantity: newQty } : item
+    );
+    await refreshCartPrices(updatedItems as any);
   };
 
   const handleDecrease = async (it: any) => {
@@ -71,15 +65,10 @@ export default function CartPage() {
     }
     const newQty = q - 1;
     updateQuantity(it.uniqueId, newQty);
-    if (it.kind !== "combo") {
-      const optionIds = (it.selectedOptions ?? []).map((o: any) => o.productOptionId);
-      const quote = await quoteProduct({ productId: it.id, qty: newQty, optionIds, comment: it.observations });
-      if (quote) {
-        const unit = Number(quote.unitPrice);
-        const total = Number(quote.total);
-        if (Number.isFinite(unit) && unit > 0) updateItemPrice(it.uniqueId, unit, Math.round(total));
-      }
-    }
+    const updatedItems = items.map((item: any) =>
+      item.uniqueId === it.uniqueId ? { ...item, quantity: newQty } : item
+    );
+    await refreshCartPrices(updatedItems as any);
   };
 
   // === Estado comercial (igual que en producto/combos) ===
@@ -329,15 +318,32 @@ export default function CartPage() {
                 pt-3 space-y-3
               "
             >
-              <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4 flex items-center justify-between">
-                <div className="text-sm font-semibold">Total:</div>
-                <div className="text-xl font-extrabold text-[var(--brand-color)]">
-                  {isRefreshing ? (
+              <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
+                {isRefreshing ? (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold">Total:</span>
                     <span className="text-sm font-normal text-gray-400 animate-pulse">Actualizando...</span>
-                  ) : (
-                    fmt(getTotalPrice())
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  <div className="w-full space-y-2">
+                    {cartSummary && (
+                      <>
+                        <div className="flex items-center justify-between text-sm text-muted-foreground">
+                          <span>Subtotal</span>
+                          <span>{fmt(cartSummary.originalSubtotal)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm" style={{ color: "var(--brand-color)" }}>
+                          <span className="font-medium truncate pr-2">{cartSummary.promoName ?? "Descuento promo"}</span>
+                          <span className="font-semibold shrink-0">−{fmt(cartSummary.savings)}</span>
+                        </div>
+                      </>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold">Total:</span>
+                      <span className="text-xl font-extrabold text-[var(--brand-color)]">{fmt(getTotalPrice())}</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-3 flex-nowrap pb-1">

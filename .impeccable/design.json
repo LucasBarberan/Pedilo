@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-11T00:00:00.000Z",
+  "title": "Design System: Pedilo",
+  "extensions": {
+    "colorMeta": {
+      "brand-runtime": {
+        "role": "primary",
+        "displayName": "Acento de Marca Runtime",
+        "canonical": "#EA562F",
+        "tonalRamp": ["oklch(0.22 0.08 35)", "oklch(0.34 0.12 35)", "oklch(0.46 0.16 35)", "oklch(0.58 0.19 35)", "oklch(0.70 0.18 35)", "oklch(0.80 0.13 35)", "oklch(0.89 0.08 35)", "oklch(0.96 0.03 35)"]
+      },
+      "background-warm": {
+        "role": "neutral",
+        "displayName": "Fondo Calido de App",
+        "canonical": "oklch(0.98 0.01 45)",
+        "tonalRamp": ["oklch(0.18 0.01 45)", "oklch(0.30 0.01 45)", "oklch(0.44 0.01 45)", "oklch(0.58 0.01 45)", "oklch(0.72 0.01 45)", "oklch(0.84 0.01 45)", "oklch(0.92 0.01 45)", "oklch(0.98 0.01 45)"]
+      },
+      "foreground-ink": {
+        "role": "neutral",
+        "displayName": "Tinta Principal",
+        "canonical": "oklch(0.2 0 0)",
+        "tonalRamp": ["oklch(0.14 0 0)", "oklch(0.2 0 0)", "oklch(0.32 0 0)", "oklch(0.46 0 0)", "oklch(0.60 0 0)", "oklch(0.74 0 0)", "oklch(0.88 0 0)", "oklch(0.98 0 0)"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Titulos de categoria y pantallas principales." },
+      "body": { "displayName": "Body", "purpose": "Texto operativo, descripciones y ayuda." },
+      "label": { "displayName": "Label", "purpose": "Controles, botones y campos." }
+    },
+    "shadows": [
+      { "name": "resting-surface", "value": "shadow-sm", "purpose": "Tarjetas y superficies clickeables en reposo." },
+      { "name": "interactive-lift", "value": "hover:shadow-md", "purpose": "Confirmar hover/foco en tarjetas navegables." },
+      { "name": "blocking-overlay", "value": "shadow-xl + bg-black/35 backdrop-blur-[2px]", "purpose": "Carga bloqueante o interrupciones reales." }
+    ],
+    "motion": [
+      { "name": "state-transition", "value": "transition-all / transition-colors, 150-250ms", "purpose": "Feedback de hover, foco y cambios de estado." },
+      { "name": "loader-float", "value": "float 2.4s ease-in-out infinite", "purpose": "Movimiento suave del logo durante carga bloqueante." },
+      { "name": "loader-dot", "value": "dot 1.2s infinite ease-in-out", "purpose": "Actividad de espera con dots de marca." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "max-content", "value": "max-w-6xl" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Boton principal compacto para acciones de flujo.",
+      "html": "<button class=\"ds-btn-primary\">Continuar</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; height: 2.25rem; padding: 0.5rem 1rem; border: 0; border-radius: 0.5rem; background: var(--brand-color, #EA562F); color: #fff; font: 500 0.875rem/1.25 Geist Sans, system-ui, sans-serif; transition: background-color 180ms ease, box-shadow 180ms ease, transform 180ms ease; } .ds-btn-primary:hover { filter: brightness(0.94); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in oklch, var(--brand-color, #EA562F) 45%, transparent); } .ds-btn-primary:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Product Card",
+      "kind": "card",
+      "refersTo": "card-product",
+      "description": "Tarjeta de producto con imagen, nombre, descripcion breve y precio dominante.",
+      "html": "<article class=\"ds-product-card\"><div class=\"ds-product-image\"></div><div class=\"ds-product-body\"><strong>Producto</strong><p>Descripcion breve del producto.</p><span>$8.500</span></div></article>",
+      "css": ".ds-product-card { display: flex; gap: 0.75rem; padding: 1rem; border-radius: 1rem; background: rgba(255,255,255,0.6); box-shadow: 0 1px 2px rgba(0,0,0,0.08); border: 1px solid rgba(0,0,0,0.05); color: oklch(0.2 0 0); transition: box-shadow 180ms ease; } .ds-product-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.10); } .ds-product-image { width: 6rem; height: 5rem; flex: 0 0 auto; border-radius: 0.5rem; background: oklch(0.96 0.01 45); } .ds-product-body { min-width: 0; } .ds-product-body strong { display: block; font: 800 0.95rem/1.3 Geist Sans, system-ui, sans-serif; text-transform: uppercase; } .ds-product-body p { margin: 0.2rem 0 0.5rem; color: oklch(0.5 0 0); font: 400 0.875rem/1.4 Geist Sans, system-ui, sans-serif; } .ds-product-body span { color: var(--brand-color, #EA562F); font: 800 1.125rem/1.2 Geist Sans, system-ui, sans-serif; }"
+    },
+    {
+      "name": "Input Field",
+      "kind": "input",
+      "refersTo": "input-default",
+      "description": "Campo de formulario compacto con borde y foco visible.",
+      "html": "<input class=\"ds-input\" placeholder=\"Tu telefono\" />",
+      "css": ".ds-input { width: 100%; height: 2.25rem; padding: 0.25rem 0.75rem; border: 1px solid oklch(0.9 0.01 45); border-radius: 0.5rem; background: transparent; color: oklch(0.2 0 0); font: 400 0.875rem/1.4 Geist Sans, system-ui, sans-serif; transition: box-shadow 180ms ease, border-color 180ms ease; } .ds-input::placeholder { color: oklch(0.5 0 0); } .ds-input:focus-visible { outline: none; border-color: var(--brand-color, #EA562F); box-shadow: 0 0 0 3px color-mix(in oklch, var(--brand-color, #EA562F) 35%, transparent); }"
+    },
+    {
+      "name": "Status Banner",
+      "kind": "custom",
+      "description": "Mensaje operativo para cerrado, warning, info o success.",
+      "html": "<div class=\"ds-status-banner\">El local esta abierto, pero solo tomamos pedidos en el local por ahora.</div>",
+      "css": ".ds-status-banner { padding: 0.75rem 1rem; border-radius: 1rem; border: 1px solid oklch(0.9 0.12 28); background: oklch(0.96 0.04 28); color: oklch(0.38 0.12 28); font: 400 0.875rem/1.45 Geist Sans, system-ui, sans-serif; }"
+    },
+    {
+      "name": "Header Icon Button",
+      "kind": "button",
+      "description": "Boton circular de volver o carrito dentro del header de marca.",
+      "html": "<button class=\"ds-header-icon\" aria-label=\"Carrito\">●</button>",
+      "css": ".ds-header-icon { width: 2.5rem; height: 2.5rem; display: inline-grid; place-items: center; border: 1px solid rgba(255,255,255,0.3); border-radius: 9999px; background: rgba(255,255,255,0.1); color: #111; transition: background-color 180ms ease, color 180ms ease, box-shadow 180ms ease; } .ds-header-icon:hover { background: rgba(255,255,255,0.2); color: #fff; } .ds-header-icon:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(255,255,255,0.7); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Mostrador Digital",
+    "overview": "Pedilo debe sentirse como pedir en un mostrador bien atendido desde el celular: directo, confiable y sin ruido. La marca del comercio aparece primero en el header, el logo y el color configurable; la estructura del producto permanece consistente para que categorias, carrito, checkout y seguimiento sean faciles de entender en cualquier negocio gastronomico. La personalidad visual es tactil y sobria. Usa superficies claras, bordes redondeados, sombras suaves y acentos de marca solo donde ayudan a decidir: header, precio, foco, CTA y estados importantes. El sistema rechaza la app de delivery saturada, la plantilla generica y el checkout burocratico.",
+    "keyCharacteristics": [
+      "Mobile-first, con areas tocables grandes y jerarquia compacta.",
+      "Identidad configurable por comercio sin romper patrones de compra.",
+      "Superficies blancas sobre fondo calido, con acento de marca controlado.",
+      "Tipografia unica, fuerte y legible para nombres, precios y acciones.",
+      "Estados visibles para carga, cerrado, promociones, errores y seguimiento."
+    ],
+    "rules": [
+      { "name": "The Runtime Brand Rule", "body": "El color de marca es variable por comercio; los layouts, radios, jerarquias y estados deben seguir funcionando aunque el hue cambie.", "section": "colors" },
+      { "name": "The Ten Percent Accent Rule", "body": "En una pantalla de tarea, el acento debe guiar acciones y precios, no banar toda la interfaz.", "section": "colors" },
+      { "name": "The Price Speaks Rule", "body": "Los precios usan peso alto y color de marca; nunca deben quedar en muted text ni competir con textos promocionales secundarios.", "section": "typography" },
+      { "name": "The Soft Lift Rule", "body": "Si una sombra se nota antes que el producto, es demasiado fuerte. La elevacion confirma interaccion, no decora.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do mantener la experiencia mobile-first: botones tocables, textos legibles y decisiones visibles sin hacer zoom.",
+      "Do usar --brand-color para identidad del comercio y tokens de sistema para estructura reusable.",
+      "Do hacer que precio, CTA y estado sean los elementos mas faciles de encontrar en cada pantalla.",
+      "Do sostener la elevacion tactil y sobria: tarjetas claras, sombras suaves y foco visible.",
+      "Do escribir errores y estados como instrucciones utiles, especialmente en checkout y seguimiento."
+    ],
+    "donts": [
+      "Don't parecer una app masiva de delivery saturada, impersonal o dominada por promociones.",
+      "Don't convertir la app en una plantilla generica donde todos los comercios se ven iguales.",
+      "Don't hacer un checkout burocratico con pasos innecesarios, precios ambiguos o validaciones confusas.",
+      "Don't usar el color de marca como decoracion indiscriminada; debe guiar decisiones.",
+      "Don't introducir side-stripe borders, gradient text, glassmorphism decorativo, metric heroes o grids de tarjetas identicas sin jerarquia."
+    ]
+  }
+}
