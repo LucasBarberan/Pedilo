@@ -37,6 +37,11 @@ export type ComboCategoryInclusion = {
   } | null;
 };
 
+export type ComboModifierOverride = {
+  modifierOptionId: number;
+  isEnabled: boolean;
+};
+
 export type Combo = {
   id: string | number;
   name: string;
@@ -55,6 +60,7 @@ export type Combo = {
   };
   items?: ComboItem[];
   categoryInclusions?: ComboCategoryInclusion[];
+  modifierOverrides?: ComboModifierOverride[];
 };
 
 type FetchCombosBaseOptions = {
@@ -217,6 +223,14 @@ function normalizeCombo(raw: any): Combo | null {
     .map((inc) => normalizeComboCategoryInclusion(inc))
     .filter((inc): inc is ComboCategoryInclusion => Boolean(inc));
 
+  const overridesRaw: any[] = Array.isArray(raw.optionOverrides) ? raw.optionOverrides : [];
+  const modifierOverrides: ComboModifierOverride[] = overridesRaw
+    .filter((o) => o && o.modifierOptionId != null)
+    .map((o) => ({
+      modifierOptionId: Number(o.modifierOptionId),
+      isEnabled: o.isEnabled !== false,
+    }));
+
   if (!description) {
     const main = items.find((item) => item?.isMain && typeof item?.product?.description === "string" && item.product.description.trim());
     const first = items.find((item) => typeof item?.product?.description === "string" && item.product.description.trim());
@@ -237,6 +251,7 @@ function normalizeCombo(raw: any): Combo | null {
     category,
     items,
     categoryInclusions,
+    modifierOverrides,
   };
 }
 

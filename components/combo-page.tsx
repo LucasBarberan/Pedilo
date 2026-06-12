@@ -200,19 +200,27 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     };
   }, []);
 
-  // Separar opciones por tipo
+  // IDs de opciones deshabilitadas por el combo
+  const disabledOptionIds = useMemo(() => {
+    return new Set(
+      (combo?.modifierOverrides ?? [])
+        .filter((ov) => ov.isEnabled === false)
+        .map((ov) => ov.modifierOptionId)
+    );
+  }, [combo?.modifierOverrides]);
+
+  // Separar opciones por tipo, respetando overrides del combo
   const { sizeOptions, extraOptions } = useMemo(() => {
     if (!mainProduct?.productOptions?.length) {
       return { sizeOptions: [], extraOptions: [] };
     }
-    const sizes = mainProduct.productOptions.filter(
-      (opt) => opt.option?.tipo?.toLowerCase() === "tamaño"
+    const allowed = mainProduct.productOptions.filter(
+      (opt) => !disabledOptionIds.has(Number(opt.option?.id))
     );
-    const extras = mainProduct.productOptions.filter(
-      (opt) => opt.option?.tipo?.toLowerCase() === "extra"
-    );
+    const sizes = allowed.filter((opt) => opt.option?.tipo?.toLowerCase() === "tamaño");
+    const extras = allowed.filter((opt) => opt.option?.tipo?.toLowerCase() === "extra");
     return { sizeOptions: sizes, extraOptions: extras };
-  }, [mainProduct]);
+  }, [mainProduct, disabledOptionIds]);
 
   // opción de tamaño seleccionada
   const selectedOption = useMemo(() => {
