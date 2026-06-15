@@ -76,11 +76,24 @@ type QuoteItemProductView = {
   productId: number;
   name: string;
   qty: number;
-  unitList: string;   // lista sin promo
-  unitPrice: string;  // unitario efectivo (con promo y ponderación)
-  total: string;      // qty * unitPrice
+  unitListPrice: string;
+  discountedUnitPrice: string;
+  unitFinalPrice: string;
+  lineTotal: string;
   options?: Array<{ id: number; name: string; extra: string }>;
-  promo?: { type: string; value: string; units: number; applyToOptions: boolean };
+  appliedPriceList?: {
+    itemId: number;
+    listName: string;
+    listCode: string;
+    priceType: string;
+    value: string;
+    savings: string;
+  };
+  appliedPromotion?: {
+    name: string;
+    priceType: string;
+    savings: string;
+  };
   comment?: string | null;
 };
 
@@ -134,11 +147,11 @@ export default function ProductDetailPage() {
   const { data: status } = useBusinessStatusSmart();
   const { config: onlineConfig } = useOnlineConfig();
   // mientras carga: true => botón habilitado (si preferís bloquear hasta cargar, cambiá a !!status?.web.open)
-  const isWebOpen  = status?.web?.open ?? true;
+  const isWebOpen = status?.web?.open ?? true;
   const pickupOnly = !!(status?.pos?.open && status?.web?.open === false);
 
   const disabledByStatus = !isWebOpen;
-  
+
 
   const [prod, setProd] = useState<Product | null>(null);
   const [selectedOptId, setSelectedOptId] = useState<string | number | null>(null);
@@ -151,7 +164,8 @@ export default function ProductDetailPage() {
   const [quotedUnit, setQuotedUnit] = useState<number | null>(null);
   const [quotedTotal, setQuotedTotal] = useState<number | null>(null);
   const [listUnit, setListUnit] = useState<number | null>(null);   // precio de lista (sin promo) por unidad
-  const [hasPromo, setHasPromo] = useState(false);                 // flag si hay promo aplicada
+  const [hasPromo, setHasPromo] = useState(false);
+  const [quoteIsFromPriceList, setQuoteIsFromPriceList] = useState(false);
   const [promoLabel, setPromoLabel] = useState<string | null>(null);
 
   // 1) al montar en el CLIENTE, intento leer el warm cache
@@ -165,41 +179,41 @@ export default function ProductDetailPage() {
       setLoading(false); // evita mostrar el loader si ya hay warm
     }
   }, [id]);
-  
+
   // 2) fetch real (reemplaza o completa el warm)
   useEffect(() => {
-  const BASE = process.env.NEXT_PUBLIC_API_URL;
-  if (!id || !BASE) return;
+    const BASE = process.env.NEXT_PUBLIC_API_URL;
+    if (!id || !BASE) return;
 
-  let aborted = false;
-  (async () => {
-    try {
-      // si no hubo warm, mostramos loader; si hubo, puede quedar en false
-      setLoading(prev => prev || !prod);
-      const product: Product | null = await fetchProductById(id, { baseUrl: BASE });
-      if (!product) throw new Error("not found");
+    let aborted = false;
+    (async () => {
+      try {
+        // si no hubo warm, mostramos loader; si hubo, puede quedar en false
+        setLoading(prev => prev || !prod);
+        const product: Product | null = await fetchProductById(id, { baseUrl: BASE });
+        if (!product) throw new Error("not found");
 
-      const ordered = product.productOptions?.length ? [...product.productOptions].sort(optionSorter) : [];
-      const productOrdered: Product = { ...product, productOptions: ordered };
+        const ordered = product.productOptions?.length ? [...product.productOptions].sort(optionSorter) : [];
+        const productOrdered: Product = { ...product, productOptions: ordered };
 
-      if (!aborted) {
-        setProd(productOrdered);
-        // si aún no había opción elegida, elegí default/primera
-        setSelectedOptId(prev => prev ?? (ordered.find(o => o.isDefault)?.id ?? ordered[0]?.id ?? null));
+        if (!aborted) {
+          setProd(productOrdered);
+          // si aún no había opción elegida, elegí default/primera
+          setSelectedOptId(prev => prev ?? (ordered.find(o => o.isDefault)?.id ?? ordered[0]?.id ?? null));
+        }
+
+        // refresco warm
+        try { sessionStorage.setItem(warmKey(productOrdered.id), JSON.stringify(productOrdered)); } catch { }
+      } catch {
+        // si falla el fetch, no rompas el warm
+      } finally {
+        if (!aborted) setLoading(false);
       }
+    })();
 
-      // refresco warm
-      try { sessionStorage.setItem(warmKey(productOrdered.id), JSON.stringify(productOrdered)); } catch {}
-    } catch {
-      // si falla el fetch, no rompas el warm
-    } finally {
-      if (!aborted) setLoading(false);
-    }
-  })();
-
-  return () => { aborted = true; };
-  // ⚠️ importante incluir `prod` solo para la línea setLoading(prev...)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { aborted = true; };
+    // ⚠️ importante incluir `prod` solo para la línea setLoading(prev...)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   // Separar opciones por tipo
@@ -228,6 +242,31 @@ export default function ProductDetailPage() {
     return extraOptions.filter((o) => selectedExtraIds.has(o.id));
   }, [extraOptions, selectedExtraIds]);
 
+  // Labels de promo a mostrar en banner — siempre desde el catálogo (prod.activePromoLabels
+  // para promos sin restricción de modificador + activatesPromo por opción para las
+  // restringidas a un modificador puntual). Nunca desde el endpoint genérico de
+  // /price-lists/active-promos: ese es exclusivo de home/categorías (PromoBanner).
+  const promoBannerLabels = useMemo(() => {
+    const labels: string[] = [];
+    const seen = new Set<string>();
+
+    for (const label of prod?.activePromoLabels ?? []) {
+      if (!seen.has(label)) {
+        seen.add(label);
+        labels.push(label);
+      }
+    }
+
+    const allOpts = [...sizeOptions, ...extraOptions];
+    const modifierLabel = allOpts.find((o) => o.activatesPromo)?.activatesPromo?.label ?? null;
+    if (modifierLabel && !seen.has(modifierLabel)) {
+      seen.add(modifierLabel);
+      labels.push(modifierLabel);
+    }
+
+    return labels;
+  }, [prod?.activePromoLabels, sizeOptions, extraOptions]);
+
   // cálculo local (fallback)
   const base = toNum(prod?.price);
   const sizeExtra = toNum(selectedOption?.precio_extra);
@@ -250,15 +289,19 @@ export default function ProductDetailPage() {
       const qres = await quoteProduct(Number(prod.id), Math.max(1, qty || 1), optionIds, notes?.trim() || undefined);
 
       if (qres) {
-        const unit = Number(qres.unitPrice);
-        const tot  = Number(qres.total);
-        const list = Number(qres.unitList);
+        const unit = Number(qres.unitFinalPrice);
+        const tot = Number(qres.lineTotal);
+        const list = Number(qres.unitListPrice);
         if (Number.isFinite(unit) && Number.isFinite(tot)) {
           setQuotedUnit(unit);
           setQuotedTotal(tot);
           setListUnit(Number.isFinite(list) ? list : null);
-          setHasPromo(!!qres.promo);
-          setPromoLabel(qres.promo ? buildPromoLabel(qres.promo) : null);
+          setHasPromo(!!(qres.appliedPriceList || qres.appliedPromotion));
+          setQuoteIsFromPriceList(!!qres.appliedPriceList && !qres.appliedPromotion);
+          setPromoLabel(
+            qres.appliedPriceList ? qres.appliedPriceList.listName :
+              qres.appliedPromotion ? qres.appliedPromotion.name : null
+          );
           return;
         }
       }
@@ -267,6 +310,7 @@ export default function ProductDetailPage() {
       setQuotedUnit(unitLocal);
       setQuotedTotal(unitLocal * qty);
       setHasPromo(false);
+      setQuoteIsFromPriceList(false);
       setPromoLabel(null);
       setListUnit(null);
     })();
@@ -305,8 +349,8 @@ export default function ProductDetailPage() {
         currentNotes?.trim() || undefined
       );
       if (qres) {
-        const u = Number(qres.unitPrice);
-        const t = Number(qres.total);
+        const u = Number(qres.unitFinalPrice);
+        const t = Number(qres.lineTotal);
         if (Number.isFinite(u) && Number.isFinite(t)) {
           unit = u;
           total = t;
@@ -442,18 +486,13 @@ export default function ProductDetailPage() {
 
           {/* Derecha */}
           <div className="space-y-4">
-            {/* Banner de promo — siempre visible si alguna opción la activa */}
-            {(() => {
-              const allOpts = [...sizeOptions, ...extraOptions];
-              const promoOpt = allOpts.find((o) => o.activatesPromo);
-              const label = promoOpt?.activatesPromo?.label ?? (hasPromo && promoLabel ? promoLabel : null);
-              return label ? (
-                <div className="rounded-xl bg-green-50 ring-1 ring-green-200 px-3 py-2 flex items-center gap-2">
-                  <span className="text-base leading-none">🏷️</span>
-                  <span className="text-sm font-semibold text-green-700">{label}</span>
-                </div>
-              ) : null;
-            })()}
+            {/* Banner de promos disponibles para este producto */}
+            {promoBannerLabels.map((label) => (
+              <div key={label} className="rounded-xl bg-green-50 ring-1 ring-green-200 px-3 py-2 flex items-center gap-2">
+                <span className="text-base leading-none">🏷️</span>
+                <span className="text-sm font-semibold text-green-700">{label}</span>
+              </div>
+            ))}
 
             {/* Opciones de Tamaño */}
             {!!sizeOptions.length && (
@@ -480,7 +519,7 @@ export default function ProductDetailPage() {
                         {o.option?.name || "Opción"}
                         {o.activatesPromo && (
                           <span className="text-[10px] font-bold bg-green-100 text-green-700 rounded px-1.5 py-0.5 leading-none">
-                            Aplica promo
+                            PROMO
                           </span>
                         )}
                       </span>
@@ -524,17 +563,17 @@ export default function ProductDetailPage() {
                       <div className="flex items-center gap-3">
                         <Checkbox
                           checked={isChecked}
-                          onCheckedChange={() => {}}
+                          onCheckedChange={() => { }}
                           className="pointer-events-none"
                         />
                         <span className="text-sm flex items-center gap-1.5">
-                            {o.option?.name || "Extra"}
-                            {o.activatesPromo && (
-                              <span className="text-[10px] font-bold bg-green-100 text-green-700 rounded px-1.5 py-0.5 leading-none">
-                                Aplica promo
-                              </span>
-                            )}
-                          </span>
+                          {o.option?.name || "Extra"}
+                          {o.activatesPromo && (
+                            <span className="text-[10px] font-bold bg-green-100 text-green-700 rounded px-1.5 py-0.5 leading-none">
+                              PROMO
+                            </span>
+                          )}
+                        </span>
                       </div>
                       <span className="text-sm font-semibold">
                         {plus ? `+${fmt(plus)}` : "Gratis"}
@@ -591,8 +630,8 @@ export default function ProductDetailPage() {
               <div className="flex items-center justify-between mb-3">
                 <div className="text-sm font-semibold">Total:</div>
                 <div className="text-right">
-                  {/* Si hay promo y tenemos unitList, mostramos el total de lista tachado */}
-                  {hasPromo && listUnit != null && (
+                  {/* Precio de lista tachado: aparece cuando hay descuento (lista PRICING o promo PROMOTION) */}
+                  {listUnit != null && listUnit !== quotedUnit && (
                     <div className="text-sm text-muted-foreground line-through">
                       {fmt(listUnit * qty)}
                     </div>
@@ -600,10 +639,10 @@ export default function ProductDetailPage() {
                   <div className="text-xl font-extrabold text-[var(--brand-color)]">
                     {fmt(quotedTotal ?? localTotal)}
                   </div>
-                  {/* Opcional: aclaración pequeña */}
-                  {hasPromo && (
+                  {/* Aclaración de descuento aplicado */}
+                  {(hasPromo || (listUnit != null && listUnit !== quotedUnit)) && (
                     <div className="text-[11px] text-green-700 font-medium">
-                      Precio promo aplicado
+                      {quoteIsFromPriceList ? "Precio con descuento aplicado" : "Precio promo aplicado"}
                     </div>
                   )}
                 </div>
@@ -633,7 +672,7 @@ export default function ProductDetailPage() {
         </div>
       )}
       {/* Overlay bloqueante solo si no teníamos warm */}
-      <BlockingLoader open={loading } message="Cargando producto…" />
+      <BlockingLoader open={loading} message="Cargando producto…" />
     </div>
   );
 }

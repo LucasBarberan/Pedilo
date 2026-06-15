@@ -64,8 +64,8 @@ export function useCartRefresh(): {
         const item = toQuote[i];
         if ((result as QuoteItemProductView).kind === "PRODUCT") {
           const r = result as QuoteItemProductView;
-          const unit  = Number(r.unitPrice);
-          const total = Number(r.total);
+          const unit  = Number(r.unitFinalPrice);
+          const total = Number(r.lineTotal);
           if (Number.isFinite(unit) && unit > 0) updateItemPrice(item.uniqueId, unit, Math.round(total));
         } else if ((result as QuoteItemComboView).kind === "COMBO") {
           const r = result as QuoteItemComboView;

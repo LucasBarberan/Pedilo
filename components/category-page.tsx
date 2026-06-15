@@ -12,6 +12,7 @@ import { fixImageUrl } from "@/lib/img";
 import type { Category } from "@/lib/categories";
 import type { Product } from "@/lib/api/products";
 import { fetchProductsByCategory, fetchProductsBySubcategory } from "@/lib/api/products";
+import PromoBanner from "./promo-banner";
 
 type CategoryPageProps = {
   slug: string;
@@ -196,7 +197,7 @@ export default function CategoryPageClient({
       <div className="h-[6px] w-full bg-white" />
       <ClosedBanner />
       <InfoBanner />
-
+      <PromoBanner apiBase={apiBase} />
       <div className="mx-auto w-full max-w-6xl px-4 pt-3 pb-2">
         <h2 className="text-2xl font-extrabold uppercase">{title}</h2>
       </div>
@@ -226,7 +227,6 @@ export default function CategoryPageClient({
                   const showPromo = !!p.promoLabel && p.basePrice != null && p.price != null && p.price !== p.basePrice;
                   const unit = typeof p.price === "number" ? p.price : undefined;
                   const targetUrl = `/producto/${p.id}`;
-
                   return (
                     <div
                       key={String(p.id)}
@@ -248,7 +248,7 @@ export default function CategoryPageClient({
                           className="object-cover"
                         />
                         {p.promoLabel && (
-                          <span className="absolute bottom-1 left-1 text-[9px] font-bold bg-green-500 text-white rounded px-1.5 py-0.5 leading-none shadow-sm">
+                          <span className="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-green-500 text-white rounded-full px-2 py-0.5 leading-none shadow">
                             {p.promoLabel}
                           </span>
                         )}
@@ -262,20 +262,16 @@ export default function CategoryPageClient({
                           {(p as any).description || ""}
                         </div>
 
-                        {!showPromo ? (
-                          <div className="mt-2 text-lg font-extrabold text-[var(--brand-color)]">
-                            {fmtPrice(unit)}
-                          </div>
-                        ) : (
-                          <div className="mt-2">
-                            <div className="text-sm text-muted-foreground line-through">
+                        <div className="mt-2 flex items-baseline gap-2">
+                          {showPromo && (
+                            <span className="text-sm text-muted-foreground line-through">
                               {fmtPrice(p.basePrice)}
-                            </div>
-                            <div className="text-lg font-extrabold text-[var(--brand-color)]">
-                              {fmtPrice(unit)}
-                            </div>
-                          </div>
-                        )}
+                            </span>
+                          )}
+                          <span className="text-lg font-extrabold text-[var(--brand-color)]">
+                            {fmtPrice(unit)}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   );

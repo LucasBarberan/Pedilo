@@ -340,7 +340,7 @@ export default function CartPage() {
                     )}
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-semibold">Total:</span>
-                      <span className="text-xl font-extrabold text-[var(--brand-color)]">{fmt(getTotalPrice())}</span>
+                      <span className="text-xl font-extrabold text-[var(--brand-color)]">{fmt(cartSummary?.total ?? getTotalPrice())}</span>
                     </div>
                   </div>
                 )}

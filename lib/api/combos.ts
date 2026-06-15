@@ -49,6 +49,7 @@ export type Combo = {
   imageUrl?: string | null;
   basePrice?: number | null;
   effectivePrice?: number | null;
+  promoLabel?: string | null;
   active?: boolean | null;
   channel?: string | null;
   categoryId?: string | number | null;
@@ -61,6 +62,7 @@ export type Combo = {
   items?: ComboItem[];
   categoryInclusions?: ComboCategoryInclusion[];
   modifierOverrides?: ComboModifierOverride[];
+  activePromoLabels?: string[];
 };
 
 type FetchCombosBaseOptions = {
@@ -244,6 +246,7 @@ function normalizeCombo(raw: any): Combo | null {
     imageUrl,
     basePrice,
     effectivePrice,
+    promoLabel: typeof raw.promoLabel === "string" ? raw.promoLabel : null,
     active: raw.active ?? raw.isActive ?? null,
     channel: raw.channel ?? raw.availableChannel ?? null,
     categoryId: raw.categoryId ?? raw.category_id ?? category?.id ?? null,
@@ -252,6 +255,7 @@ function normalizeCombo(raw: any): Combo | null {
     items,
     categoryInclusions,
     modifierOverrides,
+    activePromoLabels: Array.isArray(raw.activePromoLabels) ? raw.activePromoLabels : undefined,
   };
 }
 
@@ -378,7 +382,7 @@ export async function fetchComboDetail(
       (!mainProduct || !Array.isArray(mainProduct.productOptions) || mainProduct.productOptions.length === 0);
 
     if (needsHydration) {
-      const fetched = await fetchProductById(mainProductId, { baseUrl, signal });
+      const fetched = await fetchProductById(mainProductId, { baseUrl, signal, comboId: Number(comboId) });
       if (fetched) {
         mainProduct = mainProduct
           ? { ...mainProduct, ...fetched, productOptions: fetched.productOptions ?? mainProduct.productOptions }

@@ -30,6 +30,7 @@ export type Product = {
   } | null;
   promoLabel?: string | null;
   basePrice?: number | null;
+  activePromoLabels?: string[];
 };
 
 type FetchProductsOptions = {
@@ -160,6 +161,7 @@ export function normalizeProduct(raw: any): Product | null {
     subcategory,
     promoLabel,
     basePrice,
+    activePromoLabels: Array.isArray(raw.activePromoLabels) ? raw.activePromoLabels : undefined,
   };
 }
 
@@ -233,14 +235,15 @@ export async function fetchProductsBySubcategory(
 
 export async function fetchProductById(
   productId: string | number,
-  { baseUrl, signal }: FetchProductByIdOptions = {}
+  { baseUrl, signal, comboId }: FetchProductByIdOptions = {}
 ): Promise<Product | null> {
   const base = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
   if (!base) return null;
 
   try {
+    const qs = comboId != null ? `&comboId=${comboId}` : "";
     const res = await fetch(
-      `${base}/catalog/products/${encodeURIComponent(String(productId))}?channel=WEB`,
+      `${base}/catalog/products/${encodeURIComponent(String(productId))}?channel=WEB${qs}`,
       { cache: "no-store", signal }
     );
     if (!res.ok) return null;

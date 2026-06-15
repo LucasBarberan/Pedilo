@@ -7,6 +7,7 @@ import SiteHeader from "@/components/site-header";
 import CategoryMenu from "@/components/category-menu";
 import ClosedBanner from "@/components/closed-banner";
 import InfoBanner from "@/components/info-banner";
+import PromoBanner from "@/components/promo-banner";
 import BlockingLoader from "@/components/blocking-loader";
 import { fetchCategories } from "@/lib/categories";
 import type { Category } from "@/lib/categories";
@@ -73,8 +74,8 @@ export default function HomeScreen({ initialCategories, apiBase }: HomeScreenPro
       <SiteHeader onCartClick={handleCartClick} />
       <div className="h-[6px] w-full bg-white" />
       <ClosedBanner />
+      <PromoBanner apiBase={apiBase} />
       <InfoBanner />
-
       <CategoryMenu
         categories={sortedCategories}
         onCartClick={handleCartClick}

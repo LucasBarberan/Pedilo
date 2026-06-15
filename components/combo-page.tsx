@@ -148,12 +148,13 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   const [quotedEffective, setQuotedEffective] = useState<number | null>(null);
   const [quotedList, setQuotedList] = useState<number | null>(null);
   const [quoteHasPromo, setQuoteHasPromo] = useState(false);
+  const [quoteIsFromPriceList, setQuoteIsFromPriceList] = useState(false);
   const [promoLabel, setPromoLabel] = useState<string | null>(null);
 
   // Igual que en producto: estado comercial
   const { data: status } = useBusinessStatusSmart();
   const { config: onlineConfig } = useOnlineConfig();
-  const isWebOpen  = status?.web?.open ?? true; // mientras carga, asumimos abierto
+  const isWebOpen = status?.web?.open ?? true; // mientras carga, asumimos abierto
   const pickupOnly = !!(status?.pos?.open && status?.web?.open === false);
   const disabledByStatus = !isWebOpen;
 
@@ -234,6 +235,31 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     return extraOptions.filter((o) => selectedExtraIds.has(o.id));
   }, [extraOptions, selectedExtraIds]);
 
+  // Labels de promo a mostrar en banner — siempre desde el catálogo (combo.activePromoLabels
+  // para promos sin restricción de modificador + activatesPromo por opción para las
+  // restringidas a un modificador puntual). Nunca desde el endpoint genérico de
+  // /price-lists/active-promos: ese es exclusivo de home/categorías (PromoBanner).
+  const promoBannerLabels = useMemo(() => {
+    const labels: string[] = [];
+    const seen = new Set<string>();
+
+    for (const label of combo?.activePromoLabels ?? []) {
+      if (!seen.has(label)) {
+        seen.add(label);
+        labels.push(label);
+      }
+    }
+
+    const allOpts = [...sizeOptions, ...extraOptions];
+    const modifierLabel = allOpts.find((o) => o.activatesPromo)?.activatesPromo?.label ?? null;
+    if (modifierLabel && !seen.has(modifierLabel)) {
+      seen.add(modifierLabel);
+      labels.push(modifierLabel);
+    }
+
+    return labels;
+  }, [combo?.activePromoLabels, sizeOptions, extraOptions]);
+
   // helpers inclusiones
   const toggleSelectInclusion = (inc: CategoryInclusion, prodId: string) => {
     const key = String(inc.id);
@@ -255,7 +281,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
 
   // precios
   const baseList = toNum(combo?.basePrice);
-  const baseEff  = toNum(combo?.effectivePrice ?? combo?.basePrice);
+  const baseEff = toNum(combo?.effectivePrice ?? combo?.basePrice);
   const sizeExtra = toNum(selectedOption?.precio_extra);
   const extrasTotal = selectedExtras.reduce((sum, opt) => sum + toNum(opt.precio_extra), 0);
   const optionExtra = sizeExtra + extrasTotal;
@@ -280,10 +306,10 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   }, [combo, inclusionsProducts, inclusionSelections, promoFactor]);
 
   const unitNoPromo = (baseList + optionExtra + selectedInclusionsTotal);
-  const unitPromo   = (baseEff  + optionExtra + selectedInclusionsTotal);
+  const unitPromo = (baseEff + optionExtra + selectedInclusionsTotal);
 
   const totalNoPromo = unitNoPromo * qty;
-  const totalPromo   = unitPromo   * qty;
+  const totalPromo = unitPromo * qty;
 
   const selectedInclusionItems = useMemo(() => {
     if (!combo) return [];
@@ -375,21 +401,29 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
 
       setQuotedEffective(eff);
       setQuotedList(Number.isFinite(orig) && orig > eff ? orig : null);
-      setQuoteHasPromo(!!result.promo);
-      setPromoLabel(result.promo ? buildPromoLabel(result.promo) : null);
-    })().catch(() => {});
+      const hasDiscount = !!(result.appliedPriceList || result.appliedPromotion);
+      setQuoteHasPromo(hasDiscount);
+      setQuoteIsFromPriceList(!!result.appliedPriceList);
+      if (result.appliedPriceList) {
+        setPromoLabel(result.appliedPriceList.listName);
+      } else if (result.appliedPromotion) {
+        setPromoLabel(result.appliedPromotion.name);
+      } else {
+        setPromoLabel(null);
+      }
+    })().catch(() => { });
 
     return () => ctrl.abort();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [combo?.id, qty, quoteItems]);
 
   // Imagen principal
   const heroImg =
     fixImageUrl(
       (combo?.imageUrl && combo.imageUrl.trim() ? combo.imageUrl : "") ||
-        (mainProduct?.imageUrl && mainProduct.imageUrl.trim() ? mainProduct.imageUrl : "") ||
-        (mainItem?.product?.imageUrl && mainItem.product.imageUrl.trim() ? mainItem.product.imageUrl : "") ||
-        ""
+      (mainProduct?.imageUrl && mainProduct.imageUrl.trim() ? mainProduct.imageUrl : "") ||
+      (mainItem?.product?.imageUrl && mainItem.product.imageUrl.trim() ? mainItem.product.imageUrl : "") ||
+      ""
     ) || "/placeholder.svg";
 
   const handleAdd = () => {
@@ -407,7 +441,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       selectedOption != null && selectedOption.id != null && !Number.isNaN(Number(selectedOption.id));
 
     // precios para el carrito — servidor tiene prioridad sobre math local
-    const unit  = quotedEffective ?? unitPromo;
+    const unit = quotedEffective ?? unitPromo;
     const final = quotedEffective !== null ? Math.round(quotedEffective * qty) : Math.round(totalPromo);
 
     const img = heroImg !== "/placeholder.svg" ? heroImg : "";
@@ -628,18 +662,13 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
 
         {/* Derecha */}
         <div className="space-y-4">
-          {/* Banner de promo — siempre visible si alguna opción la activa */}
-          {(() => {
-            const allOpts = [...sizeOptions, ...extraOptions];
-            const promoOpt = allOpts.find((o) => o.activatesPromo);
-            const label = promoOpt?.activatesPromo?.label ?? (quoteHasPromo && promoLabel ? promoLabel : null);
-            return label ? (
-              <div className="rounded-xl bg-green-50 ring-1 ring-green-200 px-3 py-2 flex items-center gap-2">
-                <span className="text-base leading-none">🏷️</span>
-                <span className="text-sm font-semibold text-green-700">{label}</span>
-              </div>
-            ) : null;
-          })()}
+          {/* Banner de promos disponibles para este combo */}
+          {promoBannerLabels.map((label) => (
+            <div key={label} className="rounded-xl bg-green-50 ring-1 ring-green-200 px-3 py-2 flex items-center gap-2">
+              <span className="text-base leading-none">🏷️</span>
+              <span className="text-sm font-semibold text-green-700">{label}</span>
+            </div>
+          ))}
 
           {/* Opciones de Tamaño */}
           {sizeOptions.length > 0 && (
@@ -664,7 +693,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                       {o.option?.name || "Opcion"}
                       {o.activatesPromo && (
                         <span className="text-[10px] font-bold bg-green-100 text-green-700 rounded px-1.5 py-0.5 leading-none">
-                          Aplica promo
+                          PROMO
                         </span>
                       )}
                     </span>
@@ -706,17 +735,17 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                     <div className="flex items-center gap-3">
                       <Checkbox
                         checked={isChecked}
-                        onCheckedChange={() => {}}
+                        onCheckedChange={() => { }}
                         className="pointer-events-none"
                       />
                       <span className="text-sm flex items-center gap-1.5">
-                          {o.option?.name || "Extra"}
-                          {o.activatesPromo && (
-                            <span className="text-[10px] font-bold bg-green-100 text-green-700 rounded px-1.5 py-0.5 leading-none">
-                              Aplica promo
-                            </span>
-                          )}
-                        </span>
+                        {o.option?.name || "Extra"}
+                        {o.activatesPromo && (
+                          <span className="text-[10px] font-bold bg-green-100 text-green-700 rounded px-1.5 py-0.5 leading-none">
+                            PROMO
+                          </span>
+                        )}
+                      </span>
                     </div>
                     <span className="text-sm font-semibold">
                       {plus ? `+${fmt(plus)}` : "Gratis"}
@@ -878,9 +907,8 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                               return (
                                 <label
                                   key={String(p.id)}
-                                  className={`flex items-center justify-between gap-3 rounded-lg border p-2 cursor-pointer ${
-                                    checked ? "ring-2 ring-[var(--brand-color)]" : "ring-1 ring-black/5"
-                                  }`}
+                                  className={`flex items-center justify-between gap-3 rounded-lg border p-2 cursor-pointer ${checked ? "ring-2 ring-[var(--brand-color)]" : "ring-1 ring-black/5"
+                                    }`}
                                   onClick={() => toggleSelectInclusion(inc, String(p.id))}
                                 >
                                   <div className="flex items-center gap-3">
@@ -977,13 +1005,14 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
               <div className="text-sm font-semibold">Total:</div>
               <div className="text-right">
                 {(() => {
-                  const showPromo = quoteHasPromo || (quotedEffective === null && hasPromo);
                   const effectiveTotal = quotedEffective !== null
                     ? Math.ceil(quotedEffective * qty)
                     : Math.ceil(totalPromo);
                   const listTotal = quotedEffective !== null
                     ? (quotedList !== null ? Math.ceil(quotedList * qty) : null)
                     : (hasPromo ? Math.ceil(totalNoPromo) : null);
+                  const hasAnyAdjustment = quoteHasPromo || quotedList !== null || (quotedEffective === null && hasPromo);
+                  const showPromo = hasAnyAdjustment && listTotal !== null && effectiveTotal < listTotal;
 
                   return (
                     <>
@@ -997,7 +1026,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                       </div>
                       {showPromo && (
                         <div className="text-[11px] text-green-700 font-medium">
-                          Precio promo aplicado
+                          {quoteIsFromPriceList ? "Precio con descuento aplicado" : "Precio promo aplicado"}
                         </div>
                       )}
                     </>

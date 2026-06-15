@@ -4,20 +4,23 @@ export type QuoteItemProductView = {
   productId: number;
   name: string;
   qty: number;
-  unitList: string;          // precio de lista unitario (sin promo)
-  unitPrice: string;         // precio unitario EFECTIVO (promedio si hay units limitadas)
-  total: string;             // unitPrice * qty
+  unitListPrice: string;
+  discountedUnitPrice: string;
+  unitFinalPrice: string;
+  lineTotal: string;
   options?: Array<{ id: number; name: string; extra: string }>;
-  promo?: {
-    type: string;
+  appliedPriceList?: {
+    itemId: number;
+    listName: string;
+    priceType: string;
     value: string;
-    rawValue: string;
-    units: number;
-    applyToOptions: boolean;
-    listName?: string;
-    label?: string | null;
-    nthFreeRuleBuy?: number | null;
-    nthFreeRuleFree?: number | null;
+    savings: string;
+  };
+  appliedPromotion?: {
+    name: string;
+    priceType: string;
+    savings: string;
+    freeUnits?: number;
   };
   comment?: string | null;
 };
@@ -143,17 +146,18 @@ export type QuoteItemComboView = {
     isInclusion: boolean;
     options?: Array<{ id: number; name: string; extra: string }>;
   }>;
-  promo?: {
-    type: string;
+  appliedPriceList?: {
+    itemId: number;
+    listName: string;
+    listCode: string | null;
+    priceType: string;
     value: string;
-    rawValue: string;
-    units: number;
-    itemId: number | null;
-    applyToOptions: boolean;
-    listName?: string;
-    label?: string | null;
-    nthFreeRuleBuy?: number | null;
-    nthFreeRuleFree?: number | null;
+    savings: string;
+  };
+  appliedPromotion?: {
+    name: string;
+    priceType: string;
+    savings: string;
   };
   comment?: string | null;
 };
@@ -283,16 +287,18 @@ export async function quoteCart(
       l.type === "PRODUCT" ? (itemsArr[itemIdx++] ?? null) : (combosArr[comboIdx++] ?? null)
     );
 
-    const savings  = Number(json?.priceListSavings);
+    const priceListSavings = Number(json?.priceListSavings) || 0;
+    const promotionSavings = Number(json?.promotionSavings) || 0;
+    const totalSavings = priceListSavings + promotionSavings;
     const total    = Number(json?.total);
     const subtotal = Number(json?.subtotal);
     const summary: QuoteCartSummary | null =
-      Number.isFinite(savings) && savings > 0
+      totalSavings > 0
         ? {
-            savings,
-            promoName: json?.priceListName ?? null,
+            savings: totalSavings,
+            promoName: json?.priceListName ?? (promotionSavings > 0 ? "Promociones" : null),
             total: Number.isFinite(total) ? total : 0,
-            originalSubtotal: Number.isFinite(subtotal) ? subtotal + savings : 0,
+            originalSubtotal: Number.isFinite(subtotal) ? subtotal : 0,
           }
         : null;
 
