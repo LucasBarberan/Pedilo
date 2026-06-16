@@ -40,6 +40,7 @@ export type ComboCategoryInclusion = {
 export type ComboModifierOverride = {
   modifierOptionId: number;
   isEnabled: boolean;
+  extraOverride: number | null;
 };
 
 export type Combo = {
@@ -231,6 +232,7 @@ function normalizeCombo(raw: any): Combo | null {
     .map((o) => ({
       modifierOptionId: Number(o.modifierOptionId),
       isEnabled: o.isEnabled !== false,
+      extraOverride: parseNullableNumber(o.extraOverride ?? o.extra_override),
     }));
 
   if (!description) {
@@ -379,13 +381,20 @@ export async function fetchComboDetail(
     const needsHydration =
       mainProductId !== undefined &&
       mainProductId !== null &&
-      (!mainProduct || !Array.isArray(mainProduct.productOptions) || mainProduct.productOptions.length === 0);
+      (!mainProduct ||
+        !Array.isArray(mainProduct.modifierGroups) ||
+        mainProduct.modifierGroups.length === 0);
 
     if (needsHydration) {
       const fetched = await fetchProductById(mainProductId, { baseUrl, signal, comboId: Number(comboId) });
       if (fetched) {
         mainProduct = mainProduct
-          ? { ...mainProduct, ...fetched, productOptions: fetched.productOptions ?? mainProduct.productOptions }
+          ? {
+              ...mainProduct,
+              ...fetched,
+              productOptions: fetched.productOptions ?? mainProduct.productOptions,
+              modifierGroups: fetched.modifierGroups ?? mainProduct.modifierGroups,
+            }
           : fetched;
       }
     }

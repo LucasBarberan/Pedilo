@@ -11,6 +11,30 @@ export type ProductOption = {
   };
 };
 
+// Grupo de modificadores genérico (N grupos, no solo "Tamaño"/"Extra").
+// Refleja 1:1 lo que devuelve Backend/src/services/catalog.service.ts -> buildModifierGroupsFromTemplate.
+export type ModifierGroupOption = {
+  id: number;
+  name: string;
+  precio_extra: number;
+  isDefault: boolean;
+  isActive: boolean;
+  sortOrder: number;
+  recipeId?: number | null;
+  activatesPromo?: { label: string } | null;
+};
+
+export type ModifierGroup = {
+  id: number;
+  name: string;
+  applicableTo?: string | null;
+  isRequired: boolean;
+  minSelections: number;
+  maxSelections: number;
+  sortOrder: number;
+  options: ModifierGroupOption[];
+};
+
 export type Product = {
   id: string | number;
   name: string;
@@ -21,6 +45,7 @@ export type Product = {
   code?: string | number;
   isActive?: boolean | null;
   productOptions?: ProductOption[];
+  modifierGroups?: ModifierGroup[];
   subcategoryId?: number | null;
   subcategory?: {
     id: number;
@@ -76,6 +101,46 @@ function normalizeProductOptionFromTMO(tmo: any): ProductOption | null {
       description: null,
     },
   };
+}
+
+// Normaliza el array `modifierGroups` que devuelve /catalog/products/:id (detalle).
+// Cruza `activatesPromo` desde template.templateModifierOptions (por optionId), ya que
+// buildModifierGroupsFromTemplate en el backend no lo incluye dentro de cada grupo.
+function normalizeModifierGroups(raw: any): ModifierGroup[] {
+  const rawGroups: any[] = Array.isArray(raw?.modifierGroups) ? raw.modifierGroups : [];
+  if (rawGroups.length === 0) return [];
+
+  const promoByOptionId = new Map<number, { label: string }>();
+  const tmos: any[] = raw?.template?.templateModifierOptions ?? [];
+  for (const tmo of tmos) {
+    if (tmo?.activatesPromo) promoByOptionId.set(Number(tmo.optionId), tmo.activatesPromo);
+  }
+
+  return rawGroups
+    .map((g): ModifierGroup => ({
+      id: Number(g.id),
+      name: String(g.name ?? ""),
+      applicableTo: g.applicableTo ?? null,
+      isRequired: !!g.isRequired,
+      minSelections: Number(g.minSelections ?? 0),
+      maxSelections: Number(g.maxSelections ?? 1),
+      sortOrder: Number(g.sortOrder ?? 0),
+      options: (Array.isArray(g.options) ? g.options : [])
+        .filter((o: any) => o.isActive !== false)
+        .map((o: any): ModifierGroupOption => ({
+          id: Number(o.id),
+          name: String(o.name ?? ""),
+          precio_extra: Number(o.priceExtra ?? 0),
+          isDefault: !!o.isDefault,
+          isActive: o.isActive !== false,
+          sortOrder: Number(o.sortOrder ?? 0),
+          recipeId: o.recipeId ?? null,
+          activatesPromo: promoByOptionId.get(Number(o.id)) ?? null,
+        }))
+        .sort((a: ModifierGroupOption, b: ModifierGroupOption) => a.sortOrder - b.sortOrder),
+    }))
+    .filter((g) => g.options.length > 0)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
 // Normaliza una respuesta de ProductSKU del backend al tipo Product de Pedilo.
@@ -142,6 +207,8 @@ export function normalizeProduct(raw: any): Product | null {
     .map(normalizeProductOptionFromTMO)
     .filter((o): o is ProductOption => o !== null);
 
+  const modifierGroups = normalizeModifierGroups(raw);
+
   return {
     id,
     name: String(name),
@@ -157,6 +224,7 @@ export function normalizeProduct(raw: any): Product | null {
     code: raw.code ?? null,
     isActive: raw.isActive ?? true,
     productOptions: productOptions.length > 0 ? productOptions : undefined,
+    modifierGroups: modifierGroups.length > 0 ? modifierGroups : undefined,
     subcategoryId,
     subcategory,
     promoLabel,

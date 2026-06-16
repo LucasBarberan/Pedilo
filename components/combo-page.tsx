@@ -1,4 +1,4 @@
-﻿// app/combos/[slug]/page.tsx
+// app/combos/[slug]/page.tsx
 "use client";
 
 import SiteHeader from "@/components/site-header";
@@ -16,7 +16,7 @@ import { fixImageUrl } from "@/lib/img";
 import BlockingLoader from "@/components/blocking-loader";
 import { isAllowedForDelivery } from "@/lib/channel";
 import type { Combo as ApiCombo, ComboCategoryInclusion as CategoryInclusion } from "@/lib/api/combos";
-import type { Product as ApiProduct, ProductOption as ApiProductOption } from "@/lib/api/products";
+import type { Product as ApiProduct, ModifierGroup, ModifierGroupOption } from "@/lib/api/products";
 import { quoteCombo, buildPromoLabel, type QuoteComboItem } from "@/lib/pricing";
 
 const MAX_NOTES = 50;
@@ -45,27 +45,15 @@ const fmt = (n?: number | string | null) => {
   return `$${rounded.toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 };
 
-// ordenar opciones: simple -> doble -> triple; default primero si empatan
-const normalize = (s?: string | null) =>
-  (s || "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
-
-const rankByName = (o: ApiProductOption) => {
-  const n = normalize(o.option?.name);
-  if (n.includes("simple")) return 0;
-  if (n.includes("doble")) return 1;
-  if (n.includes("triple")) return 2;
-  return 99;
-};
-
-const optionSorter = (a: ApiProductOption, b: ApiProductOption) => {
-  const ra = rankByName(a);
-  const rb = rankByName(b);
-  if (ra !== rb) return ra - rb;
-  if (!!a.isDefault !== !!b.isDefault) return a.isDefault ? -1 : 1;
-  const ea = Number(a.precio_extra || 0);
-  const eb = Number(b.precio_extra || 0);
-  return ea - eb;
-};
+// Selección inicial: preselecciona las opciones marcadas isDefault en cada grupo.
+function buildDefaultSelection(groups: ModifierGroup[]): Map<number, Set<number>> {
+  const initial = new Map<number, Set<number>>();
+  for (const group of groups) {
+    const defaults = group.options.filter((o) => o.isDefault).map((o) => o.id);
+    if (defaults.length > 0) initial.set(group.id, new Set(defaults));
+  }
+  return initial;
+}
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -117,18 +105,14 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
 
   // ---------- Estado base ----------
   const combo = initialCombo;
-  const mainProduct = useMemo(() => {
-    if (!initialMainProduct) return null;
-    const ordered = initialMainProduct.productOptions?.length
-      ? [...initialMainProduct.productOptions].sort(optionSorter)
-      : [];
-    return { ...initialMainProduct, productOptions: ordered };
-  }, [initialMainProduct]);
+  // modifierGroups ya viene ordenado (por sortOrder de grupo y de opción) desde lib/api/products.ts
+  const mainProduct = initialMainProduct;
 
   const inclusionsProducts = initialInclusionProducts;
 
-  const [selectedOptId, setSelectedOptId] = useState<string | number | null>(null);
-  const [selectedExtraIds, setSelectedExtraIds] = useState<Set<string | number>>(new Set());
+  // Selección de modificadores del producto principal: Map<modifierGroupId, Set<modifierOptionId>>
+  const [selectedByGroup, setSelectedByGroup] = useState<Map<number, Set<number>>>(new Map());
+  const [missingModifierGroupId, setMissingModifierGroupId] = useState<number | null>(null);
   const [qty, setQty] = useState(1);
   const [notes, setNotes] = useState("");
   const [justAdded, setJustAdded] = useState(false);
@@ -160,12 +144,39 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
 
   const loading = false; // si en tu caso hay fetch para combo, actualizá este flag
 
+  // Overrides específicos del combo: pueden ocultar una opción o reemplazar su extra.
+  const modifierOverrideByOptionId = useMemo(() => {
+    return new Map(
+      (combo?.modifierOverrides ?? []).map((ov) => [Number(ov.modifierOptionId), ov])
+    );
+  }, [combo?.modifierOverrides]);
+
+  // Grupos de modificadores del producto principal (N genéricos), respetando los
+  // overrides del combo: se excluyen opciones deshabilitadas, se aplica extraOverride
+  // y se remueven grupos que quedan sin opciones tras el filtro.
+  const groups = useMemo<ModifierGroup[]>(() => {
+    const rawGroups = mainProduct?.modifierGroups ?? [];
+
+    return rawGroups
+      .map((g) => ({
+        ...g,
+        options: g.options
+          .filter((o) => modifierOverrideByOptionId.get(o.id)?.isEnabled !== false)
+          .map((o) => {
+            const override = modifierOverrideByOptionId.get(o.id);
+            return override?.extraOverride != null
+              ? { ...o, precio_extra: override.extraOverride }
+              : o;
+          }),
+      }))
+      .filter((g) => g.options.length > 0);
+  }, [mainProduct, modifierOverrideByOptionId]);
+
+  // Preseleccionar isDefault cuando cambian los grupos disponibles (carga inicial / cambio de combo)
   useEffect(() => {
-    const options = mainProduct?.productOptions ?? [];
-    const def = options.find((o) => o?.isDefault);
-    const next = (def ?? options[0])?.id ?? null;
-    setSelectedOptId(next ?? null);
-  }, [mainProduct]);
+    setSelectedByGroup(buildDefaultSelection(groups));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mainProduct?.id, combo?.id]);
 
   useEffect(() => {
     const map: Record<string, string[]> = {};
@@ -201,39 +212,44 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     };
   }, []);
 
-  // IDs de opciones deshabilitadas por el combo
-  const disabledOptionIds = useMemo(() => {
-    return new Set(
-      (combo?.modifierOverrides ?? [])
-        .filter((ov) => ov.isEnabled === false)
-        .map((ov) => ov.modifierOptionId)
-    );
-  }, [combo?.modifierOverrides]);
+  // IDs de todas las opciones seleccionadas (todos los grupos)
+  const allSelectedIds = useMemo(
+    () => Array.from(selectedByGroup.values()).flatMap((s) => Array.from(s)),
+    [selectedByGroup]
+  );
 
-  // Separar opciones por tipo, respetando overrides del combo
-  const { sizeOptions, extraOptions } = useMemo(() => {
-    if (!mainProduct?.productOptions?.length) {
-      return { sizeOptions: [], extraOptions: [] };
+  // Pares {group, option} de todo lo seleccionado, en el orden de los grupos/opciones
+  const selectedEntries = useMemo(() => {
+    const result: { group: ModifierGroup; option: ModifierGroupOption }[] = [];
+    for (const group of groups) {
+      const sel = selectedByGroup.get(group.id);
+      if (!sel || sel.size === 0) continue;
+      for (const opt of group.options) {
+        if (sel.has(opt.id)) result.push({ group, option: opt });
+      }
     }
-    const allowed = mainProduct.productOptions.filter(
-      (opt) => !disabledOptionIds.has(Number(opt.option?.id))
-    );
-    const sizes = allowed.filter((opt) => opt.option?.tipo?.toLowerCase() === "tamaño");
-    const extras = allowed.filter((opt) => opt.option?.tipo?.toLowerCase() === "extra");
-    return { sizeOptions: sizes, extraOptions: extras };
-  }, [mainProduct, disabledOptionIds]);
+    return result;
+  }, [groups, selectedByGroup]);
 
-  // opción de tamaño seleccionada
-  const selectedOption = useMemo(() => {
-    if (!sizeOptions.length) return undefined;
-    return sizeOptions.find((o) => o.id === selectedOptId);
-  }, [sizeOptions, selectedOptId]);
+  // Toggle de una opción respetando maxSelections (1 = radio, >1 = checkbox con tope) y minSelections
+  const toggleOption = (group: ModifierGroup, optionId: number) => {
+    if (missingModifierGroupId === group.id) setMissingModifierGroupId(null);
+    setSelectedByGroup((prev) => {
+      const next = new Map(prev);
+      const current = new Set(next.get(group.id) ?? []);
 
-  // opciones extra seleccionadas
-  const selectedExtras = useMemo(() => {
-    if (!extraOptions.length) return [];
-    return extraOptions.filter((o) => selectedExtraIds.has(o.id));
-  }, [extraOptions, selectedExtraIds]);
+      if (current.has(optionId)) {
+        if (group.isRequired && current.size <= group.minSelections) return prev;
+        current.delete(optionId);
+      } else {
+        if (group.maxSelections === 1) current.clear();
+        if (current.size < group.maxSelections) current.add(optionId);
+      }
+
+      next.set(group.id, current);
+      return next;
+    });
+  };
 
   // Labels de promo a mostrar en banner — siempre desde el catálogo (combo.activePromoLabels
   // para promos sin restricción de modificador + activatesPromo por opción para las
@@ -250,7 +266,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       }
     }
 
-    const allOpts = [...sizeOptions, ...extraOptions];
+    const allOpts = groups.flatMap((g) => g.options);
     const modifierLabel = allOpts.find((o) => o.activatesPromo)?.activatesPromo?.label ?? null;
     if (modifierLabel && !seen.has(modifierLabel)) {
       seen.add(modifierLabel);
@@ -258,7 +274,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     }
 
     return labels;
-  }, [combo?.activePromoLabels, sizeOptions, extraOptions]);
+  }, [combo?.activePromoLabels, groups]);
 
   // helpers inclusiones
   const toggleSelectInclusion = (inc: CategoryInclusion, prodId: string) => {
@@ -282,9 +298,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   // precios
   const baseList = toNum(combo?.basePrice);
   const baseEff = toNum(combo?.effectivePrice ?? combo?.basePrice);
-  const sizeExtra = toNum(selectedOption?.precio_extra);
-  const extrasTotal = selectedExtras.reduce((sum, opt) => sum + toNum(opt.precio_extra), 0);
-  const optionExtra = sizeExtra + extrasTotal;
+  const optionExtra = selectedEntries.reduce((sum, { option }) => sum + toNum(option.precio_extra), 0);
   const hasPromo = Number.isFinite(baseList) && Number.isFinite(baseEff) && baseEff < baseList;
   const promoFactor = hasPromo && baseList > 0 ? Math.max(0, Math.min(1, baseEff / baseList)) : 1;
 
@@ -355,10 +369,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       out.push({
         productId: Number(mainItem.productId),
         quantity: Number(mainItem.quantity ?? 1),
-        optionIds: [
-          ...(selectedOption ? [Number(selectedOption.id)] : []),
-          ...selectedExtras.map((e) => Number(e.id)),
-        ].filter((id) => Number.isFinite(id) && id > 0),
+        optionIds: allSelectedIds.filter((id) => Number.isFinite(id) && id > 0),
       });
     }
 
@@ -376,7 +387,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     }
 
     return out;
-  }, [mainItem, selectedOption, selectedExtras, combo, inclusionSelections]);
+  }, [mainItem, allSelectedIds, combo, inclusionSelections]);
 
   // Cotizar en el back cada vez que cambian qty / opciones / inclusiones
   useEffect(() => {
@@ -430,15 +441,19 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     if (!combo) return;
     if (submitting) return; // 🔒 Prevenir doble click
 
-    // Validar que si hay opciones de tamaño, se haya seleccionado una
-    if (sizeOptions.length > 0 && !selectedOptId) {
-      setFormError("Por favor selecciona un tamaño");
+    // Validar que todos los grupos obligatorios del producto principal cumplan su mínimo
+    const missingGroup = groups.find((g) => {
+      if (!g.isRequired) return false;
+      const sel = selectedByGroup.get(g.id);
+      return (sel?.size ?? 0) < g.minSelections;
+    });
+    if (missingGroup) {
+      setMissingModifierGroupId(missingGroup.id);
+      setFormError(null);
       return;
     }
 
-    const sizeLabelRaw = (selectedOption?.option?.name || "").trim();
-    const hasSelected =
-      selectedOption != null && selectedOption.id != null && !Number.isNaN(Number(selectedOption.id));
+    const currentSelectedEntries = [...selectedEntries];
 
     // precios para el carrito — servidor tiene prioridad sobre math local
     const unit = quotedEffective ?? unitPromo;
@@ -484,29 +499,12 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     const comboItems = (combo.items ?? [])
       .slice()
       .sort((a, b) => (a.isMain === b.isMain ? 0 : a.isMain ? -1 : 1))
-      .map((i) => {
-        const item: {
-          productId: number;
-          name: string;
-          qty: number;
-          isMain?: boolean;
-          option?: { id: number; name: string; extraPrice: number };
-        } = {
-          productId: Number(i.productId),
-          name: i.product?.name ?? "Ítem",
-          qty: Number(i.quantity ?? 1),
-          isMain: !!i.isMain,
-        };
-
-        if (i.isMain && hasSelected) {
-          item.option = {
-            id: Number(selectedOption!.id),
-            name: sizeLabelRaw || "Simple",
-            extraPrice: toNum(selectedOption!.precio_extra) || 0,
-          };
-        }
-        return item;
-      });
+      .map((i) => ({
+        productId: Number(i.productId),
+        name: i.product?.name ?? "Ítem",
+        qty: Number(i.quantity ?? 1),
+        isMain: !!i.isMain,
+      }));
 
     const inclusionAsItems = selectedInclusionItems.map((s) => ({
       productId: s.productId,
@@ -518,29 +516,17 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       basePrice: s.basePrice,
     }));
 
-    // Construir array de opciones seleccionadas
-    const selectedOptionsArr = [];
-    if (selectedOption) {
-      selectedOptionsArr.push({
-        productOptionId: Number(selectedOption.id),
-        optionId: Number(selectedOption.option?.id),
-        optionName: selectedOption.option?.name || "",
-        tipo: selectedOption.option?.tipo || "Tamaño",
-        priceExtra: toNum(selectedOption.precio_extra),
-      });
-    }
-    for (const extra of selectedExtras) {
-      selectedOptionsArr.push({
-        productOptionId: Number(extra.id),
-        optionId: Number(extra.option?.id),
-        optionName: extra.option?.name || "",
-        tipo: extra.option?.tipo || "Extra",
-        priceExtra: toNum(extra.precio_extra),
-      });
-    }
+    // Construir array de opciones seleccionadas (todos los grupos del producto principal)
+    const selectedOptionsArr = currentSelectedEntries.map(({ group, option }) => ({
+      productOptionId: Number(option.id),
+      optionId: Number(option.id),
+      optionName: option.name || "",
+      tipo: group.name || "Modificador",
+      priceExtra: toNum(option.precio_extra),
+    }));
 
     const cartItem = {
-      uniqueId: `${combo.id}-${selectedOptId ?? "noopt"}-${Date.now()}`,
+      uniqueId: `${combo.id}-${currentSelectedEntries.map(e => e.option.id).join("-") || "noopt"}-${Date.now()}`,
       id: Number(combo.id) || 0,
       name: combo.name || "Combo",
       description: mainProduct?.description || combo.description || "",
@@ -554,12 +540,6 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       comboName: combo.name,
       comboItems: [...comboItems, ...inclusionAsItems],
       selectedOptions: selectedOptionsArr.length > 0 ? selectedOptionsArr : undefined,
-      // Legacy fields para compatibilidad
-      size: sizeLabelRaw ? sizeLabelRaw.toLowerCase() : undefined,
-      productOptionId: hasSelected ? Number(selectedOption!.id) : undefined,
-      optionId: hasSelected ? Number((selectedOption as any).option?.id) : undefined,
-      optionName: hasSelected ? sizeLabelRaw : undefined,
-      priceExtra: optionExtra,
       isDefaultCategory: false,
     };
 
@@ -575,14 +555,9 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     }, 600);
     setNotes("");
     setQty(1);
-    setSelectedExtraIds(new Set());
-    // Resetear tamaño a default
-    const defaultSize = sizeOptions.find(o => o.isDefault);
-    if (defaultSize) {
-      setSelectedOptId(defaultSize.id);
-    } else if (sizeOptions.length > 0) {
-      setSelectedOptId(sizeOptions[0].id);
-    }
+    // Restaurar selección a los defaults de cada grupo
+    setSelectedByGroup(buildDefaultSelection(groups));
+    setMissingModifierGroupId(null);
   };
 
   if (!combo && !loading) {
@@ -594,9 +569,6 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       </div>
     );
   }
-
-  const hasOptions =
-    Array.isArray(mainProduct?.productOptions) && mainProduct.productOptions.length > 0;
 
   return (
     <div className="bg-background">
@@ -670,91 +642,78 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
             </div>
           ))}
 
-          {/* Opciones de Tamaño */}
-          {sizeOptions.length > 0 && (
-            <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 space-y-2">
-              <div className="text-sm font-semibold mb-2">
-                Tamaño: <span className="text-red-500">*</span>
-              </div>
-              {sizeOptions.map((o) => {
-                const active = selectedOptId === o.id;
-                const plus = toNum(o.precio_extra);
-                return (
-                  <button
-                    key={String(o.id)}
-                    disabled={loading}
-                    onClick={() => setSelectedOptId(o.id)}
-                    className={[
-                      "w-full rounded-lg border px-3 py-2 text-left flex items-center justify-between transition-colors",
-                      active ? "border-[var(--brand-color)] bg-[#fff5f2]" : "border-transparent hover:bg-black/5",
-                    ].join(" ")}
-                  >
-                    <span className="text-sm flex items-center gap-1.5">
-                      {o.option?.name || "Opcion"}
-                      {o.activatesPromo && (
-                        <span className="text-[10px] font-bold bg-green-100 text-green-700 rounded px-1.5 py-0.5 leading-none">
-                          PROMO
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-sm font-semibold">{plus ? `+${fmt(plus)}` : ""}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {/* Grupos de modificadores del producto principal (N genéricos: Tamaño, Salsa, Extras, etc.) */}
+          {groups.map((group) => {
+            const isRadio = group.maxSelections === 1;
+            const sel = selectedByGroup.get(group.id) ?? new Set<number>();
+            const hasError = missingModifierGroupId === group.id;
 
-          {/* Opciones Extra */}
-          {extraOptions.length > 0 && (
-            <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 space-y-2">
-              <div className="text-sm font-semibold mb-2">Extras:</div>
-              {extraOptions.map((o) => {
-                const isChecked = selectedExtraIds.has(o.id);
-                const plus = toNum(o.precio_extra);
-                return (
-                  <div
-                    key={String(o.id)}
-                    onClick={() => {
-                      setSelectedExtraIds(prev => {
-                        const newSet = new Set(prev);
-                        if (newSet.has(o.id)) {
-                          newSet.delete(o.id);
-                        } else {
-                          newSet.add(o.id);
-                        }
-                        return newSet;
-                      });
-                    }}
-                    className={[
-                      "w-full rounded-lg border px-3 py-2 cursor-pointer flex items-center justify-between transition-colors",
-                      isChecked
-                        ? "border-[var(--brand-color)] bg-[#fff5f2]"
-                        : "border-transparent hover:bg-black/5",
-                    ].join(" ")}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Checkbox
-                        checked={isChecked}
-                        onCheckedChange={() => { }}
-                        className="pointer-events-none"
-                      />
-                      <span className="text-sm flex items-center gap-1.5">
-                        {o.option?.name || "Extra"}
-                        {o.activatesPromo && (
-                          <span className="text-[10px] font-bold bg-green-100 text-green-700 rounded px-1.5 py-0.5 leading-none">
-                            PROMO
-                          </span>
+            return (
+              <div
+                key={group.id}
+                className={[
+                  "rounded-2xl ring-1 bg-white/60 p-3 space-y-2",
+                  hasError ? "ring-red-400 bg-red-50/70" : "ring-black/5",
+                ].join(" ")}
+              >
+                <div className="text-sm font-semibold mb-2 flex items-center gap-1.5">
+                  {group.name}
+                  {group.isRequired && <span className="text-red-500">*</span>}
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {group.isRequired
+                      ? isRadio
+                        ? "(obligatorio - elige una)"
+                        : `(obligatorio - mín ${group.minSelections})`
+                      : isRadio
+                        ? "(opcional - elige una)"
+                        : `(opcional - hasta ${group.maxSelections})`}
+                  </span>
+                </div>
+                {group.options.map((o) => {
+                  const active = sel.has(o.id);
+                  const plus = toNum(o.precio_extra);
+                  return (
+                    <div
+                      key={String(o.id)}
+                      onClick={() => toggleOption(group, o.id)}
+                      role={isRadio ? "radio" : "checkbox"}
+                      aria-checked={active}
+                      className={[
+                        "w-full rounded-lg border px-3 py-2 cursor-pointer flex items-center justify-between transition-colors",
+                        active
+                          ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                          : "border-transparent hover:bg-black/5",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-center gap-3">
+                        {!isRadio && (
+                          <Checkbox checked={active} onCheckedChange={() => { }} className="pointer-events-none" />
                         )}
+                        <span className="text-sm flex items-center gap-1.5">
+                          {o.name || "Opción"}
+                          {o.activatesPromo && (
+                            <span className="text-[10px] font-bold bg-green-100 text-green-700 rounded px-1.5 py-0.5 leading-none">
+                              PROMO
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <span className="text-sm font-semibold">
+                        {plus ? `+${fmt(plus)}` : isRadio ? "" : "Gratis"}
                       </span>
                     </div>
-                    <span className="text-sm font-semibold">
-                      {plus ? `+${fmt(plus)}` : "Gratis"}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+                {hasError && (
+                  <p className="text-xs font-medium text-red-600">
+                    {group.minSelections > 1
+                      ? `Debés seleccionar al menos ${group.minSelections} opciones.`
+                      : "Debés seleccionar una opción."}
+                  </p>
+                )}
+              </div>
+            );
+          })}
 
           {/* Inclusiones */}
           {(combo?.categoryInclusions?.length ?? 0) > 0 && (

@@ -14,7 +14,7 @@ import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
 import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import BlockingLoader from "@/components/blocking-loader";
 import { fixImageUrl } from "@/lib/img";
-import { fetchProductById, type Product, type ProductOption } from "@/lib/api/products";
+import { fetchProductById, type Product, type ModifierGroup, type ModifierGroupOption } from "@/lib/api/products";
 import { buildPromoLabel } from "@/lib/pricing";
 
 // ===== Helpers de formato y cálculos =====
@@ -27,26 +27,6 @@ const fmt = (n?: number | string) => {
 };
 const toNum = (v: unknown) =>
   typeof v === "string" ? Number(v) : typeof v === "number" ? v : 0;
-
-const normalize = (s?: string) =>
-  (s || "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
-
-const rankByName = (o: ProductOption) => {
-  const n = normalize(o.option?.name ?? undefined);
-  if (n.includes("simple")) return 0;
-  if (n.includes("doble")) return 1;
-  if (n.includes("triple")) return 2;
-  return 99;
-};
-const optionSorter = (a: ProductOption, b: ProductOption) => {
-  const ra = rankByName(a);
-  const rb = rankByName(b);
-  if (ra !== rb) return ra - rb;
-  if (!!a.isDefault !== !!b.isDefault) return a.isDefault ? -1 : 1;
-  const ea = Number(a.precio_extra || 0);
-  const eb = Number(b.precio_extra || 0);
-  return ea - eb;
-};
 
 // ------- Warm cache helpers (sessionStorage) -------
 const warmKey = (id: string | number) => `prefetch:product:${id}`;
@@ -63,11 +43,22 @@ function readWarmProduct(id: string | number): Product | null {
       price: p.price,
       imageUrl: p.imageUrl,
       productOptions: Array.isArray(p.productOptions) ? p.productOptions : [],
+      modifierGroups: Array.isArray(p.modifierGroups) ? p.modifierGroups : [],
       category: p.category,
     } as Product;
   } catch {
     return null;
   }
+}
+
+// Selección inicial: preselecciona las opciones marcadas isDefault en cada grupo.
+function buildDefaultSelection(groups: ModifierGroup[]): Map<number, Set<number>> {
+  const initial = new Map<number, Set<number>>();
+  for (const group of groups) {
+    const defaults = group.options.filter((o) => o.isDefault).map((o) => o.id);
+    if (defaults.length > 0) initial.set(group.id, new Set(defaults));
+  }
+  return initial;
 }
 
 // ===== Helper local para cotizar (usa /pricing/quote si existe) =====
@@ -154,8 +145,9 @@ export default function ProductDetailPage() {
 
 
   const [prod, setProd] = useState<Product | null>(null);
-  const [selectedOptId, setSelectedOptId] = useState<string | number | null>(null);
-  const [selectedExtraIds, setSelectedExtraIds] = useState<Set<string | number>>(new Set());
+  // Selección de modificadores: Map<modifierGroupId, Set<modifierOptionId>>
+  const [selectedByGroup, setSelectedByGroup] = useState<Map<number, Set<number>>>(new Map());
+  const [missingModifierGroupId, setMissingModifierGroupId] = useState<number | null>(null);
   const [qty, setQty] = useState(1);
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(true);
@@ -173,9 +165,8 @@ export default function ProductDetailPage() {
     if (!id) return;
     const warm = readWarmProduct(id); // seguro: la función ya tiene try/catch
     if (warm) {
-      const ordered = warm.productOptions?.length ? [...warm.productOptions].sort(optionSorter) : [];
-      setProd({ ...warm, productOptions: ordered });
-      setSelectedOptId(ordered.find(o => o.isDefault)?.id ?? ordered[0]?.id ?? null);
+      setProd(warm);
+      setSelectedByGroup(buildDefaultSelection(warm.modifierGroups ?? []));
       setLoading(false); // evita mostrar el loader si ya hay warm
     }
   }, [id]);
@@ -193,17 +184,14 @@ export default function ProductDetailPage() {
         const product: Product | null = await fetchProductById(id, { baseUrl: BASE });
         if (!product) throw new Error("not found");
 
-        const ordered = product.productOptions?.length ? [...product.productOptions].sort(optionSorter) : [];
-        const productOrdered: Product = { ...product, productOptions: ordered };
-
         if (!aborted) {
-          setProd(productOrdered);
-          // si aún no había opción elegida, elegí default/primera
-          setSelectedOptId(prev => prev ?? (ordered.find(o => o.isDefault)?.id ?? ordered[0]?.id ?? null));
+          setProd(product);
+          // si aún no había nada elegido (no hubo warm), aplicar defaults
+          setSelectedByGroup(prev => prev.size > 0 ? prev : buildDefaultSelection(product.modifierGroups ?? []));
         }
 
         // refresco warm
-        try { sessionStorage.setItem(warmKey(productOrdered.id), JSON.stringify(productOrdered)); } catch { }
+        try { sessionStorage.setItem(warmKey(product.id), JSON.stringify(product)); } catch { }
       } catch {
         // si falla el fetch, no rompas el warm
       } finally {
@@ -216,31 +204,47 @@ export default function ProductDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Separar opciones por tipo
-  const { sizeOptions, extraOptions } = useMemo(() => {
-    if (!prod?.productOptions?.length) {
-      return { sizeOptions: [], extraOptions: [] };
+  // Grupos de modificadores del producto (ya vienen ordenados y filtrados por isActive)
+  const groups = useMemo(() => prod?.modifierGroups ?? [], [prod]);
+
+  // IDs de todas las opciones seleccionadas (todos los grupos)
+  const allSelectedIds = useMemo(
+    () => Array.from(selectedByGroup.values()).flatMap((s) => Array.from(s)),
+    [selectedByGroup]
+  );
+
+  // Pares {group, option} de todo lo seleccionado, en el orden de los grupos/opciones
+  const selectedEntries = useMemo(() => {
+    const result: { group: ModifierGroup; option: ModifierGroupOption }[] = [];
+    for (const group of groups) {
+      const sel = selectedByGroup.get(group.id);
+      if (!sel || sel.size === 0) continue;
+      for (const opt of group.options) {
+        if (sel.has(opt.id)) result.push({ group, option: opt });
+      }
     }
-    const sizes = prod.productOptions.filter(
-      (opt) => opt.option?.tipo?.toLowerCase() === "tamaño"
-    );
-    const extras = prod.productOptions.filter(
-      (opt) => opt.option?.tipo?.toLowerCase() === "extra"
-    );
-    return { sizeOptions: sizes, extraOptions: extras };
-  }, [prod]);
+    return result;
+  }, [groups, selectedByGroup]);
 
-  // opción de tamaño elegida
-  const selectedOption = useMemo(() => {
-    if (!sizeOptions.length) return undefined;
-    return sizeOptions.find((o) => o.id === selectedOptId);
-  }, [sizeOptions, selectedOptId]);
+  // Toggle de una opción respetando maxSelections (1 = radio, >1 = checkbox con tope) y minSelections
+  const toggleOption = (group: ModifierGroup, optionId: number) => {
+    if (missingModifierGroupId === group.id) setMissingModifierGroupId(null);
+    setSelectedByGroup((prev) => {
+      const next = new Map(prev);
+      const current = new Set(next.get(group.id) ?? []);
 
-  // opciones extra elegidas
-  const selectedExtras = useMemo(() => {
-    if (!extraOptions.length) return [];
-    return extraOptions.filter((o) => selectedExtraIds.has(o.id));
-  }, [extraOptions, selectedExtraIds]);
+      if (current.has(optionId)) {
+        if (group.isRequired && current.size <= group.minSelections) return prev;
+        current.delete(optionId);
+      } else {
+        if (group.maxSelections === 1) current.clear();
+        if (current.size < group.maxSelections) current.add(optionId);
+      }
+
+      next.set(group.id, current);
+      return next;
+    });
+  };
 
   // Labels de promo a mostrar en banner — siempre desde el catálogo (prod.activePromoLabels
   // para promos sin restricción de modificador + activatesPromo por opción para las
@@ -257,7 +261,7 @@ export default function ProductDetailPage() {
       }
     }
 
-    const allOpts = [...sizeOptions, ...extraOptions];
+    const allOpts = groups.flatMap((g) => g.options);
     const modifierLabel = allOpts.find((o) => o.activatesPromo)?.activatesPromo?.label ?? null;
     if (modifierLabel && !seen.has(modifierLabel)) {
       seen.add(modifierLabel);
@@ -265,15 +269,14 @@ export default function ProductDetailPage() {
     }
 
     return labels;
-  }, [prod?.activePromoLabels, sizeOptions, extraOptions]);
+  }, [prod?.activePromoLabels, groups]);
 
   // cálculo local (fallback)
   const base = toNum(prod?.price);
-  const sizeExtra = toNum(selectedOption?.precio_extra);
-  const extrasTotal = selectedExtras.reduce((sum, opt) => sum + toNum(opt.precio_extra), 0);
-  const localTotal = (base + sizeExtra + extrasTotal) * qty;
+  const optionsExtraTotal = selectedEntries.reduce((sum, { option }) => sum + toNum(option.precio_extra), 0);
+  const localTotal = (base + optionsExtraTotal) * qty;
 
-  // 🔁 Cotizar en el back (promos) cada vez que cambian qty / option / producto
+  // 🔁 Cotizar en el back (promos) cada vez que cambian qty / opciones / producto
   useEffect(() => {
     (async () => {
       if (!prod?.id) {
@@ -281,12 +284,7 @@ export default function ProductDetailPage() {
         setQuotedTotal(null);
         return;
       }
-      // Incluir opción de tamaño + opciones extra
-      const optionIds = [
-        ...(selectedOption?.id ? [Number(selectedOption.id)] : []),
-        ...selectedExtras.map(e => Number(e.id))
-      ];
-      const qres = await quoteProduct(Number(prod.id), Math.max(1, qty || 1), optionIds, notes?.trim() || undefined);
+      const qres = await quoteProduct(Number(prod.id), Math.max(1, qty || 1), allSelectedIds, notes?.trim() || undefined);
 
       if (qres) {
         const unit = Number(qres.unitFinalPrice);
@@ -306,7 +304,7 @@ export default function ProductDetailPage() {
         }
       }
       // fallback local si la cotización falla/no aplica
-      const unitLocal = base + sizeExtra + extrasTotal;
+      const unitLocal = base + optionsExtraTotal;
       setQuotedUnit(unitLocal);
       setQuotedTotal(unitLocal * qty);
       setHasPromo(false);
@@ -315,37 +313,38 @@ export default function ProductDetailPage() {
       setListUnit(null);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prod?.id, selectedOption?.id, qty, selectedExtraIds]);
+  }, [prod?.id, qty, allSelectedIds.join(",")]);
 
   const handleAdd = async () => {
     if (!prod) return;
     if (submitting) return; // 🔒 Prevenir doble click
 
-    // Validar que si hay opciones de tamaño, se haya seleccionado una
-    if (sizeOptions.length > 0 && !selectedOptId) {
-      alert("Por favor selecciona un tamaño");
+    // Validar que todos los grupos obligatorios cumplan su mínimo de selecciones
+    const missingGroup = groups.find((g) => {
+      if (!g.isRequired) return false;
+      const sel = selectedByGroup.get(g.id);
+      return (sel?.size ?? 0) < g.minSelections;
+    });
+    if (missingGroup) {
+      setMissingModifierGroupId(missingGroup.id);
       return;
     }
 
     // IMPORTANTE: Capturar los valores ANTES de cualquier estado asíncrono
-    const currentSelectedOption = selectedOption;
-    const currentSelectedExtras = [...selectedExtras];
+    const currentSelectedEntries = [...selectedEntries];
     const currentQty = qty;
     const currentNotes = notes;
+    const currentOptionIds = currentSelectedEntries.map(({ option }) => Number(option.id));
 
     // usar cotización ya calculada (si está), con fallback
     let unit = quotedUnit;
     let total = quotedTotal;
 
     if (unit == null || total == null) {
-      const optionIds = [
-        ...(currentSelectedOption?.id ? [Number(currentSelectedOption.id)] : []),
-        ...currentSelectedExtras.map(e => Number(e.id))
-      ];
       const qres = await quoteProduct(
         Number(prod.id),
         Math.max(1, currentQty || 1),
-        optionIds,
+        currentOptionIds,
         currentNotes?.trim() || undefined
       );
       if (qres) {
@@ -360,48 +359,28 @@ export default function ProductDetailPage() {
         // último fallback local
         const baseNum =
           typeof prod.price === "string" ? Number(prod.price) : (prod.price ?? 0);
-        const sizeExtraNum =
-          typeof currentSelectedOption?.precio_extra === "string"
-            ? Number(currentSelectedOption?.precio_extra)
-            : (currentSelectedOption?.precio_extra ?? 0);
-        const extrasNum = currentSelectedExtras.reduce((sum, opt) =>
-          sum + (typeof opt.precio_extra === "string" ? Number(opt.precio_extra) : (opt.precio_extra ?? 0)),
+        const extrasNum = currentSelectedEntries.reduce(
+          (sum, { option }) => sum + toNum(option.precio_extra),
           0
         );
-        unit = baseNum + sizeExtraNum + extrasNum;
+        unit = baseNum + extrasNum;
         total = unit * currentQty;
       }
     }
 
-    // Construir array de opciones seleccionadas
-    const selectedOptionsArr = [];
-    if (currentSelectedOption) {
-      selectedOptionsArr.push({
-        productOptionId: Number(currentSelectedOption.id),
-        optionId: Number(currentSelectedOption.option?.id),
-        optionName: currentSelectedOption.option?.name || "",
-        tipo: currentSelectedOption.option?.tipo || "Tamaño",
-        priceExtra: typeof currentSelectedOption.precio_extra === "string"
-          ? Number(currentSelectedOption.precio_extra)
-          : (currentSelectedOption.precio_extra ?? 0),
-      });
-    }
-    for (const extra of currentSelectedExtras) {
-      selectedOptionsArr.push({
-        productOptionId: Number(extra.id),
-        optionId: Number(extra.option?.id),
-        optionName: extra.option?.name || "",
-        tipo: extra.option?.tipo || "Extra",
-        priceExtra: typeof extra.precio_extra === "string"
-          ? Number(extra.precio_extra)
-          : (extra.precio_extra ?? 0),
-      });
-    }
+    // Construir array de opciones seleccionadas (todos los grupos)
+    const selectedOptionsArr = currentSelectedEntries.map(({ group, option }) => ({
+      productOptionId: Number(option.id),
+      optionId: Number(option.id),
+      optionName: option.name || "",
+      tipo: group.name || "Modificador",
+      priceExtra: toNum(option.precio_extra),
+    }));
 
     setSubmitting(true); // 🔒 Bloquear mientras se procesa
 
     addToCart({
-      uniqueId: `${prod.id}-${selectedOptId}-${Date.now()}`,
+      uniqueId: `${prod.id}-${currentOptionIds.join("-")}-${Date.now()}`,
       id: Number(prod.id) || 0,
       name: prod.name || "",
       description: prod.description || "",
@@ -412,14 +391,6 @@ export default function ProductDetailPage() {
       quantity: currentQty,
       observations: currentNotes,
       selectedOptions: selectedOptionsArr.length > 0 ? selectedOptionsArr : undefined,
-      // Legacy fields para compatibilidad
-      size: currentSelectedOption?.option?.name?.toLowerCase() as any,
-      productOptionId: Number(currentSelectedOption?.id) || undefined,
-      optionId: Number(currentSelectedOption?.option?.id) || undefined,
-      optionName: currentSelectedOption?.option?.name || undefined,
-      priceExtra: typeof currentSelectedOption?.precio_extra === "string"
-        ? Number(currentSelectedOption?.precio_extra)
-        : (currentSelectedOption?.precio_extra ?? 0),
       isDefaultCategory: false,
     });
 
@@ -431,14 +402,9 @@ export default function ProductDetailPage() {
     }, 600);
     setNotes("");
     setQty(1);
-    setSelectedExtraIds(new Set());
-    // Resetear tamaño a default
-    const defaultSize = sizeOptions.find(o => o.isDefault);
-    if (defaultSize) {
-      setSelectedOptId(defaultSize.id);
-    } else if (sizeOptions.length > 0) {
-      setSelectedOptId(sizeOptions[0].id);
-    }
+    // Restaurar selección a los defaults de cada grupo
+    setSelectedByGroup(buildDefaultSelection(groups));
+    setMissingModifierGroupId(null);
   };
 
   // ⬇️ Render SIEMPRE; overlay solo si no hubo warm
@@ -494,95 +460,78 @@ export default function ProductDetailPage() {
               </div>
             ))}
 
-            {/* Opciones de Tamaño */}
-            {!!sizeOptions.length && (
-              <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 space-y-2">
-                <div className="text-sm font-semibold mb-2">
-                  Tamaño: <span className="text-red-500">*</span>
-                </div>
-                {sizeOptions.map((o) => {
-                  const active = selectedOptId === o.id;
-                  const plus = toNum(o.precio_extra);
-                  return (
-                    <button
-                      key={String(o.id)}
-                      onClick={() => setSelectedOptId(o.id)}
-                      disabled={loading && !prod}
-                      className={[
-                        "w-full rounded-lg border px-3 py-2 text-left flex items-center justify-between transition-colors",
-                        active
-                          ? "border-[var(--brand-color)] bg-[#fff5f2]"
-                          : "border-transparent hover:bg-black/5",
-                      ].join(" ")}
-                    >
-                      <span className="text-sm flex items-center gap-1.5">
-                        {o.option?.name || "Opción"}
-                        {o.activatesPromo && (
-                          <span className="text-[10px] font-bold bg-green-100 text-green-700 rounded px-1.5 py-0.5 leading-none">
-                            PROMO
-                          </span>
-                        )}
-                      </span>
-                      <span className="text-sm font-semibold">
-                        {plus ? `+${fmt(plus)}` : ""}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            {/* Grupos de modificadores (N genéricos: Tamaño, Salsa, Acompañamiento, Extras, etc.) */}
+            {groups.map((group) => {
+              const isRadio = group.maxSelections === 1;
+              const sel = selectedByGroup.get(group.id) ?? new Set<number>();
+              const hasError = missingModifierGroupId === group.id;
 
-            {/* Opciones Extra */}
-            {!!extraOptions.length && (
-              <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 space-y-2">
-                <div className="text-sm font-semibold mb-2">Extras:</div>
-                {extraOptions.map((o) => {
-                  const isChecked = selectedExtraIds.has(o.id);
-                  const plus = toNum(o.precio_extra);
-                  return (
-                    <div
-                      key={String(o.id)}
-                      onClick={() => {
-                        setSelectedExtraIds(prev => {
-                          const newSet = new Set(prev);
-                          if (newSet.has(o.id)) {
-                            newSet.delete(o.id);
-                          } else {
-                            newSet.add(o.id);
-                          }
-                          return newSet;
-                        });
-                      }}
-                      className={[
-                        "w-full rounded-lg border px-3 py-2 cursor-pointer flex items-center justify-between transition-colors",
-                        isChecked
-                          ? "border-[var(--brand-color)] bg-[#fff5f2]"
-                          : "border-transparent hover:bg-black/5",
-                      ].join(" ")}
-                    >
-                      <div className="flex items-center gap-3">
-                        <Checkbox
-                          checked={isChecked}
-                          onCheckedChange={() => { }}
-                          className="pointer-events-none"
-                        />
-                        <span className="text-sm flex items-center gap-1.5">
-                          {o.option?.name || "Extra"}
-                          {o.activatesPromo && (
-                            <span className="text-[10px] font-bold bg-green-100 text-green-700 rounded px-1.5 py-0.5 leading-none">
-                              PROMO
-                            </span>
+              return (
+                <div
+                  key={group.id}
+                  className={[
+                    "rounded-2xl ring-1 bg-white/60 p-3 space-y-2",
+                    hasError ? "ring-red-400 bg-red-50/70" : "ring-black/5",
+                  ].join(" ")}
+                >
+                  <div className="text-sm font-semibold mb-2 flex items-center gap-1.5">
+                    {group.name}
+                    {group.isRequired && <span className="text-red-500">*</span>}
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {group.isRequired
+                        ? isRadio
+                          ? "(obligatorio - elige una)"
+                          : `(obligatorio - mín ${group.minSelections})`
+                        : isRadio
+                          ? "(opcional - elige una)"
+                          : `(opcional - hasta ${group.maxSelections})`}
+                    </span>
+                  </div>
+                  {group.options.map((o) => {
+                    const active = sel.has(o.id);
+                    const plus = toNum(o.precio_extra);
+                    return (
+                      <div
+                        key={String(o.id)}
+                        onClick={() => toggleOption(group, o.id)}
+                        role={isRadio ? "radio" : "checkbox"}
+                        aria-checked={active}
+                        className={[
+                          "w-full rounded-lg border px-3 py-2 cursor-pointer flex items-center justify-between transition-colors",
+                          active
+                            ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                            : "border-transparent hover:bg-black/5",
+                        ].join(" ")}
+                      >
+                        <div className="flex items-center gap-3">
+                          {!isRadio && (
+                            <Checkbox checked={active} onCheckedChange={() => { }} className="pointer-events-none" />
                           )}
+                          <span className="text-sm flex items-center gap-1.5">
+                            {o.name || "Opción"}
+                            {o.activatesPromo && (
+                              <span className="text-[10px] font-bold bg-green-100 text-green-700 rounded px-1.5 py-0.5 leading-none">
+                                PROMO
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                        <span className="text-sm font-semibold">
+                          {plus ? `+${fmt(plus)}` : isRadio ? "" : "Gratis"}
                         </span>
                       </div>
-                      <span className="text-sm font-semibold">
-                        {plus ? `+${fmt(plus)}` : "Gratis"}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                    );
+                  })}
+                  {hasError && (
+                    <p className="text-xs font-medium text-red-600">
+                      {group.minSelections > 1
+                        ? `Debés seleccionar al menos ${group.minSelections} opciones.`
+                        : "Debés seleccionar una opción."}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
 
             <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
               <div className="text-sm font-semibold mb-2">Cantidad:</div>
