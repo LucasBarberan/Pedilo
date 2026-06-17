@@ -1,11 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { fetchActivePromos, buildActivePromoLabel, type ActivePromo } from "@/lib/api/promos";
 
 type PromoBannerProps = {
   apiBase?: string | null;
 };
+
+function buildPromoHref(p: ActivePromo): string | null {
+  switch (p.scope) {
+    case "COMBO":
+      return p.productTemplateId != null ? `/combos/${p.productTemplateId}` : null;
+    case "PRODUCT":
+      return p.productId != null ? `/producto/${p.productId}` : null;
+    case "CATEGORY":
+      return p.categoryId != null ? `/categoria/promo?id=${p.categoryId}` : null;
+    default:
+      return null;
+  }
+}
 
 export default function PromoBanner({ apiBase }: PromoBannerProps) {
   const [promos, setPromos] = useState<ActivePromo[]>([]);
@@ -27,14 +41,21 @@ export default function PromoBanner({ apiBase }: PromoBannerProps) {
           Promociones
         </p>
         <div className="flex flex-wrap justify-evenly gap-2">
-          {promos.map((p) => (
-            <span
-              key={p.id}
-              className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold text-green-800 ring-1 ring-green-300 shadow-sm"
-            >
-              {buildActivePromoLabel(p)}
-            </span>
-          ))}
+          {promos.map((p) => {
+            const href = buildPromoHref(p);
+            const badge = (
+              <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold text-green-800 ring-1 ring-green-300 shadow-sm">
+                {buildActivePromoLabel(p)}
+              </span>
+            );
+            return href ? (
+              <Link key={p.id} href={href} className="transition-transform hover:scale-105">
+                {badge}
+              </Link>
+            ) : (
+              <span key={p.id}>{badge}</span>
+            );
+          })}
         </div>
       </div>
     </div>
