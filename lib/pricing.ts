@@ -187,10 +187,10 @@ export async function quoteCombo({
         {
           type: "COMBO",
           product_template_id: comboId,
-          quantity: qty,
+          combo_quantity: qty,
           items: items.map((it) => ({
             product_id: it.productId,
-            quantity: it.quantity,
+            quantity_per_combo: it.quantity,
             option_ids: it.optionIds ?? [],
           })),
         },
@@ -263,8 +263,8 @@ export async function quoteCart(
         : {
             type: "COMBO",
             product_template_id: l.comboId,
-            quantity: l.qty,
-            items: l.items.map((it) => ({ product_id: it.productId, quantity: it.quantity, option_ids: it.optionIds ?? [] })),
+            combo_quantity: l.qty,
+            items: l.items.map((it) => ({ product_id: it.productId, quantity_per_combo: it.quantity, option_ids: it.optionIds ?? [] })),
           }
     ),
   };
