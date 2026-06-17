@@ -358,7 +358,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           const unitCombo = Math.round(Number(it.price));
 
           combosForApi.push({
-            combo_id: Number(it.id),
+            product_template_id: Number(it.id),
             name: it.comboName || it.name,
             quantity: Number(it.quantity),
             unit_price: unitCombo,
