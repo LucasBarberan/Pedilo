@@ -45,6 +45,12 @@ const fmt = (n?: number | string | null) => {
   return `$${rounded.toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 };
 
+const capitalizeFirst = (value: string) => {
+  const text = value.trim();
+  if (!text) return text;
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
+
 // Selección inicial: preselecciona las opciones marcadas isDefault en cada grupo.
 function buildDefaultSelection(groups: ModifierGroup[]): Map<number, Set<number>> {
   const initial = new Map<number, Set<number>>();
@@ -725,7 +731,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                 const max = Number(inc.maxChoices ?? 1);
                 const min = Number(inc.minChoices ?? 0);
                 const isSingle = max <= 1;
-                const title = (inc.name || (inc as any).subcategory?.name || inc.category?.name || "Elige una opcion").toLowerCase();
+                const title = capitalizeFirst(inc.name || inc.subcategory?.name || inc.category?.name || "Elige una opción");
 
                 const selectedValue = sel[0] ?? "";
 
