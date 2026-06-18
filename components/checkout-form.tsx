@@ -468,7 +468,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
       console.log("POST /orders body =>\n", JSON.stringify(apiBody, null, 2));
 
-      const res = await fetch(`${BASE}/orders`, {
+      const res = await fetch(`/api/checkout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(apiBody),
