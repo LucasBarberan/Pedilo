@@ -116,8 +116,43 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
 
   const inclusionsProducts = initialInclusionProducts;
 
+  // Overrides específicos del combo: pueden ocultar una opción o reemplazar su extra.
+  const modifierOverrideByOptionId = useMemo(() => {
+    return new Map(
+      (combo?.modifierOverrides ?? []).map((ov) => [Number(ov.modifierOptionId), ov])
+    );
+  }, [combo?.modifierOverrides]);
+
+  // Grupos de modificadores del producto principal (N genéricos), respetando los
+  // overrides del combo: se excluyen opciones deshabilitadas, se aplica extraOverride
+  // y se remueven grupos que quedan sin opciones tras el filtro.
+  const groups = useMemo<ModifierGroup[]>(() => {
+    const rawGroups = mainProduct?.modifierGroups ?? [];
+
+    return rawGroups
+      .map((g) => ({
+        ...g,
+        options: g.options
+          .filter((o) => modifierOverrideByOptionId.get(o.id)?.isEnabled !== false)
+          .map((o) => {
+            const override = modifierOverrideByOptionId.get(o.id);
+            return override?.extraOverride != null
+              ? { ...o, precio_extra: override.extraOverride }
+              : o;
+          }),
+      }))
+      .filter((g) => g.options.length > 0);
+  }, [mainProduct, modifierOverrideByOptionId]);
+
   // Selección de modificadores del producto principal: Map<modifierGroupId, Set<modifierOptionId>>
-  const [selectedByGroup, setSelectedByGroup] = useState<Map<number, Set<number>>>(new Map());
+  // Se inicializa sincrónicamente con los defaults (lazy initializer) para que el primer
+  // render ya tenga la selección correcta: mainProduct.modifierGroups llega resuelto desde
+  // el Server Component, sin fetch pendiente, así que no hace falta esperar a un useEffect
+  // post-render — eso dejaba una ventana donde un click inmediato en "Agregar al Carrito"
+  // mandaba el item sin opciones (bug confirmado en producción, ~3 casos en miles).
+  const [selectedByGroup, setSelectedByGroup] = useState<Map<number, Set<number>>>(
+    () => buildDefaultSelection(groups)
+  );
   const [missingModifierGroupId, setMissingModifierGroupId] = useState<number | null>(null);
   const [qty, setQty] = useState(1);
   const [notes, setNotes] = useState("");
@@ -149,34 +184,6 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   const disabledByStatus = !isWebOpen;
 
   const loading = false; // si en tu caso hay fetch para combo, actualizá este flag
-
-  // Overrides específicos del combo: pueden ocultar una opción o reemplazar su extra.
-  const modifierOverrideByOptionId = useMemo(() => {
-    return new Map(
-      (combo?.modifierOverrides ?? []).map((ov) => [Number(ov.modifierOptionId), ov])
-    );
-  }, [combo?.modifierOverrides]);
-
-  // Grupos de modificadores del producto principal (N genéricos), respetando los
-  // overrides del combo: se excluyen opciones deshabilitadas, se aplica extraOverride
-  // y se remueven grupos que quedan sin opciones tras el filtro.
-  const groups = useMemo<ModifierGroup[]>(() => {
-    const rawGroups = mainProduct?.modifierGroups ?? [];
-
-    return rawGroups
-      .map((g) => ({
-        ...g,
-        options: g.options
-          .filter((o) => modifierOverrideByOptionId.get(o.id)?.isEnabled !== false)
-          .map((o) => {
-            const override = modifierOverrideByOptionId.get(o.id);
-            return override?.extraOverride != null
-              ? { ...o, precio_extra: override.extraOverride }
-              : o;
-          }),
-      }))
-      .filter((g) => g.options.length > 0);
-  }, [mainProduct, modifierOverrideByOptionId]);
 
   // Preseleccionar isDefault cuando cambian los grupos disponibles (carga inicial / cambio de combo)
   useEffect(() => {

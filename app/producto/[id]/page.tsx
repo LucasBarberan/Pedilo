@@ -160,6 +160,17 @@ export default function ProductDetailPage() {
   const [quoteIsFromPriceList, setQuoteIsFromPriceList] = useState(false);
   const [promoLabel, setPromoLabel] = useState<string | null>(null);
 
+  // 0) al cambiar de producto (navegación cliente entre /producto/[id]), resetear
+  //    ANTES de cualquier fetch. Sin esto, el botón "Agregar al Carrito" podía quedar
+  //    habilitado mostrando todavía prod/selectedByGroup del producto ANTERIOR mientras
+  //    se resuelve el nuevo — riesgo real en conexiones lentas (bug confirmado en
+  //    producción para el caso análogo de combos).
+  useEffect(() => {
+    setProd(null);
+    setSelectedByGroup(new Map());
+    setLoading(true);
+  }, [id]);
+
   // 1) al montar en el CLIENTE, intento leer el warm cache
   useEffect(() => {
     if (!id) return;
@@ -179,15 +190,15 @@ export default function ProductDetailPage() {
     let aborted = false;
     (async () => {
       try {
-        // si no hubo warm, mostramos loader; si hubo, puede quedar en false
-        setLoading(prev => prev || !prod);
+        setLoading(true);
         const product: Product | null = await fetchProductById(id, { baseUrl: BASE });
         if (!product) throw new Error("not found");
 
         if (!aborted) {
           setProd(product);
-          // si aún no había nada elegido (no hubo warm), aplicar defaults
-          setSelectedByGroup(prev => prev.size > 0 ? prev : buildDefaultSelection(product.modifierGroups ?? []));
+          // Siempre defaults del producto recién cargado: nunca mantener selección
+          // de un producto anterior (eso mezclaba modificadores entre productos).
+          setSelectedByGroup(buildDefaultSelection(product.modifierGroups ?? []));
         }
 
         // refresco warm
@@ -604,13 +615,13 @@ export default function ProductDetailPage() {
                   hover:brightness-95 active:brightness-90
                   disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none`}
                 onClick={isWebOpen ? handleAdd : undefined}
-                disabled={disabledByStatus || (loading && !prod) || submitting}
+                disabled={disabledByStatus || !prod || submitting}
                 title={
                   disabledByStatus
                     ? (pickupOnly ? "Solo tomamos pedidos en el local." : onlineConfig.closedMessage)
                     : undefined
                 }
-                aria-disabled={disabledByStatus || (loading && !prod) || submitting}
+                aria-disabled={disabledByStatus || !prod || submitting}
               >
                 {disabledByStatus
                   ? (pickupOnly ? "Solo en el local" : "Local cerrado")
