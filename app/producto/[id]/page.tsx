@@ -426,7 +426,6 @@ export default function ProductDetailPage() {
         onBack={() => router.back()}
         onCartClick={() => router.push("/carrito")}
       />
-      <div className="h-[6px] w-full bg-white" />
       <ClosedBanner />
       <InfoBanner />
 

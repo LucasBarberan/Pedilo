@@ -101,7 +101,6 @@ export default function CartPage() {
   return (
     <div className="bg-background">
       <SiteHeader showBack onBack={() => router.back()} onCartClick={() => {}} />
-      <div className="h-[6px] w-full bg-white" />
 
       {/* Banners de estado (opcional pero consistente con las otras pantallas) */}
       <ClosedBanner />

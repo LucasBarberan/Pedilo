@@ -55,7 +55,6 @@ export default function HomeScreen({ initialCategories, apiBase }: HomeScreenPro
   return (
     <div className="bg-background relative">
       <SiteHeader onCartClick={handleCartClick} />
-      <div className="h-[6px] w-full bg-white" />
       <ClosedBanner />
       <PromoBanner apiBase={apiBase} />
       <InfoBanner />

@@ -7,7 +7,6 @@ export default function Loading() {
   return (
     <div className="bg-background relative">
       <SiteHeader showBack />
-      <div className="h-[6px] w-full bg-white" />
       <ClosedBanner />
       <InfoBanner />
       <BlockingLoader open message="Preparando la carta..." />

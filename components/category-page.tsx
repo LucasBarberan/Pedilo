@@ -194,7 +194,6 @@ export default function CategoryPageClient({
         onBack={() => router.back()}
         onCartClick={handleCartClick}
       />
-      <div className="h-[6px] w-full bg-white" />
       <ClosedBanner />
       <InfoBanner />
       <PromoBanner apiBase={apiBase} />
