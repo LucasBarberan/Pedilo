@@ -6,6 +6,7 @@ const apiParsed = new URL(apiUrl);
 const apiProtocol = apiParsed.protocol.replace(":", ""); // "http" o "https"
 const apiHostname = apiParsed.hostname;
 const apiPort = apiParsed.port ?? "";
+const apiOrigin = apiPort ? `${apiHostname}:${apiPort}` : apiHostname;
 
 const nextConfig = {
   eslint: {
@@ -22,8 +23,8 @@ const nextConfig = {
       { protocol: apiProtocol, hostname: apiHostname, port: apiPort, pathname: "/**" },
     ],
   },
-  // permití acceder al dev server desde tu IP de LAN
-  allowedDevOrigins: ['api.demo.keltron.app', '192.168.18.5:5000'],
+  // permití acceder al dev server desde el backend configurado en NEXT_PUBLIC_API_URL
+  allowedDevOrigins: [apiOrigin],
   output: 'standalone',
 }
 

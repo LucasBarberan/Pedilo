@@ -52,11 +52,15 @@ const capitalizeFirst = (value: string) => {
 };
 
 // Selección inicial: preselecciona las opciones marcadas isDefault en cada grupo.
-function buildDefaultSelection(groups: ModifierGroup[]): Map<number, Set<number>> {
-  const initial = new Map<number, Set<number>>();
+function buildDefaultSelection(groups: ModifierGroup[]): Map<number, Map<number, number>> {
+  const initial = new Map<number, Map<number, number>>();
   for (const group of groups) {
-    const defaults = group.options.filter((o) => o.isDefault).map((o) => o.id);
-    if (defaults.length > 0) initial.set(group.id, new Set(defaults));
+    const defaults = group.options.filter((o) => o.isDefault);
+    if (defaults.length > 0) {
+      const qtyMap = new Map<number, number>();
+      for (const o of defaults) qtyMap.set(o.id, 1);
+      initial.set(group.id, qtyMap);
+    }
   }
   return initial;
 }
@@ -144,13 +148,13 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       .filter((g) => g.options.length > 0);
   }, [mainProduct, modifierOverrideByOptionId]);
 
-  // Selección de modificadores del producto principal: Map<modifierGroupId, Set<modifierOptionId>>
+  // Selección de modificadores del producto principal: Map<modifierGroupId, Map<modifierOptionId, qty>>
   // Se inicializa sincrónicamente con los defaults (lazy initializer) para que el primer
   // render ya tenga la selección correcta: mainProduct.modifierGroups llega resuelto desde
   // el Server Component, sin fetch pendiente, así que no hace falta esperar a un useEffect
   // post-render — eso dejaba una ventana donde un click inmediato en "Agregar al Carrito"
   // mandaba el item sin opciones (bug confirmado en producción, ~3 casos en miles).
-  const [selectedByGroup, setSelectedByGroup] = useState<Map<number, Set<number>>>(
+  const [selectedByGroup, setSelectedByGroup] = useState<Map<number, Map<number, number>>>(
     () => buildDefaultSelection(groups)
   );
   const [missingModifierGroupId, setMissingModifierGroupId] = useState<number | null>(null);
@@ -225,41 +229,87 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     };
   }, []);
 
-  // IDs de todas las opciones seleccionadas (todos los grupos)
-  const allSelectedIds = useMemo(
-    () => Array.from(selectedByGroup.values()).flatMap((s) => Array.from(s)),
-    [selectedByGroup]
+  // Opciones seleccionadas con cantidad (todos los grupos)
+  const allSelectedWithQty = useMemo(() => {
+    const result: { id: number; qty: number }[] = [];
+    for (const qtyMap of selectedByGroup.values()) {
+      for (const [optId, q] of qtyMap) {
+        if (q > 0) result.push({ id: optId, qty: q });
+      }
+    }
+    return result;
+  }, [selectedByGroup]);
+
+  const selectedKey = useMemo(
+    () => allSelectedWithQty.map(o => `${o.id}x${o.qty}`).join(","),
+    [allSelectedWithQty]
   );
 
-  // Pares {group, option} de todo lo seleccionado, en el orden de los grupos/opciones
+  // Pares {group, option, qty} de todo lo seleccionado, en el orden de los grupos/opciones
   const selectedEntries = useMemo(() => {
-    const result: { group: ModifierGroup; option: ModifierGroupOption }[] = [];
+    const result: { group: ModifierGroup; option: ModifierGroupOption; qty: number }[] = [];
     for (const group of groups) {
-      const sel = selectedByGroup.get(group.id);
-      if (!sel || sel.size === 0) continue;
+      const qtyMap = selectedByGroup.get(group.id);
+      if (!qtyMap) continue;
       for (const opt of group.options) {
-        if (sel.has(opt.id)) result.push({ group, option: opt });
+        const q = qtyMap.get(opt.id) ?? 0;
+        if (q > 0) result.push({ group, option: opt, qty: q });
       }
     }
     return result;
   }, [groups, selectedByGroup]);
 
-  // Toggle de una opción respetando maxSelections (1 = radio, >1 = checkbox con tope) y minSelections
+  // Toggle de una opción (para opciones con maxQuantity === 1 o grupos radio)
   const toggleOption = (group: ModifierGroup, optionId: number) => {
     if (missingModifierGroupId === group.id) setMissingModifierGroupId(null);
     setSelectedByGroup((prev) => {
       const next = new Map(prev);
-      const current = new Set(next.get(group.id) ?? []);
+      const currentMap = new Map(next.get(group.id) ?? new Map<number, number>());
 
-      if (current.has(optionId)) {
-        if (group.isRequired && current.size <= group.minSelections) return prev;
-        current.delete(optionId);
+      const currentQty = currentMap.get(optionId) ?? 0;
+      if (currentQty > 0) {
+        const selectedCount = Array.from(currentMap.values()).filter(q => q > 0).length;
+        if (group.isRequired && selectedCount <= group.minSelections) return prev;
+        currentMap.set(optionId, 0);
       } else {
-        if (group.maxSelections === 1) current.clear();
-        if (current.size < group.maxSelections) current.add(optionId);
+        if (group.maxSelections === 1) {
+          for (const k of currentMap.keys()) currentMap.set(k, 0);
+        }
+        const selectedCount = Array.from(currentMap.values()).filter(q => q > 0).length;
+        if (group.maxSelections === 0 || selectedCount < group.maxSelections) currentMap.set(optionId, 1);
       }
 
-      next.set(group.id, current);
+      next.set(group.id, currentMap);
+      return next;
+    });
+  };
+
+  // Ajusta la cantidad de una opción con stepper (maxQuantity > 1 o null = ilimitada)
+  const setOptionQty = (group: ModifierGroup, optionId: number, newQty: number) => {
+    if (missingModifierGroupId === group.id) setMissingModifierGroupId(null);
+    setSelectedByGroup((prev) => {
+      const next = new Map(prev);
+      const currentMap = new Map(next.get(group.id) ?? new Map<number, number>());
+
+      const opt = group.options.find(o => o.id === optionId);
+      const maxOptQty = opt?.maxQuantity ?? null;
+      const clampedQty = maxOptQty !== null ? Math.min(newQty, maxOptQty) : newQty;
+      const finalQty = Math.max(0, clampedQty);
+
+      // Si estamos activando una opción nueva (0→qty>0), verificar maxSelections del grupo
+      if (finalQty > 0 && (currentMap.get(optionId) ?? 0) === 0) {
+        const activeCount = Array.from(currentMap.values()).filter(q => q > 0).length;
+        if (group.maxSelections !== 0 && activeCount >= group.maxSelections) return prev;
+      }
+
+      if (finalQty === 0) {
+        const selectedCount = Array.from(currentMap.values()).filter(q => q > 0).length;
+        const curOptQty = currentMap.get(optionId) ?? 0;
+        if (group.isRequired && curOptQty > 0 && selectedCount <= group.minSelections) return prev;
+      }
+
+      currentMap.set(optionId, finalQty);
+      next.set(group.id, currentMap);
       return next;
     });
   };
@@ -311,7 +361,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   // precios
   const baseList = toNum(combo?.basePrice);
   const baseEff = toNum(combo?.effectivePrice ?? combo?.basePrice);
-  const optionExtra = selectedEntries.reduce((sum, { option }) => sum + toNum(option.precio_extra), 0);
+  const optionExtra = selectedEntries.reduce((sum, { option, qty: optQty }) => sum + toNum(option.precio_extra) * optQty, 0);
   const hasPromo = Number.isFinite(baseList) && Number.isFinite(baseEff) && baseEff < baseList;
   const promoFactor = hasPromo && baseList > 0 ? Math.max(0, Math.min(1, baseEff / baseList)) : 1;
 
@@ -382,7 +432,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       out.push({
         productId: Number(mainItem.productId),
         quantity: Number(mainItem.quantity ?? 1),
-        optionIds: allSelectedIds.filter((id) => Number.isFinite(id) && id > 0),
+        options: allSelectedWithQty.filter((o) => Number.isFinite(o.id) && o.id > 0),
       });
     }
 
@@ -400,7 +450,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     }
 
     return out;
-  }, [mainItem, allSelectedIds, combo, inclusionSelections]);
+  }, [mainItem, allSelectedWithQty, combo, inclusionSelections]);
 
   // Cotizar en el back cada vez que cambian qty / opciones / inclusiones
   useEffect(() => {
@@ -457,8 +507,9 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     // Validar que todos los grupos obligatorios del producto principal cumplan su mínimo
     const missingGroup = groups.find((g) => {
       if (!g.isRequired) return false;
-      const sel = selectedByGroup.get(g.id);
-      return (sel?.size ?? 0) < g.minSelections;
+      const qtyMap = selectedByGroup.get(g.id);
+      const selectedCount = qtyMap ? Array.from(qtyMap.values()).filter(q => q > 0).length : 0;
+      return selectedCount < g.minSelections;
     });
     if (missingGroup) {
       setMissingModifierGroupId(missingGroup.id);
@@ -530,16 +581,17 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     }));
 
     // Construir array de opciones seleccionadas (todos los grupos del producto principal)
-    const selectedOptionsArr = currentSelectedEntries.map(({ group, option }) => ({
+    const selectedOptionsArr = currentSelectedEntries.map(({ group, option, qty: optQty }) => ({
       productOptionId: Number(option.id),
       optionId: Number(option.id),
-      optionName: option.name || "",
+      optionName: optQty > 1 ? `${optQty}x ${option.name || ""}` : (option.name || ""),
       tipo: group.name || "Modificador",
-      priceExtra: toNum(option.precio_extra),
+      priceExtra: toNum(option.precio_extra) * optQty,
+      qty: optQty,
     }));
 
     const cartItem = {
-      uniqueId: `${combo.id}-${currentSelectedEntries.map(e => e.option.id).join("-") || "noopt"}-${Date.now()}`,
+      uniqueId: `${combo.id}-${currentSelectedEntries.map(e => `${e.option.id}x${e.qty}`).join("-") || "noopt"}-${Date.now()}`,
       id: Number(combo.id) || 0,
       name: combo.name || "Combo",
       description: mainProduct?.description || combo.description || "",
@@ -656,7 +708,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
           {/* Grupos de modificadores del producto principal (N genéricos: Tamaño, Salsa, Extras, etc.) */}
           {groups.map((group) => {
             const isRadio = group.maxSelections === 1;
-            const sel = selectedByGroup.get(group.id) ?? new Set<number>();
+            const qtyMap = selectedByGroup.get(group.id) ?? new Map<number, number>();
             const hasError = missingModifierGroupId === group.id;
 
             return (
@@ -677,27 +729,32 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                         : `(obligatorio - mín ${group.minSelections})`
                       : isRadio
                         ? "(opcional - elige una)"
+                        : group.maxSelections === 0
+                        ? "(opcional - sin límite)"
                         : `(opcional - hasta ${group.maxSelections})`}
                   </span>
                 </div>
                 {group.options.map((o) => {
-                  const active = sel.has(o.id);
+                  const optQty = qtyMap.get(o.id) ?? 0;
+                  const active = optQty > 0;
                   const plus = toNum(o.precio_extra);
+                  const usesStepper = !!group.allowsQuantity;
                   return (
                     <div
                       key={String(o.id)}
-                      onClick={() => toggleOption(group, o.id)}
-                      role={isRadio ? "radio" : "checkbox"}
-                      aria-checked={active}
+                      onClick={!usesStepper ? () => toggleOption(group, o.id) : undefined}
+                      role={!usesStepper ? (isRadio ? "radio" : "checkbox") : undefined}
+                      aria-checked={!usesStepper ? active : undefined}
                       className={[
-                        "w-full rounded-lg border px-3 py-2 cursor-pointer flex items-center justify-between transition-colors",
+                        "w-full rounded-lg border px-3 py-2 flex items-center justify-between transition-colors",
+                        !usesStepper ? "cursor-pointer" : "",
                         active
                           ? "border-[var(--brand-color)] bg-[#fff5f2]"
                           : "border-transparent hover:bg-black/5",
                       ].join(" ")}
                     >
                       <div className="flex items-center gap-3">
-                        {!isRadio && (
+                        {!isRadio && !usesStepper && (
                           <Checkbox checked={active} onCheckedChange={() => { }} className="pointer-events-none" />
                         )}
                         <span className="text-sm flex items-center gap-1.5">
@@ -709,9 +766,39 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                           )}
                         </span>
                       </div>
-                      <span className="text-sm font-semibold">
-                        {plus ? `+${fmt(plus)}` : isRadio ? "" : "Gratis"}
-                      </span>
+                      {usesStepper ? (
+                        <div className="flex items-center gap-2">
+                          {plus > 0 && (
+                            <span className="text-sm font-semibold text-slate-500">+{fmt(plus)}/u</span>
+                          )}
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setOptionQty(group, o.id, optQty - 1); }}
+                              disabled={optQty === 0}
+                              className="h-7 w-7 flex items-center justify-center rounded-full border border-slate-200 text-slate-600 disabled:opacity-30 hover:bg-slate-50 active:bg-slate-100 text-base leading-none"
+                            >
+                              −
+                            </button>
+                            <span className="w-7 text-center text-sm font-semibold">{optQty}</span>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setOptionQty(group, o.id, optQty + 1); }}
+                              disabled={
+                                (typeof o.maxQuantity === 'number' && o.maxQuantity !== null && optQty >= o.maxQuantity) ||
+                                (optQty === 0 && group.maxSelections !== 0 && (qtyMap ? Array.from(qtyMap.values()).filter(q => q > 0).length : 0) >= group.maxSelections)
+                              }
+                              className="h-7 w-7 flex items-center justify-center rounded-full border border-slate-200 text-slate-600 disabled:opacity-30 hover:bg-slate-50 active:bg-slate-100 text-base leading-none"
+                            >
+                              ＋
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-sm font-semibold">
+                          {plus ? `+${fmt(plus)}` : isRadio ? "" : "Gratis"}
+                        </span>
+                      )}
                     </div>
                   );
                 })}

@@ -121,7 +121,9 @@ export function buildPromoLabel(promo: PromoInfo): string {
 export type QuoteComboItem = {
   productId: number;
   quantity: number;
+  /** @deprecated usar options con qty */
   optionIds?: number[];
+  options?: { id: number; qty: number }[];
 };
 
 export type QuoteItemComboView = {
@@ -191,7 +193,8 @@ export async function quoteCombo({
           items: items.map((it) => ({
             product_id: it.productId,
             quantity_per_combo: it.quantity,
-            option_ids: it.optionIds ?? [],
+            options: it.options && it.options.length > 0 ? it.options : undefined,
+            option_ids: !it.options && it.optionIds && it.optionIds.length > 0 ? it.optionIds : undefined,
           })),
         },
       ],

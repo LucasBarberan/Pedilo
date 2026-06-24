@@ -20,6 +20,7 @@ export type ModifierGroupOption = {
   isDefault: boolean;
   isActive: boolean;
   sortOrder: number;
+  maxQuantity?: number | null;
   recipeId?: number | null;
   activatesPromo?: { label: string } | null;
 };
@@ -32,6 +33,7 @@ export type ModifierGroup = {
   minSelections: number;
   maxSelections: number;
   sortOrder: number;
+  allowsQuantity: boolean;
   options: ModifierGroupOption[];
 };
 
@@ -125,6 +127,7 @@ function normalizeModifierGroups(raw: any): ModifierGroup[] {
       minSelections: Number(g.minSelections ?? 0),
       maxSelections: Number(g.maxSelections ?? 1),
       sortOrder: Number(g.sortOrder ?? 0),
+      allowsQuantity: !!g.allowsQuantity,
       options: (Array.isArray(g.options) ? g.options : [])
         .filter((o: any) => o.isActive !== false)
         .map((o: any): ModifierGroupOption => ({
@@ -134,6 +137,7 @@ function normalizeModifierGroups(raw: any): ModifierGroup[] {
           isDefault: !!o.isDefault,
           isActive: o.isActive !== false,
           sortOrder: Number(o.sortOrder ?? 0),
+          maxQuantity: o.maxQuantity ?? null,
           recipeId: o.recipeId ?? null,
           activatesPromo: promoByOptionId.get(Number(o.id)) ?? null,
         }))
