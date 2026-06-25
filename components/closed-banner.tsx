@@ -15,7 +15,7 @@ export default function ClosedBanner() {
   const pos = status.pos;
 
   const fmtTime = (d: Date) =>
-    d.toLocaleTimeString("es-AR", { timeZone: tz, hour: "2-digit", minute: "2-digit" });
+    d.toLocaleTimeString("es-AR", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false });
   const fmtWeekday = (d: Date) =>
     d.toLocaleDateString("es-AR", { timeZone: tz, weekday: "long" });
   const isSameLocalDate = (a: Date, b: Date) =>
