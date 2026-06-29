@@ -41,6 +41,44 @@ export type ComboModifierOverride = {
   modifierOptionId: number;
   isEnabled: boolean;
   extraOverride: number | null;
+  productTemplateId?: number | null;
+};
+
+export type ModifierGroupRuleExpanded = {
+  modifierGroupId: number;
+  includedFreeCount: number;
+};
+
+export type ComboSlotExpanded = {
+  comboItemId: number;
+  slotIndex: number;
+  slotOrder: number;
+  product: {
+    id: number;
+    name: string;
+    modifierGroups: Array<{
+      id: number;
+      name: string;
+      isRequired: boolean;
+      minSelections: number;
+      maxSelections: number;
+      allowsQuantity?: boolean;
+      options: Array<{
+        id: number;
+        name: string;
+        priceExtra?: number | null;
+        isDefault?: boolean;
+      }>;
+    }>;
+  };
+  modifierGroupRules: ModifierGroupRuleExpanded[];
+};
+
+export type SlotSelection = {
+  comboItemId: number;
+  slotIndex: number;
+  selectedByGroup: Map<number, Set<number>>;
+  comment: string;
 };
 
 export type Combo = {
@@ -61,6 +99,7 @@ export type Combo = {
     isComboCategory?: boolean | null;
   };
   items?: ComboItem[];
+  slots?: ComboSlotExpanded[];
   categoryInclusions?: ComboCategoryInclusion[];
   modifierOverrides?: ComboModifierOverride[];
   activePromoLabels?: string[];
@@ -109,6 +148,45 @@ function extractComboArray(payload: unknown): unknown[] {
     }
   }
   return [];
+}
+
+function normalizeSlot(raw: any): ComboSlotExpanded | null {
+  if (!raw) return null;
+  const comboItemId = Number(raw.comboItemId ?? raw.combo_item_id);
+  if (!Number.isFinite(comboItemId)) return null;
+
+  const rawProduct = raw.product ?? {};
+  const groups = Array.isArray(rawProduct.modifierGroups) ? rawProduct.modifierGroups : [];
+
+  return {
+    comboItemId,
+    slotIndex: Number(raw.slotIndex ?? raw.slot_index ?? 0),
+    slotOrder: Number(raw.slotOrder ?? raw.slot_order ?? 0),
+    product: {
+      id: Number(rawProduct.id ?? 0),
+      name: String(rawProduct.name ?? ""),
+      modifierGroups: groups.map((g: any) => ({
+        id: Number(g.id),
+        name: String(g.name ?? ""),
+        isRequired: g.isRequired ?? g.is_required ?? false,
+        minSelections: Number(g.minSelections ?? g.min_selections ?? 1),
+        maxSelections: Number(g.maxSelections ?? g.max_selections ?? 1),
+        allowsQuantity: g.allowsQuantity ?? g.allows_quantity ?? false,
+        options: Array.isArray(g.options) ? g.options.map((o: any) => ({
+          id: Number(o.id),
+          name: String(o.name ?? ""),
+          priceExtra: parseNullableNumber(o.priceExtra ?? o.price_extra ?? o.extra),
+          isDefault: o.isDefault ?? o.is_default ?? false,
+        })) : [],
+      })),
+    },
+    modifierGroupRules: Array.isArray(raw.modifierGroupRules)
+      ? raw.modifierGroupRules.map((r: any) => ({
+          modifierGroupId: Number(r.modifierGroupId ?? r.modifier_group_id),
+          includedFreeCount: Number(r.includedFreeCount ?? r.included_free_count ?? 0),
+        }))
+      : [],
+  };
 }
 
 function normalizeComboItem(raw: any): ComboItem | null {
@@ -233,7 +311,13 @@ function normalizeCombo(raw: any): Combo | null {
       modifierOptionId: Number(o.modifierOptionId),
       isEnabled: o.isEnabled !== false,
       extraOverride: parseNullableNumber(o.extraOverride ?? o.extra_override),
+      productTemplateId: o.productTemplateId != null ? Number(o.productTemplateId) : null,
     }));
+
+  const slotsRaw: any[] = Array.isArray(raw.slots) ? raw.slots : [];
+  const slots: ComboSlotExpanded[] = slotsRaw
+    .map(normalizeSlot)
+    .filter((s): s is ComboSlotExpanded => s !== null);
 
   if (!description) {
     const main = items.find((item) => item?.isMain && typeof item?.product?.description === "string" && item.product.description.trim());
@@ -255,6 +339,7 @@ function normalizeCombo(raw: any): Combo | null {
     categoryName: category?.name ?? null,
     category,
     items,
+    slots: slots.length > 0 ? slots : undefined,
     categoryInclusions,
     modifierOverrides,
     activePromoLabels: Array.isArray(raw.activePromoLabels) ? raw.activePromoLabels : undefined,

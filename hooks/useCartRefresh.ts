@@ -25,8 +25,22 @@ export function useCartRefresh(): {
       const lines: CartLine[] = toQuote.map((item) => {
         if (item.kind === "combo") {
           const comboItems = item.comboItems ?? [];
-          const quoteItems: QuoteComboItem[] = [];
 
+          // Si los comboItems tienen comboItemId vienen del stepper nuevo → usar slots[]
+          const hasSlotData = comboItems.some((c: any) => c.comboItemId != null);
+          if (hasSlotData) {
+            const slots = comboItems
+              .filter((c: any) => !c.isInclusion)
+              .map((c: any) => ({
+                combo_item_id: Number(c.comboItemId),
+                slot_index: Number(c.slotIndex ?? 0),
+                option_ids: Array.isArray(c.optionIds) ? c.optionIds.map(Number) : [],
+              }));
+            return { type: "COMBO" as const, comboId: Number(item.id), qty: Number(item.quantity), slots };
+          }
+
+          // Formato legacy: items[]
+          const quoteItems: QuoteComboItem[] = [];
           const mainCI = comboItems.find((c) => c.isMain);
           if (mainCI?.productId) {
             quoteItems.push({

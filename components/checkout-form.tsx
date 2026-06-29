@@ -357,40 +357,46 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           // precio unitario del combo (el back prorratea internamente)
           const unitCombo = Math.round(Number(it.price));
 
-          combosForApi.push({
+          // Detectar si el combo usa el nuevo stepper de slots (tiene comboItemId)
+          const hasSlotData = (it.comboItems || []).some((ci: any) => ci.comboItemId != null);
+
+          const comboPayload: any = {
             product_template_id: Number(it.id),
             name: it.comboName || it.name,
             quantity: Number(it.quantity),
             unit_price: unitCombo,
             comment: it.observations?.trim() || null,
-            items: (it.comboItems || []).map((ci: any) => {
-              // 🔒 CRÍTICO: La cantidad del item interno SIEMPRE es la del backend
-              // NO se multiplica por it.quantity (cantidad de combos)
-              // El backend maneja la multiplicación: combo.quantity × item.quantity
-              const itemQty = Number(ci.qty) || 1;
+          };
 
+          if (hasSlotData) {
+            // Nuevo formato con slots[]
+            comboPayload.slots = (it.comboItems || []).map((ci: any) => ({
+              combo_item_id: Number(ci.comboItemId),
+              slot_index: Number(ci.slotIndex ?? 0),
+              option_ids: Array.isArray(ci.optionIds) ? ci.optionIds.map(Number) : [],
+              ...(ci.comment?.trim() ? { comment: ci.comment.trim() } : {}),
+            }));
+          } else {
+            // Formato legacy con items[]
+            comboPayload.items = (it.comboItems || []).map((ci: any) => {
+              const itemQty = Number(ci.qty) || 1;
               const itemPayload: any = {
                 product_id: Number(ci.productId),
-                quantity: itemQty,  // Esta qty viene del backend y NO debe cambiar
+                quantity: itemQty,
               };
-
-              // Si es el producto principal Y el combo tiene selectedOptions, usarlas
               if (ci.isMain && it.selectedOptions && it.selectedOptions.length > 0) {
                 itemPayload.option_ids = it.selectedOptions.map((opt: any) => Number(opt.productOptionId));
-              }
-              // Fallback: si tiene opción legacy en el comboItem
-              else if (ci.option?.id) {
+              } else if (ci.option?.id) {
                 itemPayload.option_ids = [Number(ci.option.id)];
               }
-
-              // Agregar comentario si es el principal
               if (ci.isMain && it.observations?.trim()) {
                 itemPayload.comment = it.observations.trim();
               }
-
               return itemPayload;
-            }),
-          });
+            });
+          }
+
+          combosForApi.push(comboPayload);
         } else {
           // producto normal
           const unit = Math.round(

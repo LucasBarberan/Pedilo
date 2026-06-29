@@ -218,6 +218,67 @@ export async function quoteCombo({
   }
 }
 
+export type QuoteComboSlotInput = {
+  combo_item_id: number;
+  slot_index: number;
+  option_ids: number[];
+  comment?: string;
+};
+
+export async function quoteComboSlots({
+  comboId,
+  qty,
+  slots,
+  channel = "WEB",
+  baseUrl,
+  signal,
+}: {
+  comboId: number;
+  qty: number;
+  slots: QuoteComboSlotInput[];
+  channel?: "WEB" | "POS" | "DELIVERY";
+  baseUrl?: string | null;
+  signal?: AbortSignal;
+}): Promise<QuoteItemComboView | null> {
+  try {
+    const BASE = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+    if (!BASE) return null;
+
+    const body = {
+      channel,
+      lines: [
+        {
+          type: "COMBO",
+          product_template_id: comboId,
+          combo_quantity: qty,
+          slots: slots.map((s) => ({
+            combo_item_id: s.combo_item_id,
+            slot_index: s.slot_index,
+            option_ids: s.option_ids,
+            comment: s.comment ?? null,
+          })),
+        },
+      ],
+    };
+
+    const res = await fetch(`${BASE}/pricing/quote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!res.ok) return null;
+
+    const json = await res.json();
+    const item = Array.isArray(json?.combos) ? json.combos[0] : null;
+    if (!item || item.kind !== "COMBO") return null;
+    return item as QuoteItemComboView;
+  } catch {
+    return null;
+  }
+}
+
 // ===== quoteCart: envía todo el carrito en un solo request =====
 
 export type CartProductLine = {
@@ -228,11 +289,18 @@ export type CartProductLine = {
   comment?: string | null;
 };
 
+export type CartComboSlot = {
+  combo_item_id: number;
+  slot_index: number;
+  option_ids: number[];
+};
+
 export type CartComboLine = {
   type: "COMBO";
   comboId: number;
   qty: number;
-  items: QuoteComboItem[];
+  items?: QuoteComboItem[];
+  slots?: CartComboSlot[];
 };
 
 export type CartLine = CartProductLine | CartComboLine;
@@ -260,16 +328,20 @@ export async function quoteCart(
 
   const body = {
     channel,
-    lines: lines.map((l) =>
-      l.type === "PRODUCT"
-        ? { type: "PRODUCT", product_id: l.productId, quantity: l.qty, option_ids: l.optionIds, comment: l.comment ?? null }
-        : {
-            type: "COMBO",
-            product_template_id: l.comboId,
-            combo_quantity: l.qty,
-            items: l.items.map((it) => ({ product_id: it.productId, quantity_per_combo: it.quantity, option_ids: it.optionIds ?? [] })),
-          }
-    ),
+    lines: lines.map((l) => {
+      if (l.type === "PRODUCT") {
+        return { type: "PRODUCT", product_id: l.productId, quantity: l.qty, option_ids: l.optionIds, comment: l.comment ?? null };
+      }
+      if (l.slots && l.slots.length > 0) {
+        return { type: "COMBO", product_template_id: l.comboId, combo_quantity: l.qty, slots: l.slots };
+      }
+      return {
+        type: "COMBO",
+        product_template_id: l.comboId,
+        combo_quantity: l.qty,
+        items: (l.items ?? []).map((it) => ({ product_id: it.productId, quantity_per_combo: it.quantity, option_ids: it.optionIds ?? [] })),
+      };
+    }),
   };
 
   try {

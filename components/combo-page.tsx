@@ -4,7 +4,7 @@
 import SiteHeader from "@/components/site-header";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useCart } from "@/components/cart-context";
@@ -15,9 +15,9 @@ import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import { fixImageUrl } from "@/lib/img";
 import BlockingLoader from "@/components/blocking-loader";
 import { isAllowedForDelivery } from "@/lib/channel";
-import type { Combo as ApiCombo, ComboCategoryInclusion as CategoryInclusion } from "@/lib/api/combos";
+import type { Combo as ApiCombo, ComboCategoryInclusion as CategoryInclusion, ComboSlotExpanded, SlotSelection } from "@/lib/api/combos";
 import type { Product as ApiProduct, ModifierGroup, ModifierGroupOption } from "@/lib/api/products";
-import { quoteCombo, buildPromoLabel, type QuoteComboItem } from "@/lib/pricing";
+import { quoteCombo, quoteComboSlots, buildPromoLabel, type QuoteComboItem, type QuoteComboSlotInput } from "@/lib/pricing";
 
 const MAX_NOTES = 50;
 
@@ -50,6 +50,41 @@ const capitalizeFirst = (value: string) => {
   if (!text) return text;
   return text.charAt(0).toUpperCase() + text.slice(1);
 };
+
+// ===== Helpers stepper de slots =====
+
+function buildEmptySlotSelection(slot: ComboSlotExpanded, overrideByOptionId?: Map<number, { isEnabled: boolean }>): SlotSelection {
+  const selectedByGroup = new Map<number, Set<number>>();
+  for (const group of slot.product.modifierGroups) {
+    if (!group.isRequired) continue;
+    const visibleOptions = group.options.filter(
+      (o) => overrideByOptionId?.get(o.id)?.isEnabled !== false
+    );
+    const defaultOpt = visibleOptions.find((o) => o.isDefault) ?? visibleOptions[0];
+    if (defaultOpt) {
+      selectedByGroup.set(group.id, new Set([defaultOpt.id]));
+    }
+  }
+  return {
+    comboItemId: slot.comboItemId,
+    slotIndex: slot.slotIndex,
+    selectedByGroup,
+    comment: "",
+  };
+}
+
+function validateSlotSelection(slot: ComboSlotExpanded, sel: SlotSelection): number[] {
+  const errors: number[] = [];
+  for (const group of slot.product.modifierGroups) {
+    if (!group.isRequired) continue;
+    const chosen = sel.selectedByGroup.get(group.id);
+    const count = chosen?.size ?? 0;
+    if (count < (group.minSelections ?? 1)) errors.push(group.id);
+  }
+  return errors;
+}
+
+// ===== Selección inicial legacy =====
 
 // Selección inicial: preselecciona las opciones marcadas isDefault en cada grupo.
 function buildDefaultSelection(groups: ModifierGroup[]): Map<number, Map<number, number>> {
@@ -173,6 +208,9 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   const [inclusionErrors, setInclusionErrors] = useState<Record<string, string | null>>({});
   const [formError, setFormError] = useState<string | null>(null);
 
+  // 💰 subtotal en tiempo real del stepper (quote del servidor)
+  const [slotSubtotal, setSlotSubtotal] = useState<number | null>(null);
+
   // 💰 precios cotizados por el servidor (por unidad de combo)
   const [quotedEffective, setQuotedEffective] = useState<number | null>(null);
   const [quotedList, setQuotedList] = useState<number | null>(null);
@@ -188,6 +226,186 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   const disabledByStatus = !isWebOpen;
 
   const loading = false; // si en tu caso hay fetch para combo, actualizá este flag
+
+  // ===== Estado stepper de slots =====
+  const hasSlots = Array.isArray(combo?.slots) && (combo.slots?.length ?? 0) > 0;
+  const slots: ComboSlotExpanded[] = combo?.slots ?? [];
+  const totalSlotSteps = slots.length + (combo?.categoryInclusions?.length ?? 0);
+
+  const slotScrollRef = useRef<HTMLDivElement>(null);
+  const [slotStep, setSlotStep] = useState(0);
+  const [slotSelections, setSlotSelections] = useState<SlotSelection[]>(() => {
+    const overrideMap = new Map((initialCombo?.modifierOverrides ?? []).map((ov) => [Number(ov.modifierOptionId), ov]));
+    return slots.map((s) => buildEmptySlotSelection(s, overrideMap));
+  });
+  const [slotGroupErrors, setSlotGroupErrors] = useState<Set<number>>(new Set());
+
+  const isSlotStepActive = slotStep < slots.length;
+  const currentSlot = isSlotStepActive ? slots[slotStep] : null;
+  const currentSlotSel = isSlotStepActive ? slotSelections[slotStep] : null;
+  const currentInclusionStep = !isSlotStepActive ? slotStep - slots.length : -1;
+  const currentInclusion = currentInclusionStep >= 0 ? (combo?.categoryInclusions ?? [])[currentInclusionStep] ?? null : null;
+
+  // Reset stepper cuando cambia el combo
+  useEffect(() => {
+    if (!hasSlots) return;
+    setSlotStep(0);
+    const overrideMap = new Map((combo?.modifierOverrides ?? []).map((ov) => [Number(ov.modifierOptionId), ov]));
+    setSlotSelections((combo?.slots ?? []).map((s) => buildEmptySlotSelection(s, overrideMap)));
+    setSlotGroupErrors(new Set());
+  }, [combo?.id, hasSlots]);
+
+  // Cotizar subtotal en tiempo real mientras el usuario elige opciones en el stepper
+  useEffect(() => {
+    if (!hasSlots || !combo?.id) return;
+    const ctrl = new AbortController();
+    const slotInputs: QuoteComboSlotInput[] = slotSelections.map((sel) => ({
+      combo_item_id: sel.comboItemId,
+      slot_index: sel.slotIndex,
+      option_ids: Array.from(sel.selectedByGroup.values()).flatMap((s) => Array.from(s)),
+    }));
+    quoteComboSlots({ comboId: Number(combo.id), qty: 1, slots: slotInputs, signal: ctrl.signal })
+      .then((result) => {
+        if (result) setSlotSubtotal(Number(result.breakdown.effectivePerCombo));
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [hasSlots, combo?.id, slotSelections]);
+
+  const toggleSlotOption = (groupId: number, optionId: number, maxSelections: number) => {
+    setSlotSelections((prev) => {
+      const next = [...prev];
+      const sel = next[slotStep];
+      const current = new Set(sel.selectedByGroup.get(groupId) ?? []);
+
+      if (current.has(optionId)) {
+        current.delete(optionId);
+      } else {
+        if (maxSelections === 1) current.clear();
+        else if (maxSelections > 0 && current.size >= maxSelections) return prev;
+        // maxSelections === 0 = sin límite, siempre permite agregar
+        current.add(optionId);
+      }
+
+      const newMap = new Map(sel.selectedByGroup);
+      newMap.set(groupId, current);
+      next[slotStep] = { ...sel, selectedByGroup: newMap };
+      return next;
+    });
+    setSlotGroupErrors((prev) => { const n = new Set(prev); n.delete(groupId); return n; });
+  };
+
+  const updateSlotComment = (val: string) => {
+    setSlotSelections((prev) => {
+      const next = [...prev];
+      next[slotStep] = { ...next[slotStep], comment: val };
+      return next;
+    });
+  };
+
+  const scrollSlotToTop = () => {
+    slotScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const goSlotNext = () => {
+    if (isSlotStepActive && currentSlot && currentSlotSel) {
+      const errors = validateSlotSelection(currentSlot, currentSlotSel);
+      if (errors.length > 0) { setSlotGroupErrors(new Set(errors)); return; }
+      setSlotGroupErrors(new Set());
+    }
+    if (slotStep < totalSlotSteps - 1) {
+      setSlotStep((s) => s + 1);
+      scrollSlotToTop();
+    } else {
+      handleSlotConfirm();
+    }
+  };
+
+  const goSlotBack = () => {
+    if (slotStep > 0) {
+      setSlotGroupErrors(new Set());
+      setSlotStep((s) => s - 1);
+      scrollSlotToTop();
+    } else {
+      router.back();
+    }
+  };
+
+  const handleSlotConfirm = async () => {
+    if (submitting) return;
+    // Validar último slot si corresponde
+    if (isSlotStepActive && currentSlot && currentSlotSel) {
+      const errors = validateSlotSelection(currentSlot, currentSlotSel);
+      if (errors.length > 0) { setSlotGroupErrors(new Set(errors)); return; }
+    }
+
+    const slotInputs: QuoteComboSlotInput[] = slotSelections.map((sel) => ({
+      combo_item_id: sel.comboItemId,
+      slot_index: sel.slotIndex,
+      option_ids: Array.from(sel.selectedByGroup.values()).flatMap((s) => Array.from(s)),
+      comment: sel.comment || undefined,
+    }));
+
+    setSubmitting(true);
+    try {
+      const result = await quoteComboSlots({
+        comboId: Number(combo.id),
+        qty: 1,
+        slots: slotInputs,
+      });
+
+      const eff = result ? Number(result.breakdown.effectivePerCombo) : null;
+      const unit = Number.isFinite(eff) ? eff! : (toNum(combo.effectivePrice ?? combo.basePrice));
+
+      const img = fixImageUrl(combo.imageUrl ?? "") || "/placeholder.svg";
+
+      const comboItems = slotSelections.map((sel, i) => {
+        const slot = slots[i];
+        const optIds = Array.from(sel.selectedByGroup.values()).flatMap((s) => Array.from(s));
+        const optNames = optIds.map((oid) => {
+          for (const g of slot.product.modifierGroups) {
+            const o = g.options.find((op) => op.id === oid);
+            if (o) return o.name;
+          }
+          return "";
+        }).filter(Boolean);
+
+        return {
+          productId: slot.product.id,
+          name: slot.product.name,
+          qty: 1,
+          isMain: i === 0,
+          comboItemId: sel.comboItemId,
+          slotIndex: sel.slotIndex,
+          optionIds: optIds,
+          selectedOptions: optNames.length > 0 ? optNames.map((name) => ({ optionName: name, tipo: "", priceExtra: 0, qty: 1 })) : undefined,
+          comment: sel.comment || undefined,
+        };
+      });
+
+      addToCart({
+        uniqueId: `${combo.id}-slots-${Date.now()}`,
+        id: Number(combo.id),
+        name: combo.name ?? "Combo",
+        description: combo.description ?? "",
+        price: unit,
+        finalPrice: unit,
+        image: img !== "/placeholder.svg" ? img : "",
+        category: "combo",
+        quantity: 1,
+        observations: "",
+        kind: "combo" as const,
+        comboName: combo.name,
+        comboItems,
+        isDefaultCategory: false,
+      });
+
+      setJustAdded(true);
+      setTimeout(() => { setJustAdded(false); setSubmitting(false); router.back(); }, 600);
+    } catch {
+      setSubmitting(false);
+    }
+  };
 
   // Preseleccionar isDefault cuando cambian los grupos disponibles (carga inicial / cambio de combo)
   useEffect(() => {
@@ -630,6 +848,253 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       <div className="bg-background">
         <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
         <div className="mx-auto w-full max-w-6xl p-4">No se encontró  el combo.</div>
+      </div>
+    );
+  }
+
+  // ===== STEPPER DE SLOTS (mobile-first) =====
+  if (hasSlots) {
+    const isLastStep = slotStep === totalSlotSteps - 1;
+
+    return (
+      <div className="bg-background flex-1 flex flex-col overflow-hidden">
+        <SiteHeader showBack onBack={goSlotBack} onCartClick={() => router.push("/carrito")} />
+        <ClosedBanner />
+        <InfoBanner />
+
+        {/* Hero image del combo */}
+        {heroImg && heroImg !== "/placeholder.svg" && (
+          <div className="relative w-full aspect-[3/1] max-h-44 overflow-hidden shrink-0">
+            <Image
+              src={heroImg}
+              alt={combo?.name ?? "Combo"}
+              fill
+              className="object-cover"
+              unoptimized
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-background/70 to-transparent" />
+          </div>
+        )}
+
+        {/* Contenido scrolleable */}
+        <div ref={slotScrollRef} className="flex-1 overflow-y-auto">
+          <div className="max-w-lg mx-auto w-full px-4 pt-4 pb-6">
+            {/* Nombre del combo + dots */}
+            <h2 className="text-base font-extrabold uppercase text-foreground mb-3">
+              {combo?.name ?? "Combo"}
+            </h2>
+
+            <div className="flex items-center gap-1.5 mb-5">
+              {Array.from({ length: totalSlotSteps }).map((_, i) => (
+                <div
+                  key={i}
+                  className={`h-2 rounded-full transition-all duration-200 ${
+                    i < slotStep
+                      ? "w-2 bg-[var(--brand-color)]"
+                      : i === slotStep
+                      ? "w-5 bg-[var(--brand-color)]"
+                      : "w-2 bg-black/10"
+                  }`}
+                />
+              ))}
+            </div>
+
+            {/* PASO: slot */}
+            {isSlotStepActive && currentSlot && currentSlotSel && (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">{currentSlot.product.name}</p>
+                  {slots.length > 1 && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {slotStep + 1} de {slots.length}
+                    </p>
+                  )}
+                </div>
+
+                {currentSlot.product.modifierGroups.map((group) => {
+                  const rule = currentSlot.modifierGroupRules.find((r) => r.modifierGroupId === group.id);
+                  const freeCount = rule?.includedFreeCount ?? 0;
+                  const selectedInGroup = currentSlotSel.selectedByGroup.get(group.id) ?? new Set<number>();
+                  const hasError = slotGroupErrors.has(group.id);
+                  const isRadio = group.maxSelections === 1;
+                  const usesStepper = group.allowsQuantity ?? false;
+                  const maxSel = group.maxSelections ?? 1;
+                  // Aplicar overrides del combo: filtrar opciones deshabilitadas
+                  const visibleOptions = group.options.filter(
+                    (o) => modifierOverrideByOptionId.get(o.id)?.isEnabled !== false
+                  );
+                  if (visibleOptions.length === 0) return null;
+
+                  return (
+                    <div
+                      key={group.id}
+                      className={[
+                        "rounded-2xl ring-1 bg-white/60 p-3 space-y-2",
+                        hasError ? "ring-red-400 bg-red-50/70" : "ring-black/5",
+                      ].join(" ")}
+                    >
+                      <div className="text-sm font-semibold mb-2 flex items-center gap-1.5">
+                        {group.name}
+                        {group.isRequired && <span className="text-red-500">*</span>}
+                        <span className="text-xs font-normal text-muted-foreground">
+                          {group.isRequired
+                            ? isRadio ? "(obligatorio - elige una)" : `(obligatorio - mín ${group.minSelections})`
+                            : isRadio ? "(opcional - elige una)"
+                            : group.maxSelections === 0 ? "(opcional - sin límite)"
+                            : `(opcional - hasta ${group.maxSelections})`}
+                        </span>
+                        {freeCount > 0 && (
+                          <span className="ml-auto text-[10.5px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-1.5 py-0.5 leading-none">
+                            {selectedInGroup.size}/{freeCount} gratis
+                          </span>
+                        )}
+                      </div>
+                      {hasError && (
+                        <p className="text-xs font-medium text-red-600">
+                          {group.minSelections > 1 ? `Debés seleccionar al menos ${group.minSelections} opciones.` : "Debés seleccionar una opción."}
+                        </p>
+                      )}
+                      {visibleOptions.map((opt) => {
+                        const isSelected = selectedInGroup.has(opt.id);
+                        const sortedSel = Array.from(selectedInGroup)
+                          .map((id) => visibleOptions.find((o) => o.id === id))
+                          .filter(Boolean)
+                          .sort((a, b) => (a!.priceExtra ?? 0) - (b!.priceExtra ?? 0));
+                        const freeIds = new Set(sortedSel.slice(0, freeCount).map((o) => o!.id));
+                        const isFree = isSelected && freeIds.has(opt.id);
+                        const ov = modifierOverrideByOptionId.get(opt.id);
+                        const extra = ov?.extraOverride != null ? Number(ov.extraOverride) : (opt.priceExtra ?? 0);
+
+                        return (
+                          <div
+                            key={opt.id}
+                            onClick={() => toggleSlotOption(group.id, opt.id, maxSel)}
+                            role={isRadio ? "radio" : "checkbox"}
+                            aria-checked={isSelected}
+                            className={[
+                              "w-full rounded-lg border px-3 py-2 flex items-center justify-between transition-colors",
+                              !usesStepper ? "cursor-pointer" : "",
+                              isSelected
+                                ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                                : "border-transparent hover:bg-black/5",
+                            ].join(" ")}
+                          >
+                            <div className="flex items-center gap-3">
+                              {!isRadio && (
+                                <Checkbox checked={isSelected} onCheckedChange={() => {}} className="pointer-events-none" />
+                              )}
+                              <span className="text-sm">{opt.name}</span>
+                            </div>
+                            <span className={`text-sm font-semibold ${isFree ? "line-through text-muted-foreground" : ""}`}>
+                              {extra > 0 ? `+${fmt(extra)}` : isRadio ? "" : "Gratis"}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+
+                {/* Comentario por slot */}
+                <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
+                  <p className="text-sm font-semibold mb-2">Comentario (opcional)</p>
+                  <textarea
+                    value={currentSlotSel.comment}
+                    onChange={(e) => e.target.value.length <= MAX_NOTES && updateSlotComment(e.target.value)}
+                    maxLength={MAX_NOTES}
+                    rows={2}
+                    placeholder="Ej: sin cebolla"
+                    className="w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)] resize-none min-h-[40px]"
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground text-right">
+                    {currentSlotSel.comment.length}/{MAX_NOTES}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* PASO: inclusión de categoría */}
+            {!isSlotStepActive && currentInclusion && (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    {capitalizeFirst(currentInclusion.name || currentInclusion.subcategory?.name || currentInclusion.category?.name || "Elegí tu opción")}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Elegí{" "}
+                    {currentInclusion.minChoices === currentInclusion.maxChoices
+                      ? currentInclusion.minChoices
+                      : `${currentInclusion.minChoices ?? 0}–${currentInclusion.maxChoices ?? 1}`}{" "}
+                    opción{(currentInclusion.maxChoices ?? 1) > 1 ? "es" : ""}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {(inclusionsProducts[String(currentInclusion.id)] ?? []).map((p: ApiProduct) => {
+                    const sel = inclusionSelections[String(currentInclusion.id)] ?? [];
+                    const isSelected = sel.includes(String(p.id));
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => toggleSelectInclusion(currentInclusion, String(p.id))}
+                        className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
+                          isSelected
+                            ? "border-[var(--brand-color)] bg-[color-mix(in_srgb,var(--brand-color),transparent_90%)] text-[var(--brand-color)]"
+                            : "border-black/10 bg-white text-foreground hover:border-black/20"
+                        }`}
+                      >
+                        {isSelected && (
+                          <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 12 12" fill="none">
+                            <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                        {p.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer de navegación — en flujo normal, sticky al fondo */}
+        <div className="shrink-0 border-t border-black/5 bg-background px-4 pt-2 pb-3">
+          <div className="max-w-lg mx-auto">
+            {/* Subtotal cotizado en tiempo real */}
+            <div className="flex items-center justify-between mb-2 px-1">
+              <span className="text-xs text-muted-foreground">Subtotal</span>
+              <span className="text-sm font-bold text-[var(--brand-color)]">
+                {slotSubtotal != null ? fmt(slotSubtotal) : fmt(toNum(combo?.effectivePrice ?? combo?.basePrice))}
+              </span>
+            </div>
+          </div>
+          <div className="max-w-lg mx-auto flex gap-3">
+            <Button
+              variant="outline"
+              onClick={goSlotBack}
+              className="flex-1 h-11 text-sm rounded-xl"
+            >
+              {slotStep === 0 ? "Cancelar" : "← Anterior"}
+            </Button>
+            <Button
+              onClick={isWebOpen ? goSlotNext : undefined}
+              disabled={disabledByStatus || submitting}
+              className="flex-1 h-11 text-sm rounded-xl text-white bg-[var(--brand-color)] hover:brightness-95 active:brightness-90 disabled:opacity-60"
+            >
+              {submitting
+                ? "Agregando..."
+                : disabledByStatus
+                ? pickupOnly ? "Solo en el local" : "Local cerrado"
+                : isLastStep
+                ? (justAdded ? "Agregado ✔" : "Agregar al carrito")
+                : "Siguiente →"}
+            </Button>
+          </div>
+        </div>
+
+        <BlockingLoader open={loading} message="Cargando combo..." />
       </div>
     );
   }
