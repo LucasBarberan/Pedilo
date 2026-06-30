@@ -1674,11 +1674,9 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
           )}
 
           {/* Incluye fijo */}
-          <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
-            <div className="text-sm font-semibold mb-2">Incluye:</div>
-            {extras.length === 0 ? (
-              <div className="text-sm text-muted-foreground">— Sin agregados —</div>
-            ) : (
+          {extras.length > 0 && (
+            <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
+              <div className="text-sm font-semibold mb-2">Incluye:</div>
               <ul className="list-disc pl-5 text-sm">
                 {extras.map((it) => {
                   const quantity = Number(it.quantity ?? 0);
@@ -1689,8 +1687,8 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                   );
                 })}
               </ul>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Cantidad */}
           <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
