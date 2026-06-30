@@ -18,6 +18,7 @@ import { isAllowedForDelivery } from "@/lib/channel";
 import type { Combo as ApiCombo, ComboCategoryInclusion as CategoryInclusion, ComboSlotExpanded, SlotSelection } from "@/lib/api/combos";
 import type { Product as ApiProduct, ModifierGroup, ModifierGroupOption } from "@/lib/api/products";
 import { quoteCombo, quoteComboSlots, buildPromoLabel, type QuoteComboItem, type QuoteComboSlotInput } from "@/lib/pricing";
+import { useHideLayoutFooter } from "@/components/layout-shell";
 
 const MAX_NOTES = 50;
 
@@ -233,6 +234,9 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   // Solo usar el stepper cuando al menos un slot tiene grupos de modificadores que configurar
   const hasSlotModifiers = hasSlots && slots.some(s => (s.product?.modifierGroups?.length ?? 0) > 0);
   const totalSlotSteps = slots.length + (combo?.categoryInclusions?.length ?? 0);
+
+  // Ocultar el footer de LayoutShell cuando el stepper está activo (experiencia full-screen en mobile)
+  useHideLayoutFooter(hasSlotModifiers);
 
   const slotScrollRef = useRef<HTMLDivElement>(null);
   const [slotStep, setSlotStep] = useState(0);
@@ -1064,43 +1068,57 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
             {/* PASO: inclusión de categoría */}
             {!isSlotStepActive && currentInclusion && (
               <div className="space-y-4">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">
+                {/* Encabezado — mismo estilo que el slot header */}
+                <div className="rounded-2xl bg-[color-mix(in_srgb,var(--brand-color),transparent_91%)] border border-[color-mix(in_srgb,var(--brand-color),transparent_65%)] px-4 py-3">
+                  <p className="text-xl font-extrabold leading-tight text-foreground">
                     {capitalizeFirst(currentInclusion.name || currentInclusion.subcategory?.name || currentInclusion.category?.name || "Elegí tu opción")}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Elegí{" "}
-                    {currentInclusion.minChoices === currentInclusion.maxChoices
-                      ? currentInclusion.minChoices
-                      : `${currentInclusion.minChoices ?? 0}–${currentInclusion.maxChoices ?? 1}`}{" "}
-                    opción{(currentInclusion.maxChoices ?? 1) > 1 ? "es" : ""}
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {Number(currentInclusion.maxChoices ?? 1) <= 1
+                      ? "Elegí una opción"
+                      : currentInclusion.minChoices === currentInclusion.maxChoices
+                      ? `Elegí ${currentInclusion.minChoices} opciones`
+                      : `Elegí entre ${currentInclusion.minChoices ?? 0} y ${currentInclusion.maxChoices} opciones`}
                   </p>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  {(inclusionsProducts[String(currentInclusion.id)] ?? []).map((p: ApiProduct) => {
-                    const sel = inclusionSelections[String(currentInclusion.id)] ?? [];
-                    const isSelected = sel.includes(String(p.id));
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => toggleSelectInclusion(currentInclusion, String(p.id))}
-                        className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
-                          isSelected
-                            ? "border-[var(--brand-color)] bg-[color-mix(in_srgb,var(--brand-color),transparent_90%)] text-[var(--brand-color)]"
-                            : "border-black/10 bg-white text-foreground hover:border-black/20"
-                        }`}
-                      >
-                        {isSelected && (
-                          <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 12 12" fill="none">
-                            <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        )}
-                        {p.name}
-                      </button>
-                    );
-                  })}
+                {/* Lista de opciones — mismo estilo que modificadores */}
+                <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 space-y-2">
+                  {(inclusionsProducts[String(currentInclusion.id)] ?? []).length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No hay opciones disponibles.</p>
+                  ) : (
+                    (inclusionsProducts[String(currentInclusion.id)] ?? []).map((p: ApiProduct) => {
+                      const sel = inclusionSelections[String(currentInclusion.id)] ?? [];
+                      const isSelected = sel.includes(String(p.id));
+                      const isSingle = Number(currentInclusion.maxChoices ?? 1) <= 1;
+                      const raw = toNumber(p.price);
+                      const fin = priceWithInclusionRuleAndPromo(raw, currentInclusion, promoFactor);
+                      return (
+                        <div
+                          key={p.id}
+                          onClick={() => toggleSelectInclusion(currentInclusion, String(p.id))}
+                          role={isSingle ? "radio" : "checkbox"}
+                          aria-checked={isSelected}
+                          className={[
+                            "w-full rounded-lg border px-3 py-2 flex items-center justify-between transition-colors cursor-pointer",
+                            isSelected
+                              ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                              : "border-transparent hover:bg-black/5",
+                          ].join(" ")}
+                        >
+                          <div className="flex items-center gap-3">
+                            {!isSingle && (
+                              <Checkbox checked={isSelected} onCheckedChange={() => {}} className="pointer-events-none" />
+                            )}
+                            <span className="text-sm">{p.name}</span>
+                          </div>
+                          <span className="text-sm font-semibold text-muted-foreground">
+                            {fin != null && fin > 0 ? `+${fmt(fin)}` : fin === 0 ? "Gratis" : ""}
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
             )}
