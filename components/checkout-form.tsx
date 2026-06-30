@@ -263,18 +263,21 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           lines.push(`   Obs: ${it.observations.trim()}`);
         }
 
-        const main = comboData.comboItems?.find((x) => x.isMain);
-        const extras = comboData.comboItems?.filter((x) => !x.isMain) || [];
+        const allComboItems = comboData.comboItems || [];
 
-        if (main) {
+        allComboItems.forEach((ci: any) => {
+          const ciOpts: string[] = Array.isArray(ci.selectedOptions)
+            ? ci.selectedOptions.map((o: any) => o.optionName).filter(Boolean)
+            : ci.isMain
+              ? (it.selectedOptions?.map((o: any) => o.optionName).filter(Boolean) || [])
+              : [];
+          const ciOptsLabel = ciOpts.length > 0 ? ` (${ciOpts.join(" · ")})` : "";
           lines.push(
-            `\t\t${main.name || "Producto"}${optionsLabel}${main.qty && main.qty > 1 ? ` x${main.qty}` : ""}`
+            `\t\t${ci.name || "Producto"}${ciOptsLabel}${ci.qty && ci.qty > 1 ? ` x${ci.qty}` : ""}`
           );
-        }
-        extras.forEach((e) => {
-          lines.push(
-            `\t\t${e.name || "Ítem"}${e.qty && e.qty > 1 ? ` x${e.qty}` : ""}`
-          );
+          if (ci.comment?.trim()) {
+            lines.push(`\t\t   "${ci.comment.trim()}"`);
+          }
         });
       }
     });

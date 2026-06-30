@@ -230,6 +230,8 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   // ===== Estado stepper de slots =====
   const hasSlots = Array.isArray(combo?.slots) && (combo.slots?.length ?? 0) > 0;
   const slots: ComboSlotExpanded[] = combo?.slots ?? [];
+  // Solo usar el stepper cuando al menos un slot tiene grupos de modificadores que configurar
+  const hasSlotModifiers = hasSlots && slots.some(s => (s.product?.modifierGroups?.length ?? 0) > 0);
   const totalSlotSteps = slots.length + (combo?.categoryInclusions?.length ?? 0);
 
   const slotScrollRef = useRef<HTMLDivElement>(null);
@@ -248,16 +250,16 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
 
   // Reset stepper cuando cambia el combo
   useEffect(() => {
-    if (!hasSlots) return;
+    if (!hasSlotModifiers) return;
     setSlotStep(0);
     const overrideMap = new Map((combo?.modifierOverrides ?? []).map((ov) => [Number(ov.modifierOptionId), ov]));
     setSlotSelections((combo?.slots ?? []).map((s) => buildEmptySlotSelection(s, overrideMap)));
     setSlotGroupErrors(new Set());
-  }, [combo?.id, hasSlots]);
+  }, [combo?.id, hasSlotModifiers]);
 
   // Cotizar subtotal en tiempo real mientras el usuario elige opciones en el stepper
   useEffect(() => {
-    if (!hasSlots || !combo?.id) return;
+    if (!hasSlotModifiers || !combo?.id) return;
     const ctrl = new AbortController();
     const slotInputs: QuoteComboSlotInput[] = slotSelections.map((sel) => ({
       combo_item_id: sel.comboItemId,
@@ -270,7 +272,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       })
       .catch(() => {});
     return () => ctrl.abort();
-  }, [hasSlots, combo?.id, slotSelections]);
+  }, [hasSlotModifiers, combo?.id, slotSelections]);
 
   const toggleSlotOption = (groupId: number, optionId: number, maxSelections: number) => {
     setSlotSelections((prev) => {
@@ -778,15 +780,23 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       return;
     }
 
-    const comboItems = (combo.items ?? [])
-      .slice()
-      .sort((a, b) => (a.isMain === b.isMain ? 0 : a.isMain ? -1 : 1))
-      .map((i) => ({
-        productId: Number(i.productId),
-        name: i.product?.name ?? "Ítem",
-        qty: Number(i.quantity ?? 1),
-        isMain: !!i.isMain,
-      }));
+    const legacyItems = combo.items ?? [];
+    const comboItems = legacyItems.length > 0
+      ? legacyItems
+          .slice()
+          .sort((a, b) => (a.isMain === b.isMain ? 0 : a.isMain ? -1 : 1))
+          .map((i) => ({
+            productId: Number(i.productId),
+            name: i.product?.name ?? "Ítem",
+            qty: Number(i.quantity ?? 1),
+            isMain: !!i.isMain,
+          }))
+      : slots.map((slot, i) => ({
+          productId: slot.product.id,
+          name: slot.product.name,
+          qty: 1,
+          isMain: i === 0,
+        }));
 
     const inclusionAsItems = selectedInclusionItems.map((s) => ({
       productId: s.productId,
@@ -853,7 +863,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   }
 
   // ===== STEPPER DE SLOTS (mobile-first) =====
-  if (hasSlots) {
+  if (hasSlotModifiers) {
     const isLastStep = slotStep === totalSlotSteps - 1;
 
     return (
@@ -902,13 +912,51 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
             {/* PASO: slot */}
             {isSlotStepActive && currentSlot && currentSlotSel && (
               <div className="space-y-4">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">{currentSlot.product.name}</p>
+
+                {/* Mini-resumen de slots ya configurados */}
+                {slotStep > 0 && (
+                  <div className="space-y-1.5">
+                    {slotSelections.slice(0, slotStep).map((prevSel, i) => {
+                      const prevSlot = slots[i];
+                      const prevOptNames = Array.from(prevSel.selectedByGroup.values())
+                        .flatMap((s) => Array.from(s))
+                        .map((oid) => {
+                          for (const g of prevSlot.product.modifierGroups) {
+                            const o = g.options.find((op) => op.id === oid);
+                            if (o) return o.name;
+                          }
+                          return null;
+                        })
+                        .filter(Boolean) as string[];
+                      return (
+                        <div key={i} className="rounded-xl bg-black/[0.04] px-3 py-2 flex items-start gap-2">
+                          <span className="text-[10px] font-black uppercase text-muted-foreground/60 mt-0.5 shrink-0 w-3 text-center">{i + 1}</span>
+                          <div className="min-w-0 flex-1">
+                            <span className="text-xs font-semibold text-muted-foreground">{prevSlot.product.name}</span>
+                            {prevOptNames.length > 0 && (
+                              <p className="text-[11px] text-muted-foreground/70 mt-0.5 truncate">{prevOptNames.join(" · ")}</p>
+                            )}
+                          </div>
+                          <span className="text-xs text-emerald-600 font-bold shrink-0">✓</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Encabezado del slot actual — prominente */}
+                <div className="rounded-2xl bg-[color-mix(in_srgb,var(--brand-color),transparent_91%)] border border-[color-mix(in_srgb,var(--brand-color),transparent_65%)] px-4 py-3">
                   {slots.length > 1 && (
-                    <p className="text-xs text-muted-foreground mt-0.5">
+                    <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[var(--brand-color)] mb-1.5">
                       {slotStep + 1} de {slots.length}
                     </p>
                   )}
+                  <p className="text-xl font-extrabold leading-tight text-foreground">{currentSlot.product.name}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {slots.length > 1
+                      ? `¿Cómo querés esta ${currentSlot.product.name.toLowerCase()}?`
+                      : "Elegí tus opciones"}
+                  </p>
                 </div>
 
                 {currentSlot.product.modifierGroups.map((group) => {
