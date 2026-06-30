@@ -233,7 +233,8 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   const slots: ComboSlotExpanded[] = combo?.slots ?? [];
   // Solo usar el stepper cuando al menos un slot tiene grupos de modificadores que configurar
   const hasSlotModifiers = hasSlots && slots.some(s => (s.product?.modifierGroups?.length ?? 0) > 0);
-  const totalSlotSteps = slots.length + (combo?.categoryInclusions?.length ?? 0);
+  const hasInclusions = (combo?.categoryInclusions?.length ?? 0) > 0;
+  const totalSlotSteps = slots.length + (hasInclusions ? 1 : 0);
 
   // Ocultar el footer de LayoutShell cuando el stepper está activo (experiencia full-screen en mobile)
   useHideLayoutFooter(hasSlotModifiers);
@@ -249,8 +250,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   const isSlotStepActive = slotStep < slots.length;
   const currentSlot = isSlotStepActive ? slots[slotStep] : null;
   const currentSlotSel = isSlotStepActive ? slotSelections[slotStep] : null;
-  const currentInclusionStep = !isSlotStepActive ? slotStep - slots.length : -1;
-  const currentInclusion = currentInclusionStep >= 0 ? (combo?.categoryInclusions ?? [])[currentInclusionStep] ?? null : null;
+  const isInclusionStep = !isSlotStepActive && hasInclusions;
 
   // Reset stepper cuando cambia el combo
   useEffect(() => {
@@ -318,6 +318,23 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       const errors = validateSlotSelection(currentSlot, currentSlotSel);
       if (errors.length > 0) { setSlotGroupErrors(new Set(errors)); return; }
       setSlotGroupErrors(new Set());
+    }
+    if (isInclusionStep) {
+      const errs: Record<string, string | null> = {};
+      let ok = true;
+      for (const inc of combo?.categoryInclusions ?? []) {
+        const key = String(inc.id);
+        const min = Number(inc.minChoices ?? 0);
+        const selCount = (inclusionSelections[key] ?? []).length;
+        if (selCount < min) {
+          ok = false;
+          errs[key] = min === 1 ? "Debés seleccionar una opción" : `Debés seleccionar al menos ${min} opciones`;
+        } else {
+          errs[key] = null;
+        }
+      }
+      setInclusionErrors(errs);
+      if (!ok) return;
     }
     if (slotStep < totalSlotSteps - 1) {
       setSlotStep((s) => s + 1);
@@ -389,6 +406,16 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
         };
       });
 
+      const inclusionAsItems = selectedInclusionItems.map((s) => ({
+        productId: s.productId,
+        name: s.name,
+        qty: 1,
+        isInclusion: true as any,
+        inclusionTitle: s.inclusionTitle,
+        unitPrice: s.unitPrice,
+        basePrice: s.basePrice,
+      }));
+
       addToCart({
         uniqueId: `${combo.id}-slots-${Date.now()}`,
         id: Number(combo.id),
@@ -402,7 +429,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
         observations: "",
         kind: "combo" as const,
         comboName: combo.name,
-        comboItems,
+        comboItems: [...comboItems, ...inclusionAsItems],
         isDefaultCategory: false,
       });
 
@@ -570,12 +597,14 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
 
     setInclusionSelections((prev) => {
       const current = prev[key] ?? [];
-      let next = current.includes(prodId)
-        ? current.filter((x) => x !== prodId)
-        : [...current, prodId];
-
-      if (next.length > max) next = next.slice(0, max);
-      return { ...prev, [key]: next };
+      if (current.includes(prodId)) {
+        return { ...prev, [key]: current.filter((x) => x !== prodId) };
+      }
+      if (max === 1) {
+        return { ...prev, [key]: [prodId] };
+      }
+      const next = [...current, prodId];
+      return { ...prev, [key]: next.length > max ? next.slice(0, max) : next };
     });
 
     setInclusionErrors((e) => ({ ...e, [key]: null }));
@@ -1065,61 +1094,169 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
               </div>
             )}
 
-            {/* PASO: inclusión de categoría */}
-            {!isSlotStepActive && currentInclusion && (
+            {/* PASO: todas las inclusiones en un solo paso final */}
+            {isInclusionStep && (
               <div className="space-y-4">
-                {/* Encabezado — mismo estilo que el slot header */}
-                <div className="rounded-2xl bg-[color-mix(in_srgb,var(--brand-color),transparent_91%)] border border-[color-mix(in_srgb,var(--brand-color),transparent_65%)] px-4 py-3">
-                  <p className="text-xl font-extrabold leading-tight text-foreground">
-                    {capitalizeFirst(currentInclusion.name || currentInclusion.subcategory?.name || currentInclusion.category?.name || "Elegí tu opción")}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {Number(currentInclusion.maxChoices ?? 1) <= 1
-                      ? "Elegí una opción"
-                      : currentInclusion.minChoices === currentInclusion.maxChoices
-                      ? `Elegí ${currentInclusion.minChoices} opciones`
-                      : `Elegí entre ${currentInclusion.minChoices ?? 0} y ${currentInclusion.maxChoices} opciones`}
-                  </p>
-                </div>
+                {(combo?.categoryInclusions ?? []).map((inc) => {
+                  const key = String(inc.id);
+                  const prods = inclusionsProducts[key] ?? [];
+                  const sel = inclusionSelections[key] ?? [];
+                  const isSingle = Number(inc.maxChoices ?? 1) <= 1;
+                  const min = Number(inc.minChoices ?? 0);
+                  const title = capitalizeFirst(inc.name || inc.subcategory?.name || inc.category?.name || "Elegí tu opción");
 
-                {/* Lista de opciones — mismo estilo que modificadores */}
-                <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 space-y-2">
-                  {(inclusionsProducts[String(currentInclusion.id)] ?? []).length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No hay opciones disponibles.</p>
-                  ) : (
-                    (inclusionsProducts[String(currentInclusion.id)] ?? []).map((p: ApiProduct) => {
-                      const sel = inclusionSelections[String(currentInclusion.id)] ?? [];
-                      const isSelected = sel.includes(String(p.id));
-                      const isSingle = Number(currentInclusion.maxChoices ?? 1) <= 1;
-                      const raw = toNumber(p.price);
-                      const fin = priceWithInclusionRuleAndPromo(raw, currentInclusion, promoFactor);
-                      return (
-                        <div
-                          key={p.id}
-                          onClick={() => toggleSelectInclusion(currentInclusion, String(p.id))}
-                          role={isSingle ? "radio" : "checkbox"}
-                          aria-checked={isSelected}
-                          className={[
-                            "w-full rounded-lg border px-3 py-2 flex items-center justify-between transition-colors cursor-pointer",
-                            isSelected
-                              ? "border-[var(--brand-color)] bg-[#fff5f2]"
-                              : "border-transparent hover:bg-black/5",
-                          ].join(" ")}
-                        >
-                          <div className="flex items-center gap-3">
-                            {!isSingle && (
-                              <Checkbox checked={isSelected} onCheckedChange={() => {}} className="pointer-events-none" />
-                            )}
-                            <span className="text-sm">{p.name}</span>
-                          </div>
-                          <span className="text-sm font-semibold text-muted-foreground">
-                            {fin != null && fin > 0 ? `+${fmt(fin)}` : fin === 0 ? "Gratis" : ""}
-                          </span>
+                  return (
+                    <div key={key} className="space-y-1.5">
+                      <div className="text-sm font-semibold flex items-center gap-1">
+                        {title}
+                        {min > 0 && <span className="text-red-500">*</span>}
+                      </div>
+
+                      {isSingle ? (
+                        <div className="relative inc-dropdown">
+                          <button
+                            type="button"
+                            onClick={() => setOpenIncId((s) => (s === key ? null : key))}
+                            className={[
+                              "w-full rounded-xl border px-3 py-2.5 text-sm bg-white",
+                              "ring-1 focus:outline-none focus:ring-2 flex items-center justify-between",
+                              inclusionErrors[key]
+                                ? "ring-red-400 focus:ring-red-500"
+                                : "ring-black/5 focus:ring-[var(--brand-color)]",
+                            ].join(" ")}
+                          >
+                            <span className="truncate text-left">
+                              {(() => {
+                                const p = prods.find((x) => String(x.id) === sel[0]);
+                                if (!p) return <span className="text-muted-foreground">Elegir...</span>;
+                                const raw = toNumber(p.price);
+                                const fin = priceWithInclusionRuleAndPromo(raw, inc, promoFactor);
+                                return `${p.name}${fin != null ? ` — ${fmt(fin)}` : ""}`;
+                              })()}
+                            </span>
+                            <span className="ml-3 text-xs opacity-50 shrink-0">▼</span>
+                          </button>
+
+                          {openIncId === key && (
+                            <div
+                              className="absolute z-50 mt-1.5 w-full rounded-2xl bg-white shadow-lg ring-1 ring-black/8 p-2 max-h-64 overflow-y-auto"
+                              role="listbox"
+                              aria-label={title}
+                            >
+                              {min === 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setInclusionSelections((prev) => ({ ...prev, [key]: [] }));
+                                    setInclusionErrors((e) => ({ ...e, [key]: null }));
+                                    setFormError(null);
+                                    setOpenIncId(null);
+                                  }}
+                                  className="w-full text-left rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-black/5 mb-1"
+                                >
+                                  — No seleccionar —
+                                </button>
+                              )}
+                              {prods.length === 0 ? (
+                                <p className="p-2 text-sm text-muted-foreground">No hay opciones disponibles.</p>
+                              ) : (
+                                prods.map((p) => {
+                                  const raw = toNumber(p.price);
+                                  const fin = priceWithInclusionRuleAndPromo(raw, inc, promoFactor);
+                                  const checked = sel.includes(String(p.id));
+                                  return (
+                                    <button
+                                      key={String(p.id)}
+                                      type="button"
+                                      onClick={() => {
+                                        setInclusionSelections((prev) => ({ ...prev, [key]: [String(p.id)] }));
+                                        setInclusionErrors((e) => ({ ...e, [key]: null }));
+                                        setFormError(null);
+                                        setOpenIncId(null);
+                                      }}
+                                      className={[
+                                        "w-full rounded-lg border p-2.5 mb-1.5 last:mb-0",
+                                        "flex items-center justify-between gap-3 text-left",
+                                        checked ? "ring-2 ring-[var(--brand-color)] border-transparent" : "ring-1 ring-black/5",
+                                        "hover:bg-black/5",
+                                      ].join(" ")}
+                                      role="option"
+                                      aria-selected={checked}
+                                    >
+                                      <div className="flex items-center gap-2.5">
+                                        <span
+                                          className={[
+                                            "inline-block h-4 w-4 rounded-full border shrink-0",
+                                            checked
+                                              ? "border-[var(--brand-color)] bg-[var(--brand-color)]"
+                                              : "border-gray-300",
+                                          ].join(" ")}
+                                          aria-hidden
+                                        />
+                                        <span className="text-sm font-medium">{p.name}</span>
+                                      </div>
+                                      <div className="text-sm text-right shrink-0">
+                                        {raw !== null && fin !== null ? (
+                                          raw === fin ? (
+                                            <span className="text-muted-foreground">{fmt(fin)}</span>
+                                          ) : (
+                                            <>
+                                              <span className="line-through opacity-40 mr-1.5 text-xs">{fmt(raw)}</span>
+                                              <span className="font-semibold text-[var(--brand-color)]">{fmt(fin)}</span>
+                                            </>
+                                          )
+                                        ) : null}
+                                      </div>
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                          )}
+
+                          {inclusionErrors[key] && (
+                            <p className="mt-1 text-xs text-red-600">{inclusionErrors[key]}</p>
+                          )}
                         </div>
-                      );
-                    })
-                  )}
-                </div>
+                      ) : (
+                        /* Multi-choice: lista directa con checkboxes */
+                        <div className={[
+                          "rounded-2xl ring-1 bg-white/60 p-3 space-y-2",
+                          inclusionErrors[key] ? "ring-red-400 bg-red-50/70" : "ring-black/5",
+                        ].join(" ")}>
+                          {inclusionErrors[key] && (
+                            <p className="text-xs font-medium text-red-600">{inclusionErrors[key]}</p>
+                          )}
+                          {prods.map((p) => {
+                            const isSelected = sel.includes(String(p.id));
+                            const raw = toNumber(p.price);
+                            const fin = priceWithInclusionRuleAndPromo(raw, inc, promoFactor);
+                            return (
+                              <div
+                                key={p.id}
+                                onClick={() => toggleSelectInclusion(inc, String(p.id))}
+                                role="checkbox"
+                                aria-checked={isSelected}
+                                className={[
+                                  "w-full rounded-lg border px-3 py-2 flex items-center justify-between transition-colors cursor-pointer",
+                                  isSelected ? "border-[var(--brand-color)] bg-[#fff5f2]" : "border-transparent hover:bg-black/5",
+                                ].join(" ")}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <Checkbox checked={isSelected} onCheckedChange={() => {}} className="pointer-events-none" />
+                                  <span className="text-sm">{p.name}</span>
+                                </div>
+                                <span className="text-sm font-semibold text-muted-foreground">
+                                  {fin != null && fin > 0 ? `+${fmt(fin)}` : fin === 0 ? "Gratis" : ""}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
