@@ -232,7 +232,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   const hasSlots = Array.isArray(combo?.slots) && (combo.slots?.length ?? 0) > 0;
   const slots: ComboSlotExpanded[] = combo?.slots ?? [];
   // Solo usar el stepper cuando al menos un slot tiene grupos de modificadores que configurar
-  const hasSlotModifiers = hasSlots && slots.some(s => (s.product?.modifierGroups?.length ?? 0) > 0);
+  const hasSlotModifiers = hasSlots && slots.length > 1 && slots.some(s => (s.product?.modifierGroups?.length ?? 0) > 0);
   const hasInclusions = (combo?.categoryInclusions?.length ?? 0) > 0;
   const totalSlotSteps = slots.length + (hasInclusions ? 1 : 0);
 
