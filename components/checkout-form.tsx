@@ -288,9 +288,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     const baseTotal = cartSummary?.total ?? confirmedTotal ?? total;
     const confirmedTotalWithDelivery = Math.round(deliveryMethod === "delivery" ? baseTotal + DELIVERY_FEE : baseTotal);
 
-    if (deliveryMethod === "delivery" && DELIVERY_FEE > 0) {
+    if (deliveryMethod === "delivery") {
       lines.push(`*Subtotal:* ${fmt(Math.round(baseTotal))}`);
-      lines.push(`*Envío:* ${fmt(DELIVERY_FEE)}`);
+      lines.push(`*Envío:* ${DELIVERY_FEE > 0 ? fmt(DELIVERY_FEE) : "A coordinar con el local"}`);
     }
 
     lines.push(`*Total:* ${fmt(confirmedTotalWithDelivery)}`);
@@ -658,9 +658,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               <span className="text-sm font-medium">Retiro en local</span>
             </div>
           )}
-          {deliveryMethod === "delivery" && DELIVERY_FEE > 0 && (
+          {deliveryMethod === "delivery" && (
             <p className="mt-2 text-xs text-muted-foreground">
-              Se agregará un costo de envío de {fmt(DELIVERY_FEE)} al total.
+              {DELIVERY_FEE > 0
+                ? `Se agregará un costo de envío de ${fmt(DELIVERY_FEE)} al total.`
+                : "El costo de envío se coordina con el local."}
             </p>
           )}
         </div>
@@ -921,10 +923,10 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                 </div>
               )}
               {/* Envío */}
-              {deliveryMethod === "delivery" && DELIVERY_FEE > 0 && (
+              {deliveryMethod === "delivery" && (
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                   <span>Envío</span>
-                  <span>{fmt(DELIVERY_FEE)}</span>
+                  <span>{DELIVERY_FEE > 0 ? fmt(DELIVERY_FEE) : "A coordinar"}</span>
                 </div>
               )}
               <div className="flex items-center justify-between">
