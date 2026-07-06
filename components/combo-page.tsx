@@ -17,7 +17,7 @@ import BlockingLoader from "@/components/blocking-loader";
 import { isAllowedForDelivery } from "@/lib/channel";
 import type { Combo as ApiCombo, ComboCategoryInclusion as CategoryInclusion, ComboSlotExpanded, SlotSelection } from "@/lib/api/combos";
 import type { Product as ApiProduct, ModifierGroup, ModifierGroupOption } from "@/lib/api/products";
-import { quoteCombo, quoteComboSlots, buildPromoLabel, type QuoteComboItem, type QuoteComboSlotInput } from "@/lib/pricing";
+import { quoteCombo, quoteComboSlots, buildPromoLabel, type QuoteComboItem, type QuoteComboSlotInput, type QuoteComboInclusionInput } from "@/lib/pricing";
 import { useHideLayoutFooter } from "@/components/layout-shell";
 
 const MAX_NOTES = 50;
@@ -209,6 +209,15 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   const [inclusionErrors, setInclusionErrors] = useState<Record<string, string | null>>({});
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Mismas selecciones, en el formato que espera /pricing/quote (inclusion_id + product_ids) —
+  // necesario para que el subtotal en vivo del stepper refleje reglas de precio ligadas a la
+  // inclusión elegida (PRICE_CAP, % descuento, etc.), no solo las opciones de modificadores.
+  const inclusionSelectionsForQuote = useMemo((): QuoteComboInclusionInput[] => {
+    return Object.entries(inclusionSelections)
+      .filter(([, pids]) => pids.length > 0)
+      .map(([incId, pids]) => ({ inclusion_id: Number(incId), product_ids: pids.map(Number) }));
+  }, [inclusionSelections]);
+
   // 💰 subtotal en tiempo real del stepper (quote del servidor)
   const [slotSubtotal, setSlotSubtotal] = useState<number | null>(null);
 
@@ -229,10 +238,14 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   const loading = false; // si en tu caso hay fetch para combo, actualizá este flag
 
   // ===== Estado stepper de slots =====
-  const hasSlots = Array.isArray(combo?.slots) && (combo.slots?.length ?? 0) > 0;
-  const slots: ComboSlotExpanded[] = combo?.slots ?? [];
-  // Solo usar el stepper cuando al menos un slot tiene grupos de modificadores que configurar
-  const hasSlotModifiers = hasSlots && slots.length > 1 && slots.some(s => (s.product?.modifierGroups?.length ?? 0) > 0);
+  // Solo cuentan los slots cuyo producto tiene grupos de modificadores configurados — un ítem fijo
+  // sin modificadores (ej. papas fritas) no amerita un paso del wizard. Si sólo hay 1 ítem con
+  // modificadores en todo el combo, se usa la forma original (mainProduct + inclusiones inline),
+  // no el stepper — el stepper es para cuando hay más de un ítem a configurar.
+  const slots: ComboSlotExpanded[] = (combo?.slots ?? []).filter(
+    (s) => (s.product?.modifierGroups?.length ?? 0) > 0
+  );
+  const hasSlotModifiers = slots.length > 1;
   const hasInclusions = (combo?.categoryInclusions?.length ?? 0) > 0;
   const totalSlotSteps = slots.length + (hasInclusions ? 1 : 0);
 
@@ -257,7 +270,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     if (!hasSlotModifiers) return;
     setSlotStep(0);
     const overrideMap = new Map((combo?.modifierOverrides ?? []).map((ov) => [Number(ov.modifierOptionId), ov]));
-    setSlotSelections((combo?.slots ?? []).map((s) => buildEmptySlotSelection(s, overrideMap)));
+    setSlotSelections(slots.map((s) => buildEmptySlotSelection(s, overrideMap)));
     setSlotGroupErrors(new Set());
   }, [combo?.id, hasSlotModifiers]);
 
@@ -270,13 +283,19 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       slot_index: sel.slotIndex,
       option_ids: Array.from(sel.selectedByGroup.values()).flatMap((s) => Array.from(s)),
     }));
-    quoteComboSlots({ comboId: Number(combo.id), qty: 1, slots: slotInputs, signal: ctrl.signal })
+    quoteComboSlots({
+      comboId: Number(combo.id),
+      qty: 1,
+      slots: slotInputs,
+      inclusionSelections: inclusionSelectionsForQuote,
+      signal: ctrl.signal,
+    })
       .then((result) => {
         if (result) setSlotSubtotal(Number(result.breakdown.effectivePerCombo));
       })
       .catch(() => {});
     return () => ctrl.abort();
-  }, [hasSlotModifiers, combo?.id, slotSelections]);
+  }, [hasSlotModifiers, combo?.id, slotSelections, inclusionSelectionsForQuote]);
 
   const toggleSlotOption = (groupId: number, optionId: number, maxSelections: number) => {
     setSlotSelections((prev) => {
@@ -375,6 +394,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
         comboId: Number(combo.id),
         qty: 1,
         slots: slotInputs,
+        inclusionSelections: inclusionSelectionsForQuote,
       });
 
       const eff = result ? Number(result.breakdown.effectivePerCombo) : null;
@@ -411,6 +431,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
         name: s.name,
         qty: 1,
         isInclusion: true as any,
+        inclusionId: s.inclusionId,
         inclusionTitle: s.inclusionTitle,
         unitPrice: s.unitPrice,
         basePrice: s.basePrice,
@@ -905,24 +926,28 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
         <ClosedBanner />
         <InfoBanner />
 
-        {/* Hero image del combo */}
-        {heroImg && heroImg !== "/placeholder.svg" && (
-          <div className="relative w-full aspect-[3/1] max-h-44 overflow-hidden shrink-0">
-            <Image
-              src={heroImg}
-              alt={combo?.name ?? "Combo"}
-              fill
-              className="object-cover"
-              unoptimized
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-background/70 to-transparent" />
-          </div>
-        )}
-
         {/* Contenido scrolleable */}
         <div ref={slotScrollRef} className="flex-1 overflow-y-auto">
-          <div className="max-w-lg mx-auto w-full px-4 pt-4 pb-6">
-            {/* Nombre del combo + dots */}
+          <div className="max-w-6xl mx-auto w-full px-4 pt-4 pb-6 grid grid-cols-1 md:grid-cols-2 gap-5 md:items-start">
+            {/* Imagen del combo — arriba en mobile (en el flujo, no fija), a la izquierda y sticky en desktop */}
+            {heroImg && heroImg !== "/placeholder.svg" && (
+              <div className="md:sticky md:top-4">
+                <div className="rounded-2xl overflow-hidden ring-1 ring-black/5 bg-white/60">
+                  <div className="relative w-full aspect-[3/2] md:aspect-[4/3]">
+                    <Image
+                      src={heroImg}
+                      alt={combo?.name ?? "Combo"}
+                      fill
+                      className="object-cover"
+                      unoptimized
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Nombre + dots + paso actual — a la derecha en desktop, debajo de la imagen en mobile */}
+            <div className={heroImg && heroImg !== "/placeholder.svg" ? "" : "md:col-span-2"}>
             <h2 className="text-base font-extrabold uppercase text-foreground mb-3">
               {combo?.name ?? "Combo"}
             </h2>
@@ -1101,7 +1126,8 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                   const key = String(inc.id);
                   const prods = inclusionsProducts[key] ?? [];
                   const sel = inclusionSelections[key] ?? [];
-                  const isSingle = Number(inc.maxChoices ?? 1) <= 1;
+                  const max = Number(inc.maxChoices ?? 1);
+                  const isSingle = max <= 1;
                   const min = Number(inc.minChoices ?? 0);
                   const title = capitalizeFirst(inc.name || inc.subcategory?.name || inc.category?.name || "Elegí tu opción");
 
@@ -1110,6 +1136,11 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                       <div className="text-sm font-semibold flex items-center gap-1">
                         {title}
                         {min > 0 && <span className="text-red-500">*</span>}
+                        {!isSingle && (
+                          <span className="ml-1 text-xs font-normal text-muted-foreground">
+                            (elegí {min === max ? min : `${min}–${max}`})
+                          </span>
+                        )}
                       </div>
 
                       {isSingle ? (
@@ -1224,6 +1255,9 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                           "rounded-2xl ring-1 bg-white/60 p-3 space-y-2",
                           inclusionErrors[key] ? "ring-red-400 bg-red-50/70" : "ring-black/5",
                         ].join(" ")}>
+                          <p className="text-xs font-medium text-muted-foreground">
+                            {sel.length}/{max} seleccionadas
+                          </p>
                           {inclusionErrors[key] && (
                             <p className="text-xs font-medium text-red-600">{inclusionErrors[key]}</p>
                           )}
@@ -1259,6 +1293,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                 })}
               </div>
             )}
+            </div>
           </div>
         </div>
 

@@ -16,9 +16,15 @@ export type CartComboItem = {
   };
   // 👇 NUEVO: cuando proviene de una categoría incluida
   isInclusion?: boolean;         // lo usamos para detectarlo en el render
+  inclusionId?: string;          // id de la ComboCategoryInclusion — requerido para armar inclusion_selections al checkear
   inclusionTitle?: string;       // ej. "Elegí tu bebida"
   unitPrice?: number;            // precio con la regla aplicada (descuento/tope/etc.)
   basePrice?: number;            // precio original del producto
+
+  // 👇 NUEVO: cuando proviene del stepper de slots (no del formato legacy de items[])
+  comboItemId?: number | null;
+  slotIndex?: number;
+  optionIds?: number[];
 };
 
 export interface CartItem {

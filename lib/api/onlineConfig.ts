@@ -5,6 +5,8 @@ export type OnlineConfigResponse = {
   waNumber: string | null;
   deliveryEnabled: boolean;
   deliveryFee: number;
+  scheduledOrdersEnabled: boolean;
+  scheduledOrdersLeadMinutes: number;
   closedMessage: string;
   pickupOnlyMsg: string;
   infoBannerEnabled: boolean;
@@ -17,6 +19,8 @@ export const ONLINE_CONFIG_DEFAULTS: OnlineConfigResponse = {
   waNumber: null,
   deliveryEnabled: false,
   deliveryFee: 0,
+  scheduledOrdersEnabled: false,
+  scheduledOrdersLeadMinutes: 30,
   closedMessage: "⚠️ El local está cerrado en este momento.",
   pickupOnlyMsg: "El local está abierto, pero sólo tomamos pedidos en el local por ahora.",
   infoBannerEnabled: false,

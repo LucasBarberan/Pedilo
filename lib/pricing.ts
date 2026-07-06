@@ -225,10 +225,16 @@ export type QuoteComboSlotInput = {
   comment?: string;
 };
 
+export type QuoteComboInclusionInput = {
+  inclusion_id: number;
+  product_ids: number[];
+};
+
 export async function quoteComboSlots({
   comboId,
   qty,
   slots,
+  inclusionSelections,
   channel = "WEB",
   baseUrl,
   signal,
@@ -236,6 +242,7 @@ export async function quoteComboSlots({
   comboId: number;
   qty: number;
   slots: QuoteComboSlotInput[];
+  inclusionSelections?: QuoteComboInclusionInput[];
   channel?: "WEB" | "POS" | "DELIVERY";
   baseUrl?: string | null;
   signal?: AbortSignal;
@@ -257,6 +264,7 @@ export async function quoteComboSlots({
             option_ids: s.option_ids,
             comment: s.comment ?? null,
           })),
+          ...(inclusionSelections?.length ? { inclusion_selections: inclusionSelections } : {}),
         },
       ],
     };

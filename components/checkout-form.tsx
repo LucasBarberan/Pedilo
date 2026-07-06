@@ -42,6 +42,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const { data: businessStatus } = useBusinessStatusSmart();
   const DELIVERY_ENABLED = config.deliveryEnabled;
   const DELIVERY_FEE = config.deliveryFee;
+  const SCHEDULED_ORDERS_ENABLED = config.scheduledOrdersEnabled;
+  const SCHEDULED_ORDERS_LEAD_MINUTES = config.scheduledOrdersLeadMinutes;
   const storeOpen = businessStatus?.web?.open ?? true;
 
   // 🪝 TODOS LOS HOOKS VAN ACÁ
@@ -56,6 +58,26 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   );
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "mp">("cash");
   const [notes, setNotes] = useState("");
+
+  // Pedidos programados: se asume siempre para el mismo día — el input es solo horario (HH:mm)
+  const [scheduleLater, setScheduleLater] = useState(false); // destildado por defecto = "pedir para ya"
+  const [scheduledTime, setScheduledTime] = useState(""); // valor de <input type="time">, formato "HH:mm"
+
+  const minScheduledTime = useMemo(() => {
+    const d = new Date(Date.now() + SCHEDULED_ORDERS_LEAD_MINUTES * 60_000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, [SCHEDULED_ORDERS_LEAD_MINUTES]);
+
+  // Combina el horario elegido (HH:mm) con la fecha de hoy → ISO
+  const scheduledTimeToISO = (time: string): string | null => {
+    if (!time) return null;
+    const [h, m] = time.split(":").map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m)) return null;
+    const d = new Date();
+    d.setHours(h, m, 0, 0);
+    return d.toISOString();
+  };
   const [submitting, setSubmitting] = useState(false);
   const { refreshCartPrices, isRefreshing, cartSummary } = useCartRefresh();
 
@@ -222,6 +244,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     lines.push(
       `*Entrega:* ${deliveryMethod === "delivery" ? "Delivery" : "Retiro"}`
     );
+    if (SCHEDULED_ORDERS_ENABLED && scheduleLater && scheduledTime) {
+      lines.push(`*Horario pedido:* ${scheduledTime} hs`);
+    }
     lines.push(
       `*Pago:* ${paymentMethod === "cash" ? "Efectivo" : "Mercado Pago"}`
     );
@@ -340,6 +365,17 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       addressRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
+    // si eligió programar el pedido, validamos el horario (ayuda de UX — el backend vuelve a validar)
+    if (SCHEDULED_ORDERS_ENABLED && scheduleLater) {
+      if (!scheduledTime) {
+        setFormError("Elegí un horario para tu pedido.");
+        return;
+      }
+      if (scheduledTime < minScheduledTime) {
+        setFormError(`El horario debe tener al menos ${SCHEDULED_ORDERS_LEAD_MINUTES} minutos de anticipación.`);
+        return;
+      }
+    }
 
     setFormError(""); // OK, seguimos
     setSubmitting(true);
@@ -372,13 +408,33 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           };
 
           if (hasSlotData) {
-            // Nuevo formato con slots[]
-            comboPayload.slots = (it.comboItems || []).map((ci: any) => ({
-              combo_item_id: Number(ci.comboItemId),
-              slot_index: Number(ci.slotIndex ?? 0),
-              option_ids: Array.isArray(ci.optionIds) ? ci.optionIds.map(Number) : [],
-              ...(ci.comment?.trim() ? { comment: ci.comment.trim() } : {}),
-            }));
+            // Nuevo formato con slots[] — separar los slots reales (con comboItemId) de las
+            // inclusiones por categoría (isInclusion: true, sin comboItemId): van en dos campos
+            // distintos del payload, mezclarlos manda combo_item_id null y el backend lo rechaza.
+            comboPayload.slots = (it.comboItems || [])
+              .filter((ci: any) => !ci.isInclusion && ci.comboItemId != null)
+              .map((ci: any) => ({
+                combo_item_id: Number(ci.comboItemId),
+                slot_index: Number(ci.slotIndex ?? 0),
+                option_ids: Array.isArray(ci.optionIds) ? ci.optionIds.map(Number) : [],
+                ...(ci.comment?.trim() ? { comment: ci.comment.trim() } : {}),
+              }));
+
+            const inclusionGroups = new Map<string, number[]>();
+            for (const ci of (it.comboItems || [])) {
+              if (!ci.isInclusion || ci.inclusionId == null) continue;
+              const list = inclusionGroups.get(String(ci.inclusionId)) ?? [];
+              list.push(Number(ci.productId));
+              inclusionGroups.set(String(ci.inclusionId), list);
+            }
+            if (inclusionGroups.size > 0) {
+              comboPayload.inclusion_selections = Array.from(inclusionGroups.entries()).map(
+                ([inclusionId, productIds]) => ({
+                  inclusion_id: Number(inclusionId),
+                  product_ids: productIds,
+                })
+              );
+            }
           } else {
             // Formato legacy con items[]
             comboPayload.items = (it.comboItems || []).map((ci: any) => {
@@ -427,6 +483,10 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       const channel = "WEB" as const;
       const fulfillment = deliveryMethod === "delivery" ? "DELIVERY" : "TAKEAWAY";
       const phoneNormalized = normalizePhoneAR(customer.phone);
+      const scheduledAtISO =
+        SCHEDULED_ORDERS_ENABLED && scheduleLater && scheduledTime
+          ? scheduledTimeToISO(scheduledTime)
+          : null;
       // 4) Delivery info (siempre provider WEB)
       const delivery_info =
         deliveryMethod === "delivery"
@@ -435,7 +495,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             customerPhone: phoneNormalized,
             addressText: customer.address.trim(),
             notes: notes?.trim() || null,
-            scheduledAt: null,
+            scheduledAt: scheduledAtISO,
             provider: "WEB",
             mapUrl: null,
           }
@@ -444,7 +504,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             customerPhone: phoneNormalized,
             addressText: "", // vacío en retiro
             notes: notes?.trim() || null,
-            scheduledAt: null,
+            scheduledAt: scheduledAtISO,
             provider: "WEB",
             mapUrl: null,
           };
@@ -664,6 +724,55 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                 ? `Se agregará un costo de envío de ${fmt(DELIVERY_FEE)} al total.`
                 : "El costo de envío se coordina con el local."}
             </p>
+          )}
+
+          {SCHEDULED_ORDERS_ENABLED && (
+            <div className="mt-3 pt-3 border-t border-black/5">
+              <label className="flex items-center justify-between gap-3 cursor-pointer select-none">
+                <span className="text-sm font-medium">Programá tu pedido</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={scheduleLater}
+                  onClick={() => {
+                    setScheduleLater((v) => {
+                      const next = !v;
+                      if (next && !scheduledTime) setScheduledTime(minScheduledTime);
+                      return next;
+                    });
+                    setFormError("");
+                  }}
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${scheduleLater ? "bg-[var(--brand-color)]" : "bg-gray-300"
+                    }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${scheduleLater ? "translate-x-6" : "translate-x-1"
+                      }`}
+                  />
+                </button>
+              </label>
+              {scheduleLater ? (
+                <div className="mt-2">
+                  <input
+                    type="time"
+                    min={minScheduledTime}
+                    value={scheduledTime}
+                    onChange={(e) => {
+                      setScheduledTime(e.target.value);
+                      if (formError.includes("horario")) setFormError("");
+                    }}
+                    className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Anticipación mínima: {SCHEDULED_ORDERS_LEAD_MINUTES} minutos.
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Activá esta opción si querés tu pedido para un horario específico.
+                </p>
+              )}
+            </div>
           )}
         </div>
 
