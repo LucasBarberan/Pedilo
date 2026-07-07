@@ -101,6 +101,31 @@ function buildDefaultSelection(groups: ModifierGroup[]): Map<number, Map<number,
   return initial;
 }
 
+// Reparte includedFreeCount entre las opciones seleccionadas de un grupo: las de menor
+// precio_extra consumen el cupo gratis primero (empate por sortOrder), igual que
+// buildComboOptionSnapshotsWithFreeCount en el Backend. Devuelve unidades gratis por optionId.
+function computeFreeUnitsByOption(
+  group: ModifierGroup,
+  qtyMap: Map<number, number>,
+  freeCount: number
+): Map<number, number> {
+  const freeUnitsByOptionId = new Map<number, number>();
+  if (freeCount <= 0) return freeUnitsByOptionId;
+
+  const selected = group.options
+    .map((o) => ({ id: o.id, qty: qtyMap.get(o.id) ?? 0, precioExtra: toNum(o.precio_extra), sortOrder: o.sortOrder ?? 0 }))
+    .filter((o) => o.qty > 0)
+    .sort((a, b) => a.precioExtra - b.precioExtra || a.sortOrder - b.sortOrder);
+
+  let freeUnitsUsed = 0;
+  for (const o of selected) {
+    const freeForThis = Math.max(0, Math.min(o.qty, freeCount - freeUnitsUsed));
+    freeUnitsUsed += freeForThis;
+    if (freeForThis > 0) freeUnitsByOptionId.set(o.id, freeForThis);
+  }
+  return freeUnitsByOptionId;
+}
+
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 const priceWithInclusionRule = (
@@ -162,6 +187,16 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       (combo?.modifierOverrides ?? []).map((ov) => [Number(ov.modifierOptionId), ov])
     );
   }, [combo?.modifierOverrides]);
+
+  // Reglas de includedFreeCount del ítem principal: viajan en combo.slots[] (mismo dato que
+  // usa el stepper de slots), aunque este formulario "simple" no use el stepper — se busca
+  // el slot cuyo comboItemId coincide con el ComboItem principal (isMain).
+  const mainItemModifierGroupRules = useMemo(() => {
+    const mainItemId = combo?.items?.find((i) => i.isMain)?.id;
+    if (mainItemId == null) return [];
+    const mainSlot = (combo?.slots ?? []).find((s) => Number(s.comboItemId) === Number(mainItemId));
+    return mainSlot?.modifierGroupRules ?? [];
+  }, [combo?.items, combo?.slots]);
 
   // Grupos de modificadores del producto principal (N genéricos), respetando los
   // overrides del combo: se excluyen opciones deshabilitadas, se aplica extraOverride
@@ -635,7 +670,23 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   // precios
   const baseList = toNum(combo?.basePrice);
   const baseEff = toNum(combo?.effectivePrice ?? combo?.basePrice);
-  const optionExtra = selectedEntries.reduce((sum, { option, qty: optQty }) => sum + toNum(option.precio_extra) * optQty, 0);
+  // Descuenta includedFreeCount por grupo (mismas reglas que el Backend) antes de sumar
+  // el extra de cada opción — si no, el subtotal en vivo cobraría opciones que son gratis.
+  const optionExtra = useMemo(() => {
+    let sum = 0;
+    for (const group of groups) {
+      const qtyMap = selectedByGroup.get(group.id) ?? new Map<number, number>();
+      const rule = mainItemModifierGroupRules.find((r) => r.modifierGroupId === group.id);
+      const freeUnitsByOptionId = computeFreeUnitsByOption(group, qtyMap, rule?.includedFreeCount ?? 0);
+      for (const opt of group.options) {
+        const optQty = qtyMap.get(opt.id) ?? 0;
+        if (optQty <= 0) continue;
+        const paidUnits = optQty - (freeUnitsByOptionId.get(opt.id) ?? 0);
+        sum += toNum(opt.precio_extra) * paidUnits;
+      }
+    }
+    return sum;
+  }, [groups, selectedByGroup, mainItemModifierGroupRules]);
   const hasPromo = Number.isFinite(baseList) && Number.isFinite(baseEff) && baseEff < baseList;
   const promoFactor = hasPromo && baseList > 0 ? Math.max(0, Math.min(1, baseEff / baseList)) : 1;
 
@@ -1413,6 +1464,10 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
             const isRadio = group.maxSelections === 1;
             const qtyMap = selectedByGroup.get(group.id) ?? new Map<number, number>();
             const hasError = missingModifierGroupId === group.id;
+            const rule = mainItemModifierGroupRules.find((r) => r.modifierGroupId === group.id);
+            const freeCount = rule?.includedFreeCount ?? 0;
+            const freeUnitsByOptionId = computeFreeUnitsByOption(group, qtyMap, freeCount);
+            const selectedCount = Array.from(qtyMap.values()).filter((q) => q > 0).length;
 
             return (
               <div
@@ -1436,12 +1491,20 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                         ? "(opcional - sin límite)"
                         : `(opcional - hasta ${group.maxSelections})`}
                   </span>
+                  {freeCount > 0 && (
+                    <span className="ml-auto text-[10.5px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-1.5 py-0.5 leading-none">
+                      {selectedCount}/{freeCount} gratis
+                    </span>
+                  )}
                 </div>
                 {group.options.map((o) => {
                   const optQty = qtyMap.get(o.id) ?? 0;
                   const active = optQty > 0;
                   const plus = toNum(o.precio_extra);
                   const usesStepper = !!group.allowsQuantity;
+                  const freeUnits = freeUnitsByOptionId.get(o.id) ?? 0;
+                  const paidUnits = optQty - freeUnits;
+                  const isFullyFree = active && freeUnits >= optQty;
                   return (
                     <div
                       key={String(o.id)}
@@ -1472,7 +1535,12 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                       {usesStepper ? (
                         <div className="flex items-center gap-2">
                           {plus > 0 && (
-                            <span className="text-sm font-semibold text-slate-500">+{fmt(plus)}/u</span>
+                            <span className="text-sm font-semibold text-slate-500">
+                              {freeUnits > 0 && (
+                                <span className="text-emerald-600 mr-1">{freeUnits} gratis</span>
+                              )}
+                              {paidUnits > 0 && `+${fmt(plus)}/u`}
+                            </span>
                           )}
                           <div className="flex items-center gap-1">
                             <button
@@ -1498,7 +1566,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                           </div>
                         </div>
                       ) : (
-                        <span className="text-sm font-semibold">
+                        <span className={`text-sm font-semibold ${isFullyFree ? "line-through text-muted-foreground" : ""}`}>
                           {plus ? `+${fmt(plus)}` : isRadio ? "" : "Gratis"}
                         </span>
                       )}
