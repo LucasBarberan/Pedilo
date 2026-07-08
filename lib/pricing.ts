@@ -221,7 +221,9 @@ export async function quoteCombo({
 export type QuoteComboSlotInput = {
   combo_item_id: number;
   slot_index: number;
+  /** @deprecated usar options con qty */
   option_ids: number[];
+  options?: { id: number; qty: number }[];
   comment?: string;
 };
 
@@ -261,7 +263,9 @@ export async function quoteComboSlots({
           slots: slots.map((s) => ({
             combo_item_id: s.combo_item_id,
             slot_index: s.slot_index,
-            option_ids: s.option_ids,
+            ...(s.options && s.options.length > 0
+              ? { options: s.options }
+              : { option_ids: s.option_ids }),
             comment: s.comment ?? null,
           })),
           ...(inclusionSelections?.length ? { inclusion_selections: inclusionSelections } : {}),
@@ -293,14 +297,18 @@ export type CartProductLine = {
   type: "PRODUCT";
   productId: number;
   qty: number;
+  /** @deprecated usar options — no soporta cantidad por opción (grupos allowsQuantity) */
   optionIds: number[];
+  options?: { id: number; qty: number }[];
   comment?: string | null;
 };
 
 export type CartComboSlot = {
   combo_item_id: number;
   slot_index: number;
+  /** @deprecated usar options — no soporta cantidad por opción (grupos allowsQuantity) */
   option_ids: number[];
+  options?: { id: number; qty: number }[];
 };
 
 export type CartComboLine = {
@@ -338,7 +346,9 @@ export async function quoteCart(
     channel,
     lines: lines.map((l) => {
       if (l.type === "PRODUCT") {
-        return { type: "PRODUCT", product_id: l.productId, quantity: l.qty, option_ids: l.optionIds, comment: l.comment ?? null };
+        return l.options && l.options.length > 0
+          ? { type: "PRODUCT", product_id: l.productId, quantity: l.qty, options: l.options, comment: l.comment ?? null }
+          : { type: "PRODUCT", product_id: l.productId, quantity: l.qty, option_ids: l.optionIds, comment: l.comment ?? null };
       }
       if (l.slots && l.slots.length > 0) {
         return { type: "COMBO", product_template_id: l.comboId, combo_quantity: l.qty, slots: l.slots };
@@ -347,7 +357,13 @@ export async function quoteCart(
         type: "COMBO",
         product_template_id: l.comboId,
         combo_quantity: l.qty,
-        items: (l.items ?? []).map((it) => ({ product_id: it.productId, quantity_per_combo: it.quantity, option_ids: it.optionIds ?? [] })),
+        items: (l.items ?? []).map((it) => ({
+          product_id: it.productId,
+          quantity_per_combo: it.quantity,
+          ...(it.options && it.options.length > 0
+            ? { options: it.options }
+            : { option_ids: it.optionIds ?? [] }),
+        })),
       };
     }),
   };

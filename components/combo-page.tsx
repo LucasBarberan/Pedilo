@@ -55,15 +55,17 @@ const capitalizeFirst = (value: string) => {
 // ===== Helpers stepper de slots =====
 
 function buildEmptySlotSelection(slot: ComboSlotExpanded, overrideByOptionId?: Map<number, { isEnabled: boolean }>): SlotSelection {
-  const selectedByGroup = new Map<number, Set<number>>();
+  const selectedByGroup = new Map<number, Map<number, number>>();
   for (const group of slot.product.modifierGroups) {
-    if (!group.isRequired) continue;
     const visibleOptions = group.options.filter(
       (o) => overrideByOptionId?.get(o.id)?.isEnabled !== false
     );
-    const defaultOpt = visibleOptions.find((o) => o.isDefault) ?? visibleOptions[0];
+    // Grupos requeridos siempre necesitan algo seleccionado (default o, si no hay, la
+    // primera opción visible). Grupos opcionales solo se precompletan si tienen un
+    // default explícito — mismo criterio que buildDefaultSelection (combo simple).
+    const defaultOpt = visibleOptions.find((o) => o.isDefault) ?? (group.isRequired ? visibleOptions[0] : undefined);
     if (defaultOpt) {
-      selectedByGroup.set(group.id, new Set([defaultOpt.id]));
+      selectedByGroup.set(group.id, new Map([[defaultOpt.id, 1]]));
     }
   }
   return {
@@ -79,10 +81,20 @@ function validateSlotSelection(slot: ComboSlotExpanded, sel: SlotSelection): num
   for (const group of slot.product.modifierGroups) {
     if (!group.isRequired) continue;
     const chosen = sel.selectedByGroup.get(group.id);
-    const count = chosen?.size ?? 0;
+    const count = chosen ? Array.from(chosen.values()).filter((q) => q > 0).length : 0;
     if (count < (group.minSelections ?? 1)) errors.push(group.id);
   }
   return errors;
+}
+
+// Serializa un Map<optionId, qty> a options:[{id,qty}] (solo entradas con qty>0),
+// listo para mandar al backend (quote u orden).
+function slotSelectedByGroupToOptions(selectedByGroup: Map<number, Map<number, number>>): { id: number; qty: number }[] {
+  return Array.from(selectedByGroup.values()).flatMap((qtyMap) =>
+    Array.from(qtyMap.entries())
+      .filter(([, qty]) => qty > 0)
+      .map(([id, qty]) => ({ id, qty }))
+  );
 }
 
 // ===== Selección inicial legacy =====
@@ -313,11 +325,15 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   useEffect(() => {
     if (!hasSlotModifiers || !combo?.id) return;
     const ctrl = new AbortController();
-    const slotInputs: QuoteComboSlotInput[] = slotSelections.map((sel) => ({
-      combo_item_id: sel.comboItemId,
-      slot_index: sel.slotIndex,
-      option_ids: Array.from(sel.selectedByGroup.values()).flatMap((s) => Array.from(s)),
-    }));
+    const slotInputs: QuoteComboSlotInput[] = slotSelections.map((sel) => {
+      const options = slotSelectedByGroupToOptions(sel.selectedByGroup);
+      return {
+        combo_item_id: sel.comboItemId,
+        slot_index: sel.slotIndex,
+        option_ids: options.map((o) => o.id),
+        options,
+      };
+    });
     quoteComboSlots({
       comboId: Number(combo.id),
       qty: 1,
@@ -336,15 +352,20 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     setSlotSelections((prev) => {
       const next = [...prev];
       const sel = next[slotStep];
-      const current = new Set(sel.selectedByGroup.get(groupId) ?? []);
+      const current = new Map(sel.selectedByGroup.get(groupId) ?? new Map<number, number>());
+      const currentQty = current.get(optionId) ?? 0;
 
-      if (current.has(optionId)) {
-        current.delete(optionId);
+      if (currentQty > 0) {
+        current.set(optionId, 0);
       } else {
-        if (maxSelections === 1) current.clear();
-        else if (maxSelections > 0 && current.size >= maxSelections) return prev;
+        if (maxSelections === 1) {
+          for (const k of current.keys()) current.set(k, 0);
+        } else {
+          const selectedCount = Array.from(current.values()).filter((q) => q > 0).length;
+          if (maxSelections > 0 && selectedCount >= maxSelections) return prev;
+        }
         // maxSelections === 0 = sin límite, siempre permite agregar
-        current.add(optionId);
+        current.set(optionId, 1);
       }
 
       const newMap = new Map(sel.selectedByGroup);
@@ -353,6 +374,37 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       return next;
     });
     setSlotGroupErrors((prev) => { const n = new Set(prev); n.delete(groupId); return n; });
+  };
+
+  // Ajusta la cantidad de una opción con stepper dentro de un slot del combo
+  // (grupo con allowsQuantity, ej. "2x Queso Cheddar" en un slot del stepper multi-producto).
+  const setSlotOptionQty = (
+    group: ComboSlotExpanded["product"]["modifierGroups"][number],
+    optionId: number,
+    newQty: number
+  ) => {
+    setSlotSelections((prev) => {
+      const next = [...prev];
+      const sel = next[slotStep];
+      const current = new Map(sel.selectedByGroup.get(group.id) ?? new Map<number, number>());
+
+      const opt = group.options.find((o) => o.id === optionId);
+      const maxOptQty = opt?.maxQuantity ?? null;
+      const clampedQty = maxOptQty !== null ? Math.min(newQty, maxOptQty) : newQty;
+      const finalQty = Math.max(0, clampedQty);
+
+      if (finalQty > 0 && (current.get(optionId) ?? 0) === 0) {
+        const activeCount = Array.from(current.values()).filter((q) => q > 0).length;
+        if (group.maxSelections !== 0 && activeCount >= group.maxSelections) return prev;
+      }
+
+      current.set(optionId, finalQty);
+      const newMap = new Map(sel.selectedByGroup);
+      newMap.set(group.id, current);
+      next[slotStep] = { ...sel, selectedByGroup: newMap };
+      return next;
+    });
+    setSlotGroupErrors((prev) => { const n = new Set(prev); n.delete(group.id); return n; });
   };
 
   const updateSlotComment = (val: string) => {
@@ -416,12 +468,16 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       if (errors.length > 0) { setSlotGroupErrors(new Set(errors)); return; }
     }
 
-    const slotInputs: QuoteComboSlotInput[] = slotSelections.map((sel) => ({
-      combo_item_id: sel.comboItemId,
-      slot_index: sel.slotIndex,
-      option_ids: Array.from(sel.selectedByGroup.values()).flatMap((s) => Array.from(s)),
-      comment: sel.comment || undefined,
-    }));
+    const slotInputs: QuoteComboSlotInput[] = slotSelections.map((sel) => {
+      const options = slotSelectedByGroupToOptions(sel.selectedByGroup);
+      return {
+        combo_item_id: sel.comboItemId,
+        slot_index: sel.slotIndex,
+        option_ids: options.map((o) => o.id),
+        options,
+        comment: sel.comment || undefined,
+      };
+    });
 
     setSubmitting(true);
     try {
@@ -439,11 +495,11 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
 
       const comboItems = slotSelections.map((sel, i) => {
         const slot = slots[i];
-        const optIds = Array.from(sel.selectedByGroup.values()).flatMap((s) => Array.from(s));
-        const optNames = optIds.map((oid) => {
+        const options = slotSelectedByGroupToOptions(sel.selectedByGroup);
+        const optNames = options.map(({ id, qty: optQty }) => {
           for (const g of slot.product.modifierGroups) {
-            const o = g.options.find((op) => op.id === oid);
-            if (o) return o.name;
+            const o = g.options.find((op) => op.id === id);
+            if (o) return optQty > 1 ? `${optQty}x ${o.name}` : o.name;
           }
           return "";
         }).filter(Boolean);
@@ -455,7 +511,8 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
           isMain: i === 0,
           comboItemId: sel.comboItemId,
           slotIndex: sel.slotIndex,
-          optionIds: optIds,
+          optionIds: options.map((o) => o.id),
+          options,
           selectedOptions: optNames.length > 0 ? optNames.map((name) => ({ optionName: name, tipo: "", priceExtra: 0, qty: 1 })) : undefined,
           comment: sel.comment || undefined,
         };
@@ -1027,12 +1084,11 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                   <div className="space-y-1.5">
                     {slotSelections.slice(0, slotStep).map((prevSel, i) => {
                       const prevSlot = slots[i];
-                      const prevOptNames = Array.from(prevSel.selectedByGroup.values())
-                        .flatMap((s) => Array.from(s))
-                        .map((oid) => {
+                      const prevOptNames = slotSelectedByGroupToOptions(prevSel.selectedByGroup)
+                        .map(({ id: oid, qty: oQty }) => {
                           for (const g of prevSlot.product.modifierGroups) {
                             const o = g.options.find((op) => op.id === oid);
-                            if (o) return o.name;
+                            if (o) return oQty > 1 ? `${oQty}x ${o.name}` : o.name;
                           }
                           return null;
                         })
@@ -1071,7 +1127,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                 {currentSlot.product.modifierGroups.map((group) => {
                   const rule = currentSlot.modifierGroupRules.find((r) => r.modifierGroupId === group.id);
                   const freeCount = rule?.includedFreeCount ?? 0;
-                  const selectedInGroup = currentSlotSel.selectedByGroup.get(group.id) ?? new Set<number>();
+                  const qtyMap = currentSlotSel.selectedByGroup.get(group.id) ?? new Map<number, number>();
                   const hasError = slotGroupErrors.has(group.id);
                   const isRadio = group.maxSelections === 1;
                   const usesStepper = group.allowsQuantity ?? false;
@@ -1081,6 +1137,24 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                     (o) => modifierOverrideByOptionId.get(o.id)?.isEnabled !== false
                   );
                   if (visibleOptions.length === 0) return null;
+
+                  const selectedCount = Array.from(qtyMap.values()).filter((q) => q > 0).length;
+                  const freeUnitsByOptionId = computeFreeUnitsByOption(
+                    {
+                      ...group,
+                      options: visibleOptions.map((o) => ({
+                        id: o.id,
+                        name: o.name,
+                        precio_extra: modifierOverrideByOptionId.get(o.id)?.extraOverride ?? (o.priceExtra ?? 0),
+                        isDefault: !!o.isDefault,
+                        isActive: true,
+                        sortOrder: o.sortOrder ?? 0,
+                        maxQuantity: o.maxQuantity ?? null,
+                      })),
+                    } as unknown as ModifierGroup,
+                    qtyMap,
+                    freeCount
+                  );
 
                   return (
                     <div
@@ -1102,7 +1176,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                         </span>
                         {freeCount > 0 && (
                           <span className="ml-auto text-[10.5px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-1.5 py-0.5 leading-none">
-                            {selectedInGroup.size}/{freeCount} gratis
+                            {selectedCount}/{freeCount} gratis
                           </span>
                         )}
                       </div>
@@ -1112,39 +1186,76 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                         </p>
                       )}
                       {visibleOptions.map((opt) => {
-                        const isSelected = selectedInGroup.has(opt.id);
-                        const sortedSel = Array.from(selectedInGroup)
-                          .map((id) => visibleOptions.find((o) => o.id === id))
-                          .filter(Boolean)
-                          .sort((a, b) => (a!.priceExtra ?? 0) - (b!.priceExtra ?? 0));
-                        const freeIds = new Set(sortedSel.slice(0, freeCount).map((o) => o!.id));
-                        const isFree = isSelected && freeIds.has(opt.id);
+                        const optQty = qtyMap.get(opt.id) ?? 0;
+                        const isSelected = optQty > 0;
                         const ov = modifierOverrideByOptionId.get(opt.id);
                         const extra = ov?.extraOverride != null ? Number(ov.extraOverride) : (opt.priceExtra ?? 0);
+                        const freeUnits = freeUnitsByOptionId.get(opt.id) ?? 0;
+                        const paidUnits = optQty - freeUnits;
+                        const isFullyFree = isSelected && freeUnits >= optQty;
 
                         return (
                           <div
                             key={opt.id}
-                            onClick={() => toggleSlotOption(group.id, opt.id, maxSel)}
+                            onClick={() => {
+                              if (!usesStepper) { toggleSlotOption(group.id, opt.id, maxSel); return; }
+                              // Tap en la fila: 0→1, 1→0. Con 2+ solo +/- lo modifican.
+                              if (optQty === 0) setSlotOptionQty(group, opt.id, 1);
+                              else if (optQty === 1) setSlotOptionQty(group, opt.id, 0);
+                            }}
                             role={isRadio ? "radio" : "checkbox"}
                             aria-checked={isSelected}
                             className={[
-                              "w-full rounded-lg border px-3 py-2 flex items-center justify-between transition-colors",
-                              !usesStepper ? "cursor-pointer" : "",
+                              "w-full rounded-lg border px-3 py-2 flex items-center justify-between transition-colors cursor-pointer",
                               isSelected
                                 ? "border-[var(--brand-color)] bg-[#fff5f2]"
                                 : "border-transparent hover:bg-black/5",
                             ].join(" ")}
                           >
                             <div className="flex items-center gap-3">
-                              {!isRadio && (
+                              {!isRadio && !usesStepper && (
                                 <Checkbox checked={isSelected} onCheckedChange={() => {}} className="pointer-events-none" />
                               )}
                               <span className="text-sm">{opt.name}</span>
                             </div>
-                            <span className={`text-sm font-semibold ${isFree ? "line-through text-muted-foreground" : ""}`}>
-                              {extra > 0 ? `+${fmt(extra)}` : isRadio ? "" : "Gratis"}
-                            </span>
+                            {usesStepper ? (
+                              <div className="flex items-center gap-2">
+                                {extra > 0 && (
+                                  <span className="text-sm font-semibold text-slate-500">
+                                    {freeUnits > 0 && (
+                                      <span className="text-emerald-600 mr-1">{freeUnits} gratis</span>
+                                    )}
+                                    {paidUnits > 0 && `+${fmt(extra)}/u`}
+                                  </span>
+                                )}
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); setSlotOptionQty(group, opt.id, optQty - 1); }}
+                                    disabled={optQty === 0}
+                                    className="h-7 w-7 flex items-center justify-center rounded-full border border-slate-200 text-slate-600 disabled:opacity-30 hover:bg-slate-50 active:bg-slate-100 text-base leading-none"
+                                  >
+                                    −
+                                  </button>
+                                  <span className="w-7 text-center text-sm font-semibold">{optQty}</span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); setSlotOptionQty(group, opt.id, optQty + 1); }}
+                                    disabled={
+                                      (typeof opt.maxQuantity === "number" && opt.maxQuantity !== null && optQty >= opt.maxQuantity) ||
+                                      (optQty === 0 && maxSel !== 0 && selectedCount >= maxSel)
+                                    }
+                                    className="h-7 w-7 flex items-center justify-center rounded-full border border-slate-200 text-slate-600 disabled:opacity-30 hover:bg-slate-50 active:bg-slate-100 text-base leading-none"
+                                  >
+                                    ＋
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <span className={`text-sm font-semibold ${isFullyFree ? "line-through text-muted-foreground" : ""}`}>
+                                {extra > 0 ? `+${fmt(extra)}` : isRadio ? "" : "Gratis"}
+                              </span>
+                            )}
                           </div>
                         );
                       })}
@@ -1508,12 +1619,16 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                   return (
                     <div
                       key={String(o.id)}
-                      onClick={!usesStepper ? () => toggleOption(group, o.id) : undefined}
-                      role={!usesStepper ? (isRadio ? "radio" : "checkbox") : undefined}
-                      aria-checked={!usesStepper ? active : undefined}
+                      onClick={() => {
+                        if (!usesStepper) { toggleOption(group, o.id); return; }
+                        // Tap en la fila: 0→1, 1→0. Con 2+ solo +/- lo modifican.
+                        if (optQty === 0) setOptionQty(group, o.id, 1);
+                        else if (optQty === 1) setOptionQty(group, o.id, 0);
+                      }}
+                      role={isRadio ? "radio" : "checkbox"}
+                      aria-checked={active}
                       className={[
-                        "w-full rounded-lg border px-3 py-2 flex items-center justify-between transition-colors",
-                        !usesStepper ? "cursor-pointer" : "",
+                        "w-full rounded-lg border px-3 py-2 flex items-center justify-between transition-colors cursor-pointer",
                         active
                           ? "border-[var(--brand-color)] bg-[#fff5f2]"
                           : "border-transparent hover:bg-black/5",

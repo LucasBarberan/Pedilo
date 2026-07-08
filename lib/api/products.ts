@@ -58,6 +58,9 @@ export type Product = {
   promoLabel?: string | null;
   basePrice?: number | null;
   activePromoLabels?: string[];
+  // Opciones gratuitas incluidas por grupo cuando el producto se vende suelto
+  // (independiente de la regla que ese mismo producto tenga dentro de un combo).
+  modifierGroupRules?: Array<{ modifierGroupId: number; includedFreeCount: number }>;
 };
 
 type FetchProductsOptions = {
@@ -234,6 +237,7 @@ export function normalizeProduct(raw: any): Product | null {
     promoLabel,
     basePrice,
     activePromoLabels: Array.isArray(raw.activePromoLabels) ? raw.activePromoLabels : undefined,
+    modifierGroupRules: Array.isArray(raw.modifierGroupRules) ? raw.modifierGroupRules : undefined,
   };
 }
 

@@ -417,6 +417,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                 combo_item_id: Number(ci.comboItemId),
                 slot_index: Number(ci.slotIndex ?? 0),
                 option_ids: Array.isArray(ci.optionIds) ? ci.optionIds.map(Number) : [],
+                ...(Array.isArray(ci.options) && ci.options.length > 0 ? { options: ci.options } : {}),
                 ...(ci.comment?.trim() ? { comment: ci.comment.trim() } : {}),
               }));
 
@@ -444,9 +445,12 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                 quantity: itemQty,
               };
               if (ci.isMain && it.selectedOptions && it.selectedOptions.length > 0) {
-                itemPayload.option_ids = it.selectedOptions.map((opt: any) => Number(opt.productOptionId));
+                itemPayload.options = it.selectedOptions.map((opt: any) => ({
+                  id: Number(opt.productOptionId),
+                  qty: Number(opt.qty ?? 1),
+                }));
               } else if (ci.option?.id) {
-                itemPayload.option_ids = [Number(ci.option.id)];
+                itemPayload.options = [{ id: Number(ci.option.id), qty: 1 }];
               }
               if (ci.isMain && it.observations?.trim()) {
                 itemPayload.comment = it.observations.trim();
@@ -469,12 +473,15 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           };
           if (it.observations?.trim()) payload.comment = it.observations.trim();
 
-          // Enviar opciones seleccionadas
+          // Enviar opciones seleccionadas (con cantidad — necesario para grupos allowsQuantity)
           if (it.selectedOptions && it.selectedOptions.length > 0) {
-            payload.option_ids = it.selectedOptions.map(opt => Number(opt.productOptionId));
+            payload.options = it.selectedOptions.map(opt => ({
+              id: Number(opt.productOptionId),
+              qty: Number((opt as any).qty ?? 1),
+            }));
           } else if (it.productOptionId) {
             // Fallback para compatibilidad
-            payload.option_ids = [Number(it.productOptionId)];
+            payload.options = [{ id: Number(it.productOptionId), qty: 1 }];
           }
 
           itemsForApi.push(payload);
@@ -528,11 +535,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         fulfillment,              // "DELIVERY" | "TAKEAWAY"
       };
 
-      // limpieza defensiva (sin 'options' y sin undefined)
+      // limpieza defensiva (sin undefined). OJO: "options" ({id,qty}[]) es un campo
+      // válido que el backend espera (necesario para grupos allowsQuantity / cantidad
+      // por opción) — no debe filtrarse acá.
       const apiBody = JSON.parse(
-        JSON.stringify(apiBodyRaw, (k, v) =>
-          k === "options" || v === undefined ? undefined : v
-        )
+        JSON.stringify(apiBodyRaw, (_k, v) => (v === undefined ? undefined : v))
       );
 
       console.log("POST /orders body =>\n", JSON.stringify(apiBody, null, 2));

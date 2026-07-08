@@ -35,6 +35,7 @@ export function useCartRefresh(): {
                 combo_item_id: Number(c.comboItemId),
                 slot_index: Number(c.slotIndex ?? 0),
                 option_ids: Array.isArray(c.optionIds) ? c.optionIds.map(Number) : [],
+                options: Array.isArray(c.options) ? c.options : undefined,
               }));
             return { type: "COMBO" as const, comboId: Number(item.id), qty: Number(item.quantity), slots };
           }
@@ -43,12 +44,14 @@ export function useCartRefresh(): {
           const quoteItems: QuoteComboItem[] = [];
           const mainCI = comboItems.find((c) => c.isMain);
           if (mainCI?.productId) {
+            const mainOptions = (item.selectedOptions ?? [])
+              .map((o) => ({ id: Number(o.productOptionId), qty: Number(o.qty ?? 1) }))
+              .filter((o) => Number.isFinite(o.id) && o.id > 0);
             quoteItems.push({
               productId: Number(mainCI.productId),
               quantity:  Number(mainCI.qty ?? 1),
-              optionIds: (item.selectedOptions ?? [])
-                .map((o) => Number(o.productOptionId))
-                .filter((id) => Number.isFinite(id) && id > 0),
+              optionIds: mainOptions.map((o) => o.id),
+              options: mainOptions,
             });
           }
           for (const ci of comboItems.filter((c) => !c.isMain && !c.isInclusion)) {
@@ -60,11 +63,16 @@ export function useCartRefresh(): {
 
           return { type: "COMBO" as const, comboId: Number(item.id), qty: Number(item.quantity), items: quoteItems };
         } else {
+          const options = (item.selectedOptions ?? []).map((o) => ({
+            id: Number(o.productOptionId),
+            qty: Number(o.qty ?? 1),
+          }));
           return {
             type: "PRODUCT" as const,
             productId: item.id,
             qty: item.quantity,
-            optionIds: (item.selectedOptions ?? []).map((o) => o.productOptionId),
+            optionIds: options.map((o) => o.id),
+            options,
             comment: item.observations,
           };
         }

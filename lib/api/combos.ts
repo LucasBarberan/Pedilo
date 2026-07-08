@@ -68,6 +68,8 @@ export type ComboSlotExpanded = {
         name: string;
         priceExtra?: number | null;
         isDefault?: boolean;
+        sortOrder?: number;
+        maxQuantity?: number | null;
       }>;
     }>;
   };
@@ -77,7 +79,8 @@ export type ComboSlotExpanded = {
 export type SlotSelection = {
   comboItemId: number;
   slotIndex: number;
-  selectedByGroup: Map<number, Set<number>>;
+  // optionId -> cantidad (0 = no seleccionada, se mantiene la entrada para no perder el "toggle off").
+  selectedByGroup: Map<number, Map<number, number>>;
   comment: string;
 };
 

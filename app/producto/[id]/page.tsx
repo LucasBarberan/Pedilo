@@ -28,6 +28,32 @@ const fmt = (n?: number | string) => {
 const toNum = (v: unknown) =>
   typeof v === "string" ? Number(v) : typeof v === "number" ? v : 0;
 
+// Reparte includedFreeCount entre las opciones seleccionadas de un grupo: las de menor
+// precio_extra consumen el cupo gratis primero (empate por sortOrder), igual que
+// buildComboOptionSnapshotsWithFreeCount en el Backend. Devuelve unidades gratis por optionId.
+// (misma lógica que components/combo-page.tsx -> computeFreeUnitsByOption)
+function computeFreeUnitsByOption(
+  group: ModifierGroup,
+  qtyMap: Map<number, number>,
+  freeCount: number
+): Map<number, number> {
+  const freeUnitsByOptionId = new Map<number, number>();
+  if (freeCount <= 0) return freeUnitsByOptionId;
+
+  const selected = group.options
+    .map((o) => ({ id: o.id, qty: qtyMap.get(o.id) ?? 0, precioExtra: toNum(o.precio_extra), sortOrder: o.sortOrder ?? 0 }))
+    .filter((o) => o.qty > 0)
+    .sort((a, b) => a.precioExtra - b.precioExtra || a.sortOrder - b.sortOrder);
+
+  let freeUnitsUsed = 0;
+  for (const o of selected) {
+    const freeForThis = Math.max(0, Math.min(o.qty, freeCount - freeUnitsUsed));
+    freeUnitsUsed += freeForThis;
+    if (freeForThis > 0) freeUnitsByOptionId.set(o.id, freeForThis);
+  }
+  return freeUnitsByOptionId;
+}
+
 // ------- Warm cache helpers (sessionStorage) -------
 const warmKey = (id: string | number) => `prefetch:product:${id}`;
 function readWarmProduct(id: string | number): Product | null {
@@ -222,6 +248,10 @@ export default function ProductDetailPage() {
   // Grupos de modificadores del producto (ya vienen ordenados y filtrados por isActive)
   const groups = useMemo(() => prod?.modifierGroups ?? [], [prod]);
 
+  // Reglas de includedFreeCount del producto suelto (independientes de la regla que
+  // este mismo producto pueda tener dentro de un combo).
+  const modifierGroupRules = useMemo(() => prod?.modifierGroupRules ?? [], [prod]);
+
   // Opciones seleccionadas con cantidad (todos los grupos)
   const allSelectedWithQty = useMemo(() => {
     const result: { id: number; qty: number }[] = [];
@@ -334,7 +364,23 @@ export default function ProductDetailPage() {
 
   // cálculo local (fallback)
   const base = toNum(prod?.price);
-  const optionsExtraTotal = selectedEntries.reduce((sum, { option, qty: optQty }) => sum + toNum(option.precio_extra) * optQty, 0);
+  // Descuenta includedFreeCount por grupo (mismas reglas que el Backend) antes de sumar
+  // el extra de cada opción — si no, el subtotal en vivo cobraría opciones que son gratis.
+  const optionsExtraTotal = useMemo(() => {
+    let sum = 0;
+    for (const group of groups) {
+      const qtyMap = selectedByGroup.get(group.id) ?? new Map<number, number>();
+      const rule = modifierGroupRules.find((r) => r.modifierGroupId === group.id);
+      const freeUnitsByOptionId = computeFreeUnitsByOption(group, qtyMap, rule?.includedFreeCount ?? 0);
+      for (const opt of group.options) {
+        const optQty = qtyMap.get(opt.id) ?? 0;
+        if (optQty <= 0) continue;
+        const paidUnits = optQty - (freeUnitsByOptionId.get(opt.id) ?? 0);
+        sum += toNum(opt.precio_extra) * paidUnits;
+      }
+    }
+    return sum;
+  }, [groups, selectedByGroup, modifierGroupRules]);
   const localTotal = (base + optionsExtraTotal) * qty;
 
   // 🔁 Cotizar en el back (promos) cada vez que cambian qty / opciones / producto
@@ -527,6 +573,10 @@ export default function ProductDetailPage() {
               const isRadio = group.maxSelections === 1;
               const qtyMap = selectedByGroup.get(group.id) ?? new Map<number, number>();
               const hasError = missingModifierGroupId === group.id;
+              const rule = modifierGroupRules.find((r) => r.modifierGroupId === group.id);
+              const freeCount = rule?.includedFreeCount ?? 0;
+              const freeUnitsByOptionId = computeFreeUnitsByOption(group, qtyMap, freeCount);
+              const selectedCount = Array.from(qtyMap.values()).filter((q) => q > 0).length;
 
               return (
                 <div
@@ -550,21 +600,33 @@ export default function ProductDetailPage() {
                           ? "(opcional - sin límite)"
                           : `(opcional - hasta ${group.maxSelections})`}
                     </span>
+                    {freeCount > 0 && (
+                      <span className="ml-auto text-[10.5px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-1.5 py-0.5 leading-none">
+                        {selectedCount}/{freeCount} gratis
+                      </span>
+                    )}
                   </div>
                   {group.options.map((o) => {
                     const optQty = qtyMap.get(o.id) ?? 0;
                     const active = optQty > 0;
                     const plus = toNum(o.precio_extra);
                     const usesStepper = !!group.allowsQuantity;
+                    const freeUnits = freeUnitsByOptionId.get(o.id) ?? 0;
+                    const paidUnits = optQty - freeUnits;
+                    const isFullyFree = active && freeUnits >= optQty;
                     return (
                       <div
                         key={String(o.id)}
-                        onClick={!usesStepper ? () => toggleOption(group, o.id) : undefined}
-                        role={!usesStepper ? (isRadio ? "radio" : "checkbox") : undefined}
-                        aria-checked={!usesStepper ? active : undefined}
+                        onClick={() => {
+                          if (!usesStepper) { toggleOption(group, o.id); return; }
+                          // Tap en la fila: 0→1, 1→0. Con 2+ solo +/- lo modifican.
+                          if (optQty === 0) setOptionQty(group, o.id, 1);
+                          else if (optQty === 1) setOptionQty(group, o.id, 0);
+                        }}
+                        role={isRadio ? "radio" : "checkbox"}
+                        aria-checked={active}
                         className={[
-                          "w-full rounded-lg border px-3 py-2 flex items-center justify-between transition-colors",
-                          !usesStepper ? "cursor-pointer" : "",
+                          "w-full rounded-lg border px-3 py-2 flex items-center justify-between transition-colors cursor-pointer",
                           active
                             ? "border-[var(--brand-color)] bg-[#fff5f2]"
                             : "border-transparent hover:bg-black/5",
@@ -586,7 +648,12 @@ export default function ProductDetailPage() {
                         {usesStepper ? (
                           <div className="flex items-center gap-2">
                             {plus > 0 && (
-                              <span className="text-sm font-semibold text-slate-500">+{fmt(plus)}/u</span>
+                              <span className="text-sm font-semibold text-slate-500">
+                                {freeUnits > 0 && (
+                                  <span className="text-emerald-600 mr-1">{freeUnits} gratis</span>
+                                )}
+                                {paidUnits > 0 && `+${fmt(plus)}/u`}
+                              </span>
                             )}
                             <div className="flex items-center gap-1">
                               <button
@@ -612,7 +679,7 @@ export default function ProductDetailPage() {
                             </div>
                           </div>
                         ) : (
-                          <span className="text-sm font-semibold">
+                          <span className={`text-sm font-semibold ${isFullyFree ? "line-through text-muted-foreground" : ""}`}>
                             {plus ? `+${fmt(plus)}` : isRadio ? "" : "Gratis"}
                           </span>
                         )}
