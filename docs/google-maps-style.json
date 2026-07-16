@@ -1,0 +1,30 @@
+{
+  "styles": [
+    {
+      "id": "pointOfInterest",
+      "geometry": { "visible": false },
+      "label": { "visible": false }
+    },
+    {
+      "id": "infrastructure.transitStation",
+      "geometry": { "visible": false },
+      "label": { "visible": false }
+    },
+    {
+      "id": "infrastructure.railwayTrack",
+      "geometry": { "visible": false }
+    },
+    {
+      "id": "political.city",
+      "label": { "visible": false }
+    },
+    {
+      "id": "political.stateOrProvince",
+      "label": { "visible": false }
+    },
+    {
+      "id": "political.countryOrRegion",
+      "label": { "visible": false }
+    }
+  ]
+}

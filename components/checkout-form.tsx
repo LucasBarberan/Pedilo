@@ -7,11 +7,16 @@ import { useRef, useEffect, useMemo, useState } from "react";
 import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
 import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import { useCartRefresh } from "@/hooks/useCartRefresh";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
+import { DeliveryMap } from "@/components/delivery-map";
+import { fetchDeliveryQuote, type DeliveryQuoteResponse } from "@/lib/api/delivery";
 
 type Customer = {
   name: string;
   phone: string;
   address: string;
+  addressUnit: string;
+  placeId?: string;
 };
 
 type Props = {
@@ -51,7 +56,15 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     name: "",
     phone: "",
     address: "",
+    addressUnit: "",
   });
+
+  // Cotización de envío por distancia real (delivery-pricing). El precio
+  // mostrado acá es solo informativo — el Backend recalcula todo al confirmar
+  // el pedido (server-authoritative). `null` = todavía no se cotizó nada.
+  const [deliveryQuote, setDeliveryQuote] = useState<DeliveryQuoteResponse | null>(null);
+  const [quotingDelivery, setQuotingDelivery] = useState(false);
+  const [deliveryQuoteError, setDeliveryQuoteError] = useState<string>("");
 
   const [deliveryMethod, setDeliveryMethod] = useState<"delivery" | "pickup" | null>(
     DELIVERY_ENABLED ? null : "pickup"
@@ -99,15 +112,27 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const [formError, setFormError] = useState<string>("");
   const nameRef = useRef<HTMLInputElement>(null);
   const phoneRef = useRef<HTMLInputElement>(null);
-  const addressRef = useRef<HTMLInputElement>(null);
+  const addressRef = useRef<HTMLInputElement | null>(null);
 
   const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
 
+  // Precio de envío a mostrar: prioriza la cotización real por distancia.
+  // Si no hay cotización, la dirección está fuera de cobertura, o el servicio
+  // de ruteo falló, cae al fee fijo configurado ("a coordinar con el local"
+  // si DELIVERY_FEE es 0). El Backend vuelve a calcular todo al confirmar.
+  const resolvedDeliveryPrice = useMemo(() => {
+    if (deliveryQuote?.withinCoverage && deliveryQuote.price != null) {
+      return deliveryQuote.price;
+    }
+    return DELIVERY_FEE;
+  }, [deliveryQuote, DELIVERY_FEE]);
+
+  const deliveryOutOfCoverage = deliveryQuote != null && !deliveryQuote.withinCoverage;
 
   const totalWithDelivery = useMemo(() => {
-    return deliveryMethod === "delivery" ? total + DELIVERY_FEE : total;
-  }, [total, deliveryMethod, DELIVERY_FEE]);
+    return deliveryMethod === "delivery" ? total + resolvedDeliveryPrice : total;
+  }, [total, deliveryMethod, resolvedDeliveryPrice]);
   const CHECKOUT_NOTES_MAX = 50; // o el número que prefieras
 
 
@@ -149,15 +174,58 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     });
   }, [items]);
 
+  /** Se dispara cuando el usuario elige una sugerencia del autocomplete de Google. */
+  async function handleAddressSelect(selection: { address: string; placeId: string }) {
+    // No pisamos customer.address con selection.address acá — el input ya
+    // muestra el texto elegido (vía onChange, disparado antes que esta
+    // función) y volver a setearlo con el formattedAddress de Google
+    // causaba un "salto" visual si difería levemente del texto tipeado.
+    setCustomer((prev) => ({ ...prev, placeId: selection.placeId }));
+    setDeliveryQuoteError("");
+    setQuotingDelivery(true);
+    try {
+      const quote = await fetchDeliveryQuote({ placeId: selection.placeId });
+      setDeliveryQuote(quote);
+    } catch {
+      setDeliveryQuote(null);
+      setDeliveryQuoteError("No pudimos calcular el envío para esa dirección. Se coordina con el local.");
+    } finally {
+      setQuotingDelivery(false);
+    }
+  }
 
-
+  /**
+   * Se dispara al soltar el pin arrastrado en el mapa. A diferencia de
+   * handleAddressSelect, acá SÍ actualizamos customer.address con lo que
+   * devuelve el Backend — no hay ningún texto "ya visto" que preservar, el
+   * pin se movió a un punto que todavía no tiene descripción en pantalla.
+   * Un punto arrastrado a mano no tiene placeId (Google no lo genera para
+   * coordenadas arbitrarias), así que se cotiza con latitude/longitude.
+   */
+  async function handlePinDrag(location: { latitude: number; longitude: number }) {
+    setCustomer((prev) => ({ ...prev, placeId: undefined }));
+    setDeliveryQuoteError("");
+    setQuotingDelivery(true);
+    try {
+      const quote = await fetchDeliveryQuote(location);
+      setDeliveryQuote(quote);
+      if (quote.addressResolved) {
+        setCustomer((prev) => ({ ...prev, address: quote.addressResolved! }));
+      }
+    } catch {
+      setDeliveryQuote(null);
+      setDeliveryQuoteError("No pudimos calcular el envío para esa ubicación. Se coordina con el local.");
+    } finally {
+      setQuotingDelivery(false);
+    }
+  }
 
 
   // Cargar / guardar datos del cliente en localStorage
   useEffect(() => {
     try {
       const raw = localStorage.getItem("checkout.customer");
-      if (raw) setCustomer(JSON.parse(raw));
+      if (raw) setCustomer((prev) => ({ ...prev, ...JSON.parse(raw) }));
     } catch { }
   }, []);
   useEffect(() => {
@@ -239,7 +307,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     lines.push(`*Cliente:* ${customer.name}`);
     if (customer.phone?.trim()) lines.push(`*Tel:* ${customer.phone}`);
     if (deliveryMethod === "delivery" && customer.address?.trim()) {
-      lines.push(`*Dirección:* ${customer.address}`);
+      const unit = customer.addressUnit?.trim();
+      lines.push(`*Dirección:* ${customer.address}${unit ? ` (${unit})` : ""}`);
     }
     lines.push(
       `*Entrega:* ${deliveryMethod === "delivery" ? "Delivery" : "Retiro"}`
@@ -311,11 +380,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
     // Prioridad: total del quote (con promo) > total confirmado por API > total del carrito
     const baseTotal = cartSummary?.total ?? confirmedTotal ?? total;
-    const confirmedTotalWithDelivery = Math.round(deliveryMethod === "delivery" ? baseTotal + DELIVERY_FEE : baseTotal);
+    const confirmedTotalWithDelivery = Math.round(deliveryMethod === "delivery" ? baseTotal + resolvedDeliveryPrice : baseTotal);
 
     if (deliveryMethod === "delivery") {
       lines.push(`*Subtotal:* ${fmt(Math.round(baseTotal))}`);
-      lines.push(`*Envío:* ${DELIVERY_FEE > 0 ? fmt(DELIVERY_FEE) : "A coordinar con el local"}`);
+      lines.push(`*Envío:* ${deliveryQuote?.withinCoverage && deliveryQuote.price != null ? fmt(deliveryQuote.price) : (resolvedDeliveryPrice > 0 ? fmt(resolvedDeliveryPrice) : "A coordinar con el local")}`);
     }
 
     lines.push(`*Total:* ${fmt(confirmedTotalWithDelivery)}`);
@@ -494,17 +563,28 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         SCHEDULED_ORDERS_ENABLED && scheduleLater && scheduledTime
           ? scheduledTimeToISO(scheduledTime)
           : null;
-      // 4) Delivery info (siempre provider WEB)
+      // 4) Delivery info (siempre provider WEB). El Backend recalcula
+      // distancia/precio de envío a partir de placeId — nunca confía en un
+      // precio mostrado en esta pantalla (ver delivery-pricing design.md).
+      // addressText incluye el piso/depto solo como dato de display para el
+      // local — el geocoding/cotización usa placeId, que resuelve la
+      // dirección de calle, no el piso/depto.
+      const addressUnitTrimmed = customer.addressUnit.trim();
+      const fullAddressText = addressUnitTrimmed
+        ? `${customer.address.trim()} (${addressUnitTrimmed})`
+        : customer.address.trim();
+
       const delivery_info =
         deliveryMethod === "delivery"
           ? {
             customerName: customer.name.trim(),
             customerPhone: phoneNormalized,
-            addressText: customer.address.trim(),
+            addressText: fullAddressText,
             notes: notes?.trim() || null,
             scheduledAt: scheduledAtISO,
             provider: "WEB",
             mapUrl: null,
+            placeId: customer.placeId ?? null,
           }
           : {
             customerName: customer.name.trim(),
@@ -725,11 +805,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               <span className="text-sm font-medium">Retiro en local</span>
             </div>
           )}
-          {deliveryMethod === "delivery" && (
+          {deliveryMethod === "delivery" && !deliveryQuote && (
             <p className="mt-2 text-xs text-muted-foreground">
-              {DELIVERY_FEE > 0
-                ? `Se agregará un costo de envío de ${fmt(DELIVERY_FEE)} al total.`
-                : "El costo de envío se coordina con el local."}
+              El costo de envío se calcula según la distancia a tu domicilio.
             </p>
           )}
 
@@ -842,17 +920,45 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           {deliveryMethod === "delivery" && (
             <>
               <label className="block text-sm mb-1">Dirección</label>
-              <input
-                ref={addressRef}
-                className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
+              <AddressAutocomplete
+                onInputElement={(el) => { addressRef.current = el; }}
                 value={customer.address}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setCustomer({ ...customer, address: v });
+                onChange={(v) => {
+                  setCustomer((prev) => ({ ...prev, address: v, placeId: undefined }));
+                  setDeliveryQuote(null);
+                  setDeliveryQuoteError("");
                   if (formError && v.trim() && /direcci[oó]n/i.test(formError)) setFormError("");
                 }}
-                placeholder="Calle 123, Piso/Depto"
+                onPlaceSelect={handleAddressSelect}
+                className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
+                placeholder="Empezá a escribir tu dirección..."
               />
+              {!quotingDelivery && deliveryOutOfCoverage && (
+                <p className="mt-1 text-xs text-amber-600">
+                  Esa dirección está fuera de nuestra zona de cobertura. El envío se coordina con el local.
+                </p>
+              )}
+              {!quotingDelivery && deliveryQuoteError && (
+                <p className="mt-1 text-xs text-amber-600">{deliveryQuoteError}</p>
+              )}
+
+              <label className="block text-sm mb-1 mt-3">Piso / Depto (opcional)</label>
+              <input
+                type="text"
+                value={customer.addressUnit}
+                onChange={(e) => setCustomer((prev) => ({ ...prev, addressUnit: e.target.value }))}
+                className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
+                placeholder="Ej: Piso 3, Depto B"
+              />
+
+              {deliveryQuote?.destinationLocation && (
+                <div className="mt-3">
+                  <DeliveryMap
+                    destinationLocation={deliveryQuote.destinationLocation}
+                    onLocationChange={handlePinDrag}
+                  />
+                </div>
+              )}
             </>
           )}
         </div>
@@ -1025,7 +1131,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           <div className="flex items-center justify-between border-t mt-3 pt-3 bg-white/0">
             <div className="w-full space-y-1.5">
               {/* Subtotal sin promo — solo si hay promo o delivery */}
-              {(cartSummary || (deliveryMethod === "delivery" && DELIVERY_FEE > 0)) && (
+              {(cartSummary || (deliveryMethod === "delivery" && resolvedDeliveryPrice > 0)) && (
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                   <span>Subtotal</span>
                   <span>{fmt(cartSummary ? cartSummary.originalSubtotal : total)}</span>
@@ -1042,7 +1148,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               {deliveryMethod === "delivery" && (
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                   <span>Envío</span>
-                  <span>{DELIVERY_FEE > 0 ? fmt(DELIVERY_FEE) : "A coordinar"}</span>
+                  <span>
+                    {deliveryQuote?.withinCoverage && deliveryQuote.price != null
+                      ? fmt(deliveryQuote.price)
+                      : resolvedDeliveryPrice > 0
+                        ? fmt(resolvedDeliveryPrice)
+                        : "A coordinar"}
+                  </span>
                 </div>
               )}
               <div className="flex items-center justify-between">
