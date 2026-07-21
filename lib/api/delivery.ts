@@ -22,6 +22,38 @@ export type DeliveryQuoteResponse = {
 
 const API = process.env.NEXT_PUBLIC_API_URL; // ej: http://localhost:5000/api
 
+let _configCache: boolean | null = null;
+let _configPromise: Promise<boolean> | null = null;
+
+/**
+ * Consulta si el módulo DELIVERY_PRICING está habilitado. Se llama ANTES de
+ * montar el autocomplete de Google Places — con el módulo apagado no hay que
+ * gastar ninguna cuota de Google (ni Places client-side, ni Geocoding/Routes
+ * server-side), ver openspec/changes/delivery-pricing/design.md punto 6.
+ */
+export async function fetchDeliveryPricingEnabled(): Promise<boolean> {
+  if (_configCache !== null) return _configCache;
+  if (_configPromise) return _configPromise;
+
+  _configPromise = (async () => {
+    try {
+      if (!API) return false;
+      const res = await fetch(`${API}/delivery/config`, { cache: "no-store" });
+      if (!res.ok) return false;
+      const body = await res.json();
+      const enabled = Boolean(body?.data?.enabled);
+      _configCache = enabled;
+      return enabled;
+    } catch {
+      return false;
+    } finally {
+      _configPromise = null;
+    }
+  })();
+
+  return _configPromise;
+}
+
 /**
  * Cotiza el costo de envío según distancia real al comercio. El precio
  * devuelto acá es solo para mostrarlo en pantalla — el Backend vuelve a

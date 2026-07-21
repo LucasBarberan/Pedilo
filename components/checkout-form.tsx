@@ -9,7 +9,7 @@ import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import { useCartRefresh } from "@/hooks/useCartRefresh";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { DeliveryMap } from "@/components/delivery-map";
-import { fetchDeliveryQuote, type DeliveryQuoteResponse } from "@/lib/api/delivery";
+import { fetchDeliveryQuote, fetchDeliveryPricingEnabled, type DeliveryQuoteResponse } from "@/lib/api/delivery";
 
 type Customer = {
   name: string;
@@ -65,6 +65,14 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const [deliveryQuote, setDeliveryQuote] = useState<DeliveryQuoteResponse | null>(null);
   const [quotingDelivery, setQuotingDelivery] = useState(false);
   const [deliveryQuoteError, setDeliveryQuoteError] = useState<string>("");
+
+  // Módulo DELIVERY_PRICING: mientras no se confirme habilitado, no se monta
+  // el autocomplete ni se llama a /api/delivery/quote — se usa directo el fee
+  // fijo (mismo comportamiento que si la dirección estuviera fuera de cobertura).
+  const [deliveryPricingEnabled, setDeliveryPricingEnabled] = useState(false);
+  useEffect(() => {
+    fetchDeliveryPricingEnabled().then(setDeliveryPricingEnabled);
+  }, []);
 
   const [deliveryMethod, setDeliveryMethod] = useState<"delivery" | "pickup" | null>(
     DELIVERY_ENABLED ? null : "pickup"
@@ -920,26 +928,46 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           {deliveryMethod === "delivery" && (
             <>
               <label className="block text-sm mb-1">Dirección</label>
-              <AddressAutocomplete
-                onInputElement={(el) => { addressRef.current = el; }}
-                value={customer.address}
-                onChange={(v) => {
-                  setCustomer((prev) => ({ ...prev, address: v, placeId: undefined }));
-                  setDeliveryQuote(null);
-                  setDeliveryQuoteError("");
-                  if (formError && v.trim() && /direcci[oó]n/i.test(formError)) setFormError("");
-                }}
-                onPlaceSelect={handleAddressSelect}
-                className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
-                placeholder="Empezá a escribir tu dirección..."
-              />
-              {!quotingDelivery && deliveryOutOfCoverage && (
-                <p className="mt-1 text-xs text-amber-600">
-                  Esa dirección está fuera de nuestra zona de cobertura. El envío se coordina con el local.
-                </p>
-              )}
-              {!quotingDelivery && deliveryQuoteError && (
-                <p className="mt-1 text-xs text-amber-600">{deliveryQuoteError}</p>
+              {deliveryPricingEnabled ? (
+                <>
+                  <AddressAutocomplete
+                    onInputElement={(el) => { addressRef.current = el; }}
+                    value={customer.address}
+                    onChange={(v) => {
+                      setCustomer((prev) => ({ ...prev, address: v, placeId: undefined }));
+                      setDeliveryQuote(null);
+                      setDeliveryQuoteError("");
+                      if (formError && v.trim() && /direcci[oó]n/i.test(formError)) setFormError("");
+                    }}
+                    onPlaceSelect={handleAddressSelect}
+                    className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
+                    placeholder="Empezá a escribir tu dirección..."
+                  />
+                  {!quotingDelivery && deliveryOutOfCoverage && (
+                    <p className="mt-1 text-xs text-amber-600">
+                      Esa dirección está fuera de nuestra zona de cobertura. El envío se coordina con el local.
+                    </p>
+                  )}
+                  {!quotingDelivery && deliveryQuoteError && (
+                    <p className="mt-1 text-xs text-amber-600">{deliveryQuoteError}</p>
+                  )}
+                </>
+              ) : (
+                // Módulo DELIVERY_PRICING apagado: input de texto libre, sin
+                // autocomplete ni cotización — fee fijo (resolvedDeliveryPrice
+                // ya cae a DELIVERY_FEE cuando deliveryQuote es null).
+                <input
+                  ref={addressRef}
+                  type="text"
+                  value={customer.address}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setCustomer((prev) => ({ ...prev, address: v, placeId: undefined }));
+                    if (formError && v.trim() && /direcci[oó]n/i.test(formError)) setFormError("");
+                  }}
+                  className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
+                  placeholder="Ej: Av. Siempre Viva 742"
+                />
               )}
 
               <label className="block text-sm mb-1 mt-3">Piso / Depto (opcional)</label>
