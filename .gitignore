@@ -18,6 +18,7 @@ yarn-error.log*
 
 # env files
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -25,3 +26,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+docker-compose.yml
+dockerfile
+
+# cualquier carpeta que empiece con "." (en cualquier nivel del árbol)
+.*/

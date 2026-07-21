@@ -15,7 +15,7 @@ export default function ClosedBanner() {
   const pos = status.pos;
 
   const fmtTime = (d: Date) =>
-    d.toLocaleTimeString("es-AR", { timeZone: tz, hour: "2-digit", minute: "2-digit" });
+    d.toLocaleTimeString("es-AR", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false });
   const fmtWeekday = (d: Date) =>
     d.toLocaleDateString("es-AR", { timeZone: tz, weekday: "long" });
   const isSameLocalDate = (a: Date, b: Date) =>
@@ -46,22 +46,22 @@ export default function ClosedBanner() {
   if (web.reason === "CLOSED_DAY" || web.reason === "NO_RANGE") {
     extra =
       nextAt && web.nextChange?.willOpen
-        ? ` Hoy no abrimos. Volvemos el ${fmtWeekday(nextAt)} a las ${fmtTime(nextAt)}.`
-        : " Hoy no abrimos.";
+        ? ` Volvemos el ${fmtWeekday(nextAt)} a las ${fmtTime(nextAt)}.`
+        : "";
   } else if (web.reason === "EXCEPTION") {
     extra =
       nextAt && web.nextChange?.willOpen
         ? isSameLocalDate(now, nextAt)
           ? ` Abrimos a las ${fmtTime(nextAt)} (excepción).`
           : ` Abrimos el ${fmtWeekday(nextAt)} a las ${fmtTime(nextAt)} (excepción).`
-        : " Hoy no abrimos (excepción).";
+        : "";
   } else {
     extra =
       nextAt && web.nextChange?.willOpen
         ? isSameLocalDate(now, nextAt)
           ? ` Abrimos a las ${fmtTime(nextAt)}.`
           : ` Abrimos el ${fmtWeekday(nextAt)} a las ${fmtTime(nextAt)}.`
-        : " Cerrado por el momento.";
+        : "";
   }
 
   return (

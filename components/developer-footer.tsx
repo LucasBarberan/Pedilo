@@ -7,7 +7,7 @@ export function DeveloperFooter() {
   const DEVELOPER_NAME = "Keltron"
   const DEVELOPER_EMAIL = "soporte@keltron.app"
   const DEVELOPER_WHATSAPP = "3537604893"
-  const DEVELOPER_WEBSITE = "keltron.app"
+  const DEVELOPER_WEBSITE = "https://keltron.app"
 
   return (
     <footer className="mt-auto border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">

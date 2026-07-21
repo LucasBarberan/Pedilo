@@ -11,6 +11,7 @@ import BlockingLoader from "@/components/blocking-loader";
 import { fixImageUrl } from "@/lib/img";
 import { isAllowedForDelivery } from "@/lib/channel";
 import { fetchCombos, type Combo } from "@/lib/api/combos";
+import PromoBanner from "./promo-banner";
 
 const toNum = (v: unknown): number | null => {
   if (v === null || v === undefined) return null;
@@ -87,7 +88,7 @@ export default function CombosListScreen({ initialCombos, categoryName, category
       controller.abort();
     };
   }, [initialCombos.length, apiBase, categoryId, categoryName]);
-  
+
 
   const title = useMemo(() => {
     if (titleOverride) return titleOverride.toUpperCase();
@@ -138,10 +139,9 @@ export default function CombosListScreen({ initialCombos, categoryName, category
   return (
     <div className="bg-background">
       <SiteHeader showBack onBack={() => router.back()} onCartClick={() => router.push("/carrito")} />
-      <div className="h-[6px] w-full bg-white" />
       <ClosedBanner />
       <InfoBanner />
-
+      <PromoBanner apiBase={apiBase} />
       <div className="mx-auto w-full max-w-6xl px-4 pt-3 pb-2">
         <h2 className="text-2xl font-extrabold uppercase">{title}</h2>
       </div>
@@ -162,7 +162,7 @@ export default function CombosListScreen({ initialCombos, categoryName, category
             .map((combo) => {
               const base = toNum(combo.basePrice);
               const eff = toNum(combo.effectivePrice);
-              const hasPromo = base !== null && eff !== null && eff < base;
+              const showDiscount = !!combo.promoLabel && base !== null && eff !== null && eff < base;
               const imgSrc = buildMainImage(combo);
 
               return (
@@ -178,6 +178,11 @@ export default function CombosListScreen({ initialCombos, categoryName, category
                 >
                   <div className="relative h-20 w-24 rounded-lg overflow-hidden flex-shrink-0 bg-neutral-100">
                     <Image src={imgSrc} alt={combo.name} fill className="object-cover" unoptimized />
+                    {combo.promoLabel && (
+                      <span className="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-green-500 text-white rounded-full px-2 py-0.5 leading-none shadow">
+                        {combo.promoLabel}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex-1 min-w-0">
@@ -191,22 +196,15 @@ export default function CombosListScreen({ initialCombos, categoryName, category
                       </div>
                     ) : null}
 
-                    <div className="mt-2">
-                      {hasPromo ? (
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-sm text-muted-foreground line-through">
-                            {fmtPrice(base)}
-                          </span>
-                          <span className="text-lg font-extrabold text-[var(--brand-color)]">
-                            {fmtPrice(eff)}
-                          </span>
-                          <span className="text-[11px] text-green-700 font-medium">Promo</span>
-                        </div>
-                      ) : (
-                        <div className="text-lg font-extrabold text-[var(--brand-color)]">
-                          {fmtPrice(eff ?? base)}
-                        </div>
+                    <div className="mt-2 flex items-baseline gap-2">
+                      {showDiscount && (
+                        <span className="text-sm text-muted-foreground line-through">
+                          {fmtPrice(base)}
+                        </span>
                       )}
+                      <span className="text-lg font-extrabold text-[var(--brand-color)]">
+                        {fmtPrice(showDiscount ? eff : (eff ?? base))}
+                      </span>
                     </div>
                   </div>
                 </div>

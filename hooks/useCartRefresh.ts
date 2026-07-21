@@ -1,45 +1,104 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useCart } from "@/components/cart-context";
-import { quoteProduct } from "@/lib/pricing";
+import { useCart, type CartItem } from "@/components/cart-context";
+import { quoteCart, type CartLine, type QuoteComboItem, type QuoteCartSummary, type QuoteItemProductView, type QuoteItemComboView } from "@/lib/pricing";
 
 export function useCartRefresh(): {
-  refreshCartPrices: () => Promise<void>;
+  refreshCartPrices: (overrideItems?: CartItem[]) => Promise<void>;
   isRefreshing: boolean;
+  cartSummary: QuoteCartSummary | null;
 } {
   const { items, updateItemPrice } = useCart();
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [cartSummary, setCartSummary] = useState<QuoteCartSummary | null>(null);
 
-  const refreshCartPrices = useCallback(async () => {
-    const products = items.filter((it) => it.kind !== "combo");
-    if (!products.length) return;
+  const refreshCartPrices = useCallback(async (overrideItems?: CartItem[]) => {
+    const toQuote = overrideItems ?? items;
+    if (!toQuote.length) {
+      setCartSummary(null);
+      return;
+    }
 
     setIsRefreshing(true);
     try {
-      await Promise.all(
-        products.map(async (item) => {
-          const optionIds = (item.selectedOptions ?? []).map(
-            (o) => o.productOptionId
-          );
-          const quote = await quoteProduct({
+      const lines: CartLine[] = toQuote.map((item) => {
+        if (item.kind === "combo") {
+          const comboItems = item.comboItems ?? [];
+
+          // Si los comboItems tienen comboItemId vienen del stepper nuevo → usar slots[]
+          const hasSlotData = comboItems.some((c: any) => c.comboItemId != null);
+          if (hasSlotData) {
+            const slots = comboItems
+              .filter((c: any) => !c.isInclusion)
+              .map((c: any) => ({
+                combo_item_id: Number(c.comboItemId),
+                slot_index: Number(c.slotIndex ?? 0),
+                option_ids: Array.isArray(c.optionIds) ? c.optionIds.map(Number) : [],
+                options: Array.isArray(c.options) ? c.options : undefined,
+              }));
+            return { type: "COMBO" as const, comboId: Number(item.id), qty: Number(item.quantity), slots };
+          }
+
+          // Formato legacy: items[]
+          const quoteItems: QuoteComboItem[] = [];
+          const mainCI = comboItems.find((c) => c.isMain);
+          if (mainCI?.productId) {
+            const mainOptions = (item.selectedOptions ?? [])
+              .map((o) => ({ id: Number(o.productOptionId), qty: Number(o.qty ?? 1) }))
+              .filter((o) => Number.isFinite(o.id) && o.id > 0);
+            quoteItems.push({
+              productId: Number(mainCI.productId),
+              quantity:  Number(mainCI.qty ?? 1),
+              optionIds: mainOptions.map((o) => o.id),
+              options: mainOptions,
+            });
+          }
+          for (const ci of comboItems.filter((c) => !c.isMain && !c.isInclusion)) {
+            if (ci.productId) quoteItems.push({ productId: Number(ci.productId), quantity: Number(ci.qty ?? 1), optionIds: [] });
+          }
+          for (const ci of comboItems.filter((c) => !!c.isInclusion)) {
+            if (ci.productId) quoteItems.push({ productId: Number(ci.productId), quantity: Number(ci.qty ?? 1), optionIds: [] });
+          }
+
+          return { type: "COMBO" as const, comboId: Number(item.id), qty: Number(item.quantity), items: quoteItems };
+        } else {
+          const options = (item.selectedOptions ?? []).map((o) => ({
+            id: Number(o.productOptionId),
+            qty: Number(o.qty ?? 1),
+          }));
+          return {
+            type: "PRODUCT" as const,
             productId: item.id,
             qty: item.quantity,
-            optionIds,
+            optionIds: options.map((o) => o.id),
+            options,
             comment: item.observations,
-          });
-          if (!quote) return;
-          const unit = Number(quote.unitPrice);
-          const total = Number(quote.total);
-          if (Number.isFinite(unit) && unit > 0) {
-            updateItemPrice(item.uniqueId, unit, Math.round(total));
-          }
-        })
-      );
+          };
+        }
+      });
+
+      const { items: results, summary } = await quoteCart(lines);
+      setCartSummary(summary);
+
+      results.forEach((result, i) => {
+        if (!result) return;
+        const item = toQuote[i];
+        if ((result as QuoteItemProductView).kind === "PRODUCT") {
+          const r = result as QuoteItemProductView;
+          const unit  = Number(r.unitFinalPrice);
+          const total = Number(r.lineTotal);
+          if (Number.isFinite(unit) && unit > 0) updateItemPrice(item.uniqueId, unit, Math.round(total));
+        } else if ((result as QuoteItemComboView).kind === "COMBO") {
+          const r = result as QuoteItemComboView;
+          const eff = Number(r.breakdown.effectivePerCombo);
+          if (Number.isFinite(eff) && eff > 0) updateItemPrice(item.uniqueId, eff, Math.round(eff * Number(item.quantity)));
+        }
+      });
     } finally {
       setIsRefreshing(false);
     }
   }, [items, updateItemPrice]);
 
-  return { refreshCartPrices, isRefreshing };
+  return { refreshCartPrices, isRefreshing, cartSummary };
 }

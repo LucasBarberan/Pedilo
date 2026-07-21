@@ -7,11 +7,16 @@ import { useRef, useEffect, useMemo, useState } from "react";
 import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
 import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import { useCartRefresh } from "@/hooks/useCartRefresh";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
+import { DeliveryMap } from "@/components/delivery-map";
+import { fetchDeliveryQuote, fetchDeliveryPricingEnabled, type DeliveryQuoteResponse } from "@/lib/api/delivery";
 
 type Customer = {
   name: string;
   phone: string;
   address: string;
+  addressUnit: string;
+  placeId?: string;
 };
 
 type Props = {
@@ -42,6 +47,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const { data: businessStatus } = useBusinessStatusSmart();
   const DELIVERY_ENABLED = config.deliveryEnabled;
   const DELIVERY_FEE = config.deliveryFee;
+  const SCHEDULED_ORDERS_ENABLED = config.scheduledOrdersEnabled;
+  const SCHEDULED_ORDERS_LEAD_MINUTES = config.scheduledOrdersLeadMinutes;
   const storeOpen = businessStatus?.web?.open ?? true;
 
   // 🪝 TODOS LOS HOOKS VAN ACÁ
@@ -49,15 +56,51 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     name: "",
     phone: "",
     address: "",
+    addressUnit: "",
   });
+
+  // Cotización de envío por distancia real (delivery-pricing). El precio
+  // mostrado acá es solo informativo — el Backend recalcula todo al confirmar
+  // el pedido (server-authoritative). `null` = todavía no se cotizó nada.
+  const [deliveryQuote, setDeliveryQuote] = useState<DeliveryQuoteResponse | null>(null);
+  const [quotingDelivery, setQuotingDelivery] = useState(false);
+  const [deliveryQuoteError, setDeliveryQuoteError] = useState<string>("");
+
+  // Módulo DELIVERY_PRICING: mientras no se confirme habilitado, no se monta
+  // el autocomplete ni se llama a /api/delivery/quote — se usa directo el fee
+  // fijo (mismo comportamiento que si la dirección estuviera fuera de cobertura).
+  const [deliveryPricingEnabled, setDeliveryPricingEnabled] = useState(false);
+  useEffect(() => {
+    fetchDeliveryPricingEnabled().then(setDeliveryPricingEnabled);
+  }, []);
 
   const [deliveryMethod, setDeliveryMethod] = useState<"delivery" | "pickup" | null>(
     DELIVERY_ENABLED ? null : "pickup"
   );
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "mp">("cash");
   const [notes, setNotes] = useState("");
+
+  // Pedidos programados: se asume siempre para el mismo día — el input es solo horario (HH:mm)
+  const [scheduleLater, setScheduleLater] = useState(false); // destildado por defecto = "pedir para ya"
+  const [scheduledTime, setScheduledTime] = useState(""); // valor de <input type="time">, formato "HH:mm"
+
+  const minScheduledTime = useMemo(() => {
+    const d = new Date(Date.now() + SCHEDULED_ORDERS_LEAD_MINUTES * 60_000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, [SCHEDULED_ORDERS_LEAD_MINUTES]);
+
+  // Combina el horario elegido (HH:mm) con la fecha de hoy → ISO
+  const scheduledTimeToISO = (time: string): string | null => {
+    if (!time) return null;
+    const [h, m] = time.split(":").map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m)) return null;
+    const d = new Date();
+    d.setHours(h, m, 0, 0);
+    return d.toISOString();
+  };
   const [submitting, setSubmitting] = useState(false);
-  const { refreshCartPrices, isRefreshing } = useCartRefresh();
+  const { refreshCartPrices, isRefreshing, cartSummary } = useCartRefresh();
 
   useEffect(() => {
     refreshCartPrices();
@@ -77,15 +120,27 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const [formError, setFormError] = useState<string>("");
   const nameRef = useRef<HTMLInputElement>(null);
   const phoneRef = useRef<HTMLInputElement>(null);
-  const addressRef = useRef<HTMLInputElement>(null);
+  const addressRef = useRef<HTMLInputElement | null>(null);
 
   const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
 
+  // Precio de envío a mostrar: prioriza la cotización real por distancia.
+  // Si no hay cotización, la dirección está fuera de cobertura, o el servicio
+  // de ruteo falló, cae al fee fijo configurado ("a coordinar con el local"
+  // si DELIVERY_FEE es 0). El Backend vuelve a calcular todo al confirmar.
+  const resolvedDeliveryPrice = useMemo(() => {
+    if (deliveryQuote?.withinCoverage && deliveryQuote.price != null) {
+      return deliveryQuote.price;
+    }
+    return DELIVERY_FEE;
+  }, [deliveryQuote, DELIVERY_FEE]);
+
+  const deliveryOutOfCoverage = deliveryQuote != null && !deliveryQuote.withinCoverage;
 
   const totalWithDelivery = useMemo(() => {
-    return deliveryMethod === "delivery" ? total + DELIVERY_FEE : total;
-  }, [total, deliveryMethod, DELIVERY_FEE]);
+    return deliveryMethod === "delivery" ? total + resolvedDeliveryPrice : total;
+  }, [total, deliveryMethod, resolvedDeliveryPrice]);
   const CHECKOUT_NOTES_MAX = 50; // o el número que prefieras
 
 
@@ -127,15 +182,58 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     });
   }, [items]);
 
+  /** Se dispara cuando el usuario elige una sugerencia del autocomplete de Google. */
+  async function handleAddressSelect(selection: { address: string; placeId: string }) {
+    // No pisamos customer.address con selection.address acá — el input ya
+    // muestra el texto elegido (vía onChange, disparado antes que esta
+    // función) y volver a setearlo con el formattedAddress de Google
+    // causaba un "salto" visual si difería levemente del texto tipeado.
+    setCustomer((prev) => ({ ...prev, placeId: selection.placeId }));
+    setDeliveryQuoteError("");
+    setQuotingDelivery(true);
+    try {
+      const quote = await fetchDeliveryQuote({ placeId: selection.placeId });
+      setDeliveryQuote(quote);
+    } catch {
+      setDeliveryQuote(null);
+      setDeliveryQuoteError("No pudimos calcular el envío para esa dirección. Se coordina con el local.");
+    } finally {
+      setQuotingDelivery(false);
+    }
+  }
 
-
+  /**
+   * Se dispara al soltar el pin arrastrado en el mapa. A diferencia de
+   * handleAddressSelect, acá SÍ actualizamos customer.address con lo que
+   * devuelve el Backend — no hay ningún texto "ya visto" que preservar, el
+   * pin se movió a un punto que todavía no tiene descripción en pantalla.
+   * Un punto arrastrado a mano no tiene placeId (Google no lo genera para
+   * coordenadas arbitrarias), así que se cotiza con latitude/longitude.
+   */
+  async function handlePinDrag(location: { latitude: number; longitude: number }) {
+    setCustomer((prev) => ({ ...prev, placeId: undefined }));
+    setDeliveryQuoteError("");
+    setQuotingDelivery(true);
+    try {
+      const quote = await fetchDeliveryQuote(location);
+      setDeliveryQuote(quote);
+      if (quote.addressResolved) {
+        setCustomer((prev) => ({ ...prev, address: quote.addressResolved! }));
+      }
+    } catch {
+      setDeliveryQuote(null);
+      setDeliveryQuoteError("No pudimos calcular el envío para esa ubicación. Se coordina con el local.");
+    } finally {
+      setQuotingDelivery(false);
+    }
+  }
 
 
   // Cargar / guardar datos del cliente en localStorage
   useEffect(() => {
     try {
       const raw = localStorage.getItem("checkout.customer");
-      if (raw) setCustomer(JSON.parse(raw));
+      if (raw) setCustomer((prev) => ({ ...prev, ...JSON.parse(raw) }));
     } catch { }
   }, []);
   useEffect(() => {
@@ -217,11 +315,15 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     lines.push(`*Cliente:* ${customer.name}`);
     if (customer.phone?.trim()) lines.push(`*Tel:* ${customer.phone}`);
     if (deliveryMethod === "delivery" && customer.address?.trim()) {
-      lines.push(`*Dirección:* ${customer.address}`);
+      const unit = customer.addressUnit?.trim();
+      lines.push(`*Dirección:* ${customer.address}${unit ? ` (${unit})` : ""}`);
     }
     lines.push(
       `*Entrega:* ${deliveryMethod === "delivery" ? "Delivery" : "Retiro"}`
     );
+    if (SCHEDULED_ORDERS_ENABLED && scheduleLater && scheduledTime) {
+      lines.push(`*Horario pedido:* ${scheduledTime} hs`);
+    }
     lines.push(
       `*Pago:* ${paymentMethod === "cash" ? "Efectivo" : "Mercado Pago"}`
     );
@@ -231,7 +333,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
     // 👇 usar el ordenamiento y desglosar combos
     sortedItems.forEach((it: any) => {
-      const unit = it.finalPrice / it.quantity || it.price;
+      const unit = Math.round((it.finalPrice / it.quantity || it.price) * 100) / 100;
       const comboData = it as MaybeCombo;
       const isCombo =
         comboData.kind === "combo" || Array.isArray(comboData.comboItems);
@@ -263,31 +365,34 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           lines.push(`   Obs: ${it.observations.trim()}`);
         }
 
-        const main = comboData.comboItems?.find((x) => x.isMain);
-        const extras = comboData.comboItems?.filter((x) => !x.isMain) || [];
+        const allComboItems = comboData.comboItems || [];
 
-        if (main) {
+        allComboItems.forEach((ci: any) => {
+          const ciOpts: string[] = Array.isArray(ci.selectedOptions)
+            ? ci.selectedOptions.map((o: any) => o.optionName).filter(Boolean)
+            : ci.isMain
+              ? (it.selectedOptions?.map((o: any) => o.optionName).filter(Boolean) || [])
+              : [];
+          const ciOptsLabel = ciOpts.length > 0 ? ` (${ciOpts.join(" · ")})` : "";
           lines.push(
-            `\t\t${main.name || "Producto"}${optionsLabel}${main.qty && main.qty > 1 ? ` x${main.qty}` : ""}`
+            `\t\t${ci.name || "Producto"}${ciOptsLabel}${ci.qty && ci.qty > 1 ? ` x${ci.qty}` : ""}`
           );
-        }
-        extras.forEach((e) => {
-          lines.push(
-            `\t\t${e.name || "Ítem"}${e.qty && e.qty > 1 ? ` x${e.qty}` : ""}`
-          );
+          if (ci.comment?.trim()) {
+            lines.push(`\t\t   "${ci.comment.trim()}"`);
+          }
         });
       }
     });
 
     lines.push("");
 
-    const confirmedSubtotal = confirmedTotal ?? total;
-    const confirmedTotalWithDelivery = deliveryMethod === "delivery" ? confirmedSubtotal + DELIVERY_FEE : confirmedSubtotal;
+    // Prioridad: total del quote (con promo) > total confirmado por API > total del carrito
+    const baseTotal = cartSummary?.total ?? confirmedTotal ?? total;
+    const confirmedTotalWithDelivery = Math.round(deliveryMethod === "delivery" ? baseTotal + resolvedDeliveryPrice : baseTotal);
 
-    if (deliveryMethod === "delivery" && DELIVERY_FEE > 0) {
-      lines.push(`*Sub Total:* ${fmt(confirmedSubtotal)}`);
-      lines.push(`*Envío:* ${fmt(DELIVERY_FEE)}`);
-      lines.push("");
+    if (deliveryMethod === "delivery") {
+      lines.push(`*Subtotal:* ${fmt(Math.round(baseTotal))}`);
+      lines.push(`*Envío:* ${deliveryQuote?.withinCoverage && deliveryQuote.price != null ? fmt(deliveryQuote.price) : (resolvedDeliveryPrice > 0 ? fmt(resolvedDeliveryPrice) : "A coordinar con el local")}`);
     }
 
     lines.push(`*Total:* ${fmt(confirmedTotalWithDelivery)}`);
@@ -337,6 +442,17 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       addressRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
+    // si eligió programar el pedido, validamos el horario (ayuda de UX — el backend vuelve a validar)
+    if (SCHEDULED_ORDERS_ENABLED && scheduleLater) {
+      if (!scheduledTime) {
+        setFormError("Elegí un horario para tu pedido.");
+        return;
+      }
+      if (scheduledTime < minScheduledTime) {
+        setFormError(`El horario debe tener al menos ${SCHEDULED_ORDERS_LEAD_MINUTES} minutos de anticipación.`);
+        return;
+      }
+    }
 
     setFormError(""); // OK, seguimos
     setSubmitting(true);
@@ -357,40 +473,70 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           // precio unitario del combo (el back prorratea internamente)
           const unitCombo = Math.round(Number(it.price));
 
-          combosForApi.push({
-            combo_id: Number(it.id),
+          // Detectar si el combo usa el nuevo stepper de slots (tiene comboItemId)
+          const hasSlotData = (it.comboItems || []).some((ci: any) => ci.comboItemId != null);
+
+          const comboPayload: any = {
+            product_template_id: Number(it.id),
             name: it.comboName || it.name,
             quantity: Number(it.quantity),
             unit_price: unitCombo,
             comment: it.observations?.trim() || null,
-            items: (it.comboItems || []).map((ci: any) => {
-              // 🔒 CRÍTICO: La cantidad del item interno SIEMPRE es la del backend
-              // NO se multiplica por it.quantity (cantidad de combos)
-              // El backend maneja la multiplicación: combo.quantity × item.quantity
-              const itemQty = Number(ci.qty) || 1;
+          };
 
+          if (hasSlotData) {
+            // Nuevo formato con slots[] — separar los slots reales (con comboItemId) de las
+            // inclusiones por categoría (isInclusion: true, sin comboItemId): van en dos campos
+            // distintos del payload, mezclarlos manda combo_item_id null y el backend lo rechaza.
+            comboPayload.slots = (it.comboItems || [])
+              .filter((ci: any) => !ci.isInclusion && ci.comboItemId != null)
+              .map((ci: any) => ({
+                combo_item_id: Number(ci.comboItemId),
+                slot_index: Number(ci.slotIndex ?? 0),
+                option_ids: Array.isArray(ci.optionIds) ? ci.optionIds.map(Number) : [],
+                ...(Array.isArray(ci.options) && ci.options.length > 0 ? { options: ci.options } : {}),
+                ...(ci.comment?.trim() ? { comment: ci.comment.trim() } : {}),
+              }));
+
+            const inclusionGroups = new Map<string, number[]>();
+            for (const ci of (it.comboItems || [])) {
+              if (!ci.isInclusion || ci.inclusionId == null) continue;
+              const list = inclusionGroups.get(String(ci.inclusionId)) ?? [];
+              list.push(Number(ci.productId));
+              inclusionGroups.set(String(ci.inclusionId), list);
+            }
+            if (inclusionGroups.size > 0) {
+              comboPayload.inclusion_selections = Array.from(inclusionGroups.entries()).map(
+                ([inclusionId, productIds]) => ({
+                  inclusion_id: Number(inclusionId),
+                  product_ids: productIds,
+                })
+              );
+            }
+          } else {
+            // Formato legacy con items[]
+            comboPayload.items = (it.comboItems || []).map((ci: any) => {
+              const itemQty = Number(ci.qty) || 1;
               const itemPayload: any = {
                 product_id: Number(ci.productId),
-                quantity: itemQty,  // Esta qty viene del backend y NO debe cambiar
+                quantity: itemQty,
               };
-
-              // Si es el producto principal Y el combo tiene selectedOptions, usarlas
               if (ci.isMain && it.selectedOptions && it.selectedOptions.length > 0) {
-                itemPayload.option_ids = it.selectedOptions.map((opt: any) => Number(opt.productOptionId));
+                itemPayload.options = it.selectedOptions.map((opt: any) => ({
+                  id: Number(opt.productOptionId),
+                  qty: Number(opt.qty ?? 1),
+                }));
+              } else if (ci.option?.id) {
+                itemPayload.options = [{ id: Number(ci.option.id), qty: 1 }];
               }
-              // Fallback: si tiene opción legacy en el comboItem
-              else if (ci.option?.id) {
-                itemPayload.option_ids = [Number(ci.option.id)];
-              }
-
-              // Agregar comentario si es el principal
               if (ci.isMain && it.observations?.trim()) {
                 itemPayload.comment = it.observations.trim();
               }
-
               return itemPayload;
-            }),
-          });
+            });
+          }
+
+          combosForApi.push(comboPayload);
         } else {
           // producto normal
           const unit = Math.round(
@@ -404,12 +550,15 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           };
           if (it.observations?.trim()) payload.comment = it.observations.trim();
 
-          // Enviar opciones seleccionadas
+          // Enviar opciones seleccionadas (con cantidad — necesario para grupos allowsQuantity)
           if (it.selectedOptions && it.selectedOptions.length > 0) {
-            payload.option_ids = it.selectedOptions.map(opt => Number(opt.productOptionId));
+            payload.options = it.selectedOptions.map(opt => ({
+              id: Number(opt.productOptionId),
+              qty: Number((opt as any).qty ?? 1),
+            }));
           } else if (it.productOptionId) {
             // Fallback para compatibilidad
-            payload.option_ids = [Number(it.productOptionId)];
+            payload.options = [{ id: Number(it.productOptionId), qty: 1 }];
           }
 
           itemsForApi.push(payload);
@@ -418,24 +567,39 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       const channel = "WEB" as const;
       const fulfillment = deliveryMethod === "delivery" ? "DELIVERY" : "TAKEAWAY";
       const phoneNormalized = normalizePhoneAR(customer.phone);
-      // 4) Delivery info (siempre provider WEB)
+      const scheduledAtISO =
+        SCHEDULED_ORDERS_ENABLED && scheduleLater && scheduledTime
+          ? scheduledTimeToISO(scheduledTime)
+          : null;
+      // 4) Delivery info (siempre provider WEB). El Backend recalcula
+      // distancia/precio de envío a partir de placeId — nunca confía en un
+      // precio mostrado en esta pantalla (ver delivery-pricing design.md).
+      // addressText incluye el piso/depto solo como dato de display para el
+      // local — el geocoding/cotización usa placeId, que resuelve la
+      // dirección de calle, no el piso/depto.
+      const addressUnitTrimmed = customer.addressUnit.trim();
+      const fullAddressText = addressUnitTrimmed
+        ? `${customer.address.trim()} (${addressUnitTrimmed})`
+        : customer.address.trim();
+
       const delivery_info =
         deliveryMethod === "delivery"
           ? {
             customerName: customer.name.trim(),
             customerPhone: phoneNormalized,
-            addressText: customer.address.trim(),
+            addressText: fullAddressText,
             notes: notes?.trim() || null,
-            scheduledAt: null,
+            scheduledAt: scheduledAtISO,
             provider: "WEB",
             mapUrl: null,
+            placeId: customer.placeId ?? null,
           }
           : {
             customerName: customer.name.trim(),
             customerPhone: phoneNormalized,
             addressText: "", // vacío en retiro
             notes: notes?.trim() || null,
-            scheduledAt: null,
+            scheduledAt: scheduledAtISO,
             provider: "WEB",
             mapUrl: null,
           };
@@ -459,16 +623,16 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         fulfillment,              // "DELIVERY" | "TAKEAWAY"
       };
 
-      // limpieza defensiva (sin 'options' y sin undefined)
+      // limpieza defensiva (sin undefined). OJO: "options" ({id,qty}[]) es un campo
+      // válido que el backend espera (necesario para grupos allowsQuantity / cantidad
+      // por opción) — no debe filtrarse acá.
       const apiBody = JSON.parse(
-        JSON.stringify(apiBodyRaw, (k, v) =>
-          k === "options" || v === undefined ? undefined : v
-        )
+        JSON.stringify(apiBodyRaw, (_k, v) => (v === undefined ? undefined : v))
       );
 
       console.log("POST /orders body =>\n", JSON.stringify(apiBody, null, 2));
 
-      const res = await fetch(`${BASE}/orders`, {
+      const res = await fetch(`/api/checkout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(apiBody),
@@ -649,10 +813,59 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               <span className="text-sm font-medium">Retiro en local</span>
             </div>
           )}
-          {deliveryMethod === "delivery" && DELIVERY_FEE > 0 && (
+          {deliveryMethod === "delivery" && !deliveryQuote && (
             <p className="mt-2 text-xs text-muted-foreground">
-              Se agregará un costo de envío de {fmt(DELIVERY_FEE)} al total.
+              El costo de envío se calcula según la distancia a tu domicilio.
             </p>
+          )}
+
+          {SCHEDULED_ORDERS_ENABLED && (
+            <div className="mt-3 pt-3 border-t border-black/5">
+              <label className="flex items-center justify-between gap-3 cursor-pointer select-none">
+                <span className="text-sm font-medium">Programá tu pedido</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={scheduleLater}
+                  onClick={() => {
+                    setScheduleLater((v) => {
+                      const next = !v;
+                      if (next && !scheduledTime) setScheduledTime(minScheduledTime);
+                      return next;
+                    });
+                    setFormError("");
+                  }}
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${scheduleLater ? "bg-[var(--brand-color)]" : "bg-gray-300"
+                    }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${scheduleLater ? "translate-x-6" : "translate-x-1"
+                      }`}
+                  />
+                </button>
+              </label>
+              {scheduleLater ? (
+                <div className="mt-2">
+                  <input
+                    type="time"
+                    min={minScheduledTime}
+                    value={scheduledTime}
+                    onChange={(e) => {
+                      setScheduledTime(e.target.value);
+                      if (formError.includes("horario")) setFormError("");
+                    }}
+                    className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Anticipación mínima: {SCHEDULED_ORDERS_LEAD_MINUTES} minutos.
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Activá esta opción si querés tu pedido para un horario específico.
+                </p>
+              )}
+            </div>
           )}
         </div>
 
@@ -715,17 +928,65 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           {deliveryMethod === "delivery" && (
             <>
               <label className="block text-sm mb-1">Dirección</label>
+              {deliveryPricingEnabled ? (
+                <>
+                  <AddressAutocomplete
+                    onInputElement={(el) => { addressRef.current = el; }}
+                    value={customer.address}
+                    onChange={(v) => {
+                      setCustomer((prev) => ({ ...prev, address: v, placeId: undefined }));
+                      setDeliveryQuote(null);
+                      setDeliveryQuoteError("");
+                      if (formError && v.trim() && /direcci[oó]n/i.test(formError)) setFormError("");
+                    }}
+                    onPlaceSelect={handleAddressSelect}
+                    className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
+                    placeholder="Empezá a escribir tu dirección..."
+                  />
+                  {!quotingDelivery && deliveryOutOfCoverage && (
+                    <p className="mt-1 text-xs text-amber-600">
+                      Esa dirección está fuera de nuestra zona de cobertura. El envío se coordina con el local.
+                    </p>
+                  )}
+                  {!quotingDelivery && deliveryQuoteError && (
+                    <p className="mt-1 text-xs text-amber-600">{deliveryQuoteError}</p>
+                  )}
+                </>
+              ) : (
+                // Módulo DELIVERY_PRICING apagado: input de texto libre, sin
+                // autocomplete ni cotización — fee fijo (resolvedDeliveryPrice
+                // ya cae a DELIVERY_FEE cuando deliveryQuote es null).
+                <input
+                  ref={addressRef}
+                  type="text"
+                  value={customer.address}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setCustomer((prev) => ({ ...prev, address: v, placeId: undefined }));
+                    if (formError && v.trim() && /direcci[oó]n/i.test(formError)) setFormError("");
+                  }}
+                  className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
+                  placeholder="Ej: Av. Siempre Viva 742"
+                />
+              )}
+
+              <label className="block text-sm mb-1 mt-3">Piso / Depto (opcional)</label>
               <input
-                ref={addressRef}
+                type="text"
+                value={customer.addressUnit}
+                onChange={(e) => setCustomer((prev) => ({ ...prev, addressUnit: e.target.value }))}
                 className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
-                value={customer.address}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setCustomer({ ...customer, address: v });
-                  if (formError && v.trim() && /direcci[oó]n/i.test(formError)) setFormError("");
-                }}
-                placeholder="Calle 123, Piso/Depto"
+                placeholder="Ej: Piso 3, Depto B"
               />
+
+              {deliveryQuote?.destinationLocation && (
+                <div className="mt-3">
+                  <DeliveryMap
+                    destinationLocation={deliveryQuote.destinationLocation}
+                    onLocationChange={handlePinDrag}
+                  />
+                </div>
+              )}
             </>
           )}
         </div>
@@ -801,10 +1062,10 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
               if (!isCombo) {
                 return (
-                  <div key={it.uniqueId} className="flex items-start justify-between gap-3 py-1">
+                  <div key={it.uniqueId} className="flex items-stretch justify-between gap-3 py-1">
                     <div className="flex-1 min-w-0 space-y-0.5">
                       <p className="text-sm font-semibold text-gray-900 leading-snug">
-                        {it.name}{it.quantity > 1 ? ` ×${it.quantity}` : ""}
+                        {it.name}
                       </p>
                       {(it.selectedOptions && it.selectedOptions.length > 0) || sizeLabel ? (
                         <p className="text-xs text-gray-500">
@@ -817,9 +1078,14 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                         <p className="text-xs text-gray-400 italic">Obs: {it.observations.trim()}</p>
                       )}
                     </div>
-                    <p className="text-sm font-bold text-gray-900 tabular-nums shrink-0 pt-0.5">
-                      {fmt(it.finalPrice || it.price * it.quantity)}
-                    </p>
+                    <div className="flex flex-col justify-between items-end shrink-0 pt-0.5">
+                      <p className="text-sm font-bold text-gray-900 tabular-nums">
+                        {fmt(it.finalPrice || it.price * it.quantity)}
+                      </p>
+                      {it.quantity > 1 && (
+                        <span className="text-xs text-gray-400 tabular-nums">×{it.quantity}</span>
+                      )}
+                    </div>
                   </div>
                 );
               }
@@ -829,7 +1095,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
               return (
                 <div key={it.uniqueId} className="py-1">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-stretch justify-between gap-3">
                     <div className="flex-1 min-w-0 space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-sm font-semibold text-gray-900 leading-snug">{it.name}</p>
@@ -875,9 +1141,14 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                         <p className="text-xs text-gray-400 italic pl-2">Obs: {it.observations.trim()}</p>
                       )}
                     </div>
-                    <p className="text-sm font-bold text-gray-900 tabular-nums shrink-0 pt-0.5">
-                      {fmt(it.finalPrice || it.price * it.quantity)}
-                    </p>
+                    <div className="flex flex-col justify-between items-end shrink-0 pt-0.5">
+                      <p className="text-sm font-bold text-gray-900 tabular-nums">
+                        {fmt(it.finalPrice || it.price * it.quantity)}
+                      </p>
+                      {it.quantity > 1 && (
+                        <span className="text-xs text-gray-400 tabular-nums">×{it.quantity}</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -886,17 +1157,32 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
           {/* FOOTER FIJO DENTRO DE LA CARD */}
           <div className="flex items-center justify-between border-t mt-3 pt-3 bg-white/0">
-            <div className="w-full space-y-1">
-              {deliveryMethod === "delivery" && DELIVERY_FEE > 0 && (
+            <div className="w-full space-y-1.5">
+              {/* Subtotal sin promo — solo si hay promo o delivery */}
+              {(cartSummary || (deliveryMethod === "delivery" && resolvedDeliveryPrice > 0)) && (
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
-                  <span>Sub Total</span>
-                  <span>{fmt(total)}</span>
+                  <span>Subtotal</span>
+                  <span>{fmt(cartSummary ? cartSummary.originalSubtotal : total)}</span>
                 </div>
               )}
-              {deliveryMethod === "delivery" && DELIVERY_FEE > 0 && (
+              {/* Descuento promo */}
+              {cartSummary && (
+                <div className="flex items-center justify-between text-sm" style={{ color: "var(--brand-color)" }}>
+                  <span className="font-medium truncate pr-2">{cartSummary.promoName ?? "Descuento promo"}</span>
+                  <span className="font-semibold shrink-0">−{fmt(cartSummary.savings)}</span>
+                </div>
+              )}
+              {/* Envío */}
+              {deliveryMethod === "delivery" && (
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                   <span>Envío</span>
-                  <span>{fmt(DELIVERY_FEE)}</span>
+                  <span>
+                    {deliveryQuote?.withinCoverage && deliveryQuote.price != null
+                      ? fmt(deliveryQuote.price)
+                      : resolvedDeliveryPrice > 0
+                        ? fmt(resolvedDeliveryPrice)
+                        : "A coordinar"}
+                  </span>
                 </div>
               )}
               <div className="flex items-center justify-between">
