@@ -16,9 +16,17 @@ export type CartComboItem = {
   };
   // 👇 NUEVO: cuando proviene de una categoría incluida
   isInclusion?: boolean;         // lo usamos para detectarlo en el render
+  inclusionId?: string;          // id de la ComboCategoryInclusion — requerido para armar inclusion_selections al checkear
   inclusionTitle?: string;       // ej. "Elegí tu bebida"
   unitPrice?: number;            // precio con la regla aplicada (descuento/tope/etc.)
   basePrice?: number;            // precio original del producto
+
+  // 👇 NUEVO: cuando proviene del stepper de slots (no del formato legacy de items[])
+  comboItemId?: number | null;
+  slotIndex?: number;
+  /** @deprecated usar options con qty — no soporta cantidad por opción (grupos allowsQuantity) */
+  optionIds?: number[];
+  options?: { id: number; qty: number }[];
 };
 
 export interface CartItem {
@@ -48,6 +56,7 @@ export interface CartItem {
     optionName: string;          // nombre de la opción
     tipo: string;                // "Tamaño", "Extra", etc.
     priceExtra: number;          // extra aplicado
+    qty?: number;                // cantidad de esta opción (grupos allowsQuantity) — default 1
   }>;
 
   // —— NUEVO: soporte para combos ——

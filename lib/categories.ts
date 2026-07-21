@@ -134,10 +134,6 @@ export function normalizeCategoriesPayload(payload: unknown): Category[] {
 export function sortCategories(list: Category[]): Category[] {
   const fallback = Number.MAX_SAFE_INTEGER;
   return [...list].sort((a, b) => {
-    const aDefault = !!a.isDefault;
-    const bDefault = !!b.isDefault;
-    if (aDefault !== bDefault) return aDefault ? -1 : 1;
-
     const aSort = typeof a.sortOrder === "number" ? a.sortOrder : fallback;
     const bSort = typeof b.sortOrder === "number" ? b.sortOrder : fallback;
     if (aSort !== bSort) return aSort - bSort;
@@ -156,7 +152,7 @@ export async function fetchCategories({ baseUrl, signal }: FetchCategoriesOption
   if (!base) return [];
 
   try {
-    const res = await fetch(`${base}/categories`, { cache: "no-store", signal });
+    const res = await fetch(`${base}/catalog/categories?channel=WEB`, { cache: "no-store", signal });
     if (!res.ok) return [];
 
     const json = await res.json();

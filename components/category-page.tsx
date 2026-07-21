@@ -11,14 +11,13 @@ import BlockingLoader from "@/components/blocking-loader";
 import { fixImageUrl } from "@/lib/img";
 import type { Category } from "@/lib/categories";
 import type { Product } from "@/lib/api/products";
-import { fetchProductsByCategory } from "@/lib/api/products";
-import { quoteProductsBatch, type QuoteProductsBatchMap } from "@/lib/pricing";
+import { fetchProductsByCategory, fetchProductsBySubcategory } from "@/lib/api/products";
+import PromoBanner from "./promo-banner";
 
 type CategoryPageProps = {
   slug: string;
   category: Category | null;
   initialProducts: Product[];
-  initialPromoMap: QuoteProductsBatchMap;
   apiBase: string | null;
 };
 
@@ -40,22 +39,16 @@ export default function CategoryPageClient({
   slug,
   category,
   initialProducts,
-  initialPromoMap,
   apiBase,
 }: CategoryPageProps) {
   const router = useRouter();
 
   const [products, setProducts] = useState<ProductWithMaybeSub[]>(initialProducts as ProductWithMaybeSub[]);
-  const [promoMap, setPromoMap] = useState<QuoteProductsBatchMap>(initialPromoMap);
   const [loading, setLoading] = useState(initialProducts.length === 0 && !!category && !!apiBase);
 
   useEffect(() => {
     setProducts(initialProducts as ProductWithMaybeSub[]);
   }, [initialProducts]);
-
-  useEffect(() => {
-    setPromoMap(initialPromoMap);
-  }, [initialPromoMap]);
 
   useEffect(() => {
     const shouldFetch = !!category && initialProducts.length === 0 && !!apiBase;
@@ -94,23 +87,18 @@ export default function CategoryPageClient({
               if (subs.length > 0) {
                 const perSub = await Promise.all(
                   subs.map(async (sc) => {
-                    const u = new URL(`${apiBase!.replace(/\/$/, "")}/products`);
-                    u.searchParams.set("subcategory", String(sc.id));
-                    const r = await fetch(u, { signal: controller.signal });
-                    if (!r.ok) return [] as ProductWithMaybeSub[];
-                    const list = await r.json();
-                  
-                    const arr = Array.isArray(list?.data) ? list.data : Array.isArray(list) ? list : [];
-                  
-                    // 🔧 Aseguramos que la subcategory tenga categoryId
+                    const prods = await fetchProductsBySubcategory(sc.id, {
+                      baseUrl: apiBase,
+                      signal: controller.signal,
+                    });
+
                     const ensuredCategoryId = (sc.categoryId != null ? sc.categoryId : Number(category?.id)) || undefined;
-                  
-                    return (arr as ProductWithMaybeSub[]).map((p) => ({
+
+                    return (prods as ProductWithMaybeSub[]).map((p) => ({
                       ...p,
                       subcategory: p.subcategory ?? {
                         id: sc.id,
                         name: sc.name,
-                        // 👇 ESTA LÍNEA RESUELVE EL ERROR DE TIPO
                         categoryId: ensuredCategoryId as number,
                         description: sc.description ?? null,
                       },
@@ -130,25 +118,9 @@ export default function CategoryPageClient({
         }
 
         setProducts(finalProducts);
-
-        // 3) Cotizaciones/promos
-        const ids = finalProducts
-          .map((p) => Number(p.id))
-          .filter((n) => Number.isFinite(n)) as number[];
-
-        if (ids.length === 0) {
-          setPromoMap({});
-        } else {
-          const quoted = await quoteProductsBatch(ids, {
-            baseUrl: apiBase ?? undefined,
-            signal: controller.signal,
-          });
-          if (!cancelled) setPromoMap(quoted);
-        }
       } catch {
         if (!cancelled) {
           setProducts([]);
-          setPromoMap({});
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -222,10 +194,9 @@ export default function CategoryPageClient({
         onBack={() => router.back()}
         onCartClick={handleCartClick}
       />
-      <div className="h-[6px] w-full bg-white" />
       <ClosedBanner />
       <InfoBanner />
-
+      <PromoBanner apiBase={apiBase} />
       <div className="mx-auto w-full max-w-6xl px-4 pt-3 pb-2">
         <h2 className="text-2xl font-extrabold uppercase">{title}</h2>
       </div>
@@ -252,12 +223,9 @@ export default function CategoryPageClient({
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {group.items.map((p) => {
-                  const productId = Number(p.id);
-                  const promo = Number.isFinite(productId) ? promoMap[productId] : undefined;
-                  const showPromo = promo?.hasPromo && Number.isFinite(promo.unit);
-                  const unit = promo?.unit ?? (typeof (p as any).price === "number" ? (p as any).price : undefined);
+                  const showPromo = !!p.promoLabel && p.basePrice != null && p.price != null && p.price !== p.basePrice;
+                  const unit = typeof p.price === "number" ? p.price : undefined;
                   const targetUrl = `/producto/${p.id}`;
-
                   return (
                     <div
                       key={String(p.id)}
@@ -278,6 +246,11 @@ export default function CategoryPageClient({
                           fill
                           className="object-cover"
                         />
+                        {p.promoLabel && (
+                          <span className="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-green-500 text-white rounded-full px-2 py-0.5 leading-none shadow">
+                            {p.promoLabel}
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex-1 min-w-0">
@@ -288,20 +261,16 @@ export default function CategoryPageClient({
                           {(p as any).description || ""}
                         </div>
 
-                        {!showPromo ? (
-                          <div className="mt-2 text-lg font-extrabold text-[var(--brand-color)]">
+                        <div className="mt-2 flex items-baseline gap-2">
+                          {showPromo && (
+                            <span className="text-sm text-muted-foreground line-through">
+                              {fmtPrice(p.basePrice)}
+                            </span>
+                          )}
+                          <span className="text-lg font-extrabold text-[var(--brand-color)]">
                             {fmtPrice(unit)}
-                          </div>
-                        ) : (
-                          <div className="mt-2">
-                            <div className="text-sm text-muted-foreground line-through">
-                              {fmtPrice(promo.list)}
-                            </div>
-                            <div className="text-lg font-extrabold text-[var(--brand-color)]">
-                              {fmtPrice(promo.unit)}
-                            </div>
-                          </div>
-                        )}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   );

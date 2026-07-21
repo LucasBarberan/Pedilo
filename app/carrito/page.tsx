@@ -8,7 +8,6 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useMemo, useEffect } from "react";
 import { useCartRefresh } from "@/hooks/useCartRefresh";
-import { quoteProduct } from "@/lib/pricing";
 import { Trash2 } from "lucide-react";
 import ClosedBanner from "@/components/closed-banner";
 import InfoBanner from "@/components/info-banner";
@@ -42,7 +41,7 @@ export default function CartPage() {
   const router = useRouter();
   const { items, updateQuantity, updateItemPrice, removeFromCart, clearCart, getTotalPrice } =
     useCart();
-  const { refreshCartPrices, isRefreshing } = useCartRefresh();
+  const { refreshCartPrices, isRefreshing, cartSummary } = useCartRefresh();
 
   useEffect(() => {
     refreshCartPrices();
@@ -52,15 +51,10 @@ export default function CartPage() {
   const handleIncrease = async (it: any) => {
     const newQty = Number(it.quantity) + 1;
     updateQuantity(it.uniqueId, newQty);
-    if (it.kind !== "combo") {
-      const optionIds = (it.selectedOptions ?? []).map((o: any) => o.productOptionId);
-      const quote = await quoteProduct({ productId: it.id, qty: newQty, optionIds, comment: it.observations });
-      if (quote) {
-        const unit = Number(quote.unitPrice);
-        const total = Number(quote.total);
-        if (Number.isFinite(unit) && unit > 0) updateItemPrice(it.uniqueId, unit, Math.round(total));
-      }
-    }
+    const updatedItems = items.map((item: any) =>
+      item.uniqueId === it.uniqueId ? { ...item, quantity: newQty } : item
+    );
+    await refreshCartPrices(updatedItems as any);
   };
 
   const handleDecrease = async (it: any) => {
@@ -71,15 +65,10 @@ export default function CartPage() {
     }
     const newQty = q - 1;
     updateQuantity(it.uniqueId, newQty);
-    if (it.kind !== "combo") {
-      const optionIds = (it.selectedOptions ?? []).map((o: any) => o.productOptionId);
-      const quote = await quoteProduct({ productId: it.id, qty: newQty, optionIds, comment: it.observations });
-      if (quote) {
-        const unit = Number(quote.unitPrice);
-        const total = Number(quote.total);
-        if (Number.isFinite(unit) && unit > 0) updateItemPrice(it.uniqueId, unit, Math.round(total));
-      }
-    }
+    const updatedItems = items.map((item: any) =>
+      item.uniqueId === it.uniqueId ? { ...item, quantity: newQty } : item
+    );
+    await refreshCartPrices(updatedItems as any);
   };
 
   // === Estado comercial (igual que en producto/combos) ===
@@ -112,7 +101,6 @@ export default function CartPage() {
   return (
     <div className="bg-background">
       <SiteHeader showBack onBack={() => router.back()} onCartClick={() => {}} />
-      <div className="h-[6px] w-full bg-white" />
 
       {/* Banners de estado (opcional pero consistente con las otras pantallas) */}
       <ClosedBanner />
@@ -214,33 +202,40 @@ export default function CartPage() {
                               COMBO
                             </span>
                           </div>
-                          {main && (
+                          {/* Slots: cada comboItem con sus opciones */}
+                          {(comboData.comboItems?.filter((x) => !x.isInclusion) ?? []).length > 0 && (
                             <div
-                              className="pl-2 border-l-2 space-y-0.5"
+                              className="pl-2 border-l-2 space-y-1"
                               style={{ borderColor: "color-mix(in srgb, var(--brand-color) 35%, transparent)" }}
                             >
-                              <p className="text-xs text-gray-600 leading-snug">
-                                {main.name || "Producto"}
-                                {it.selectedOptions && it.selectedOptions.length > 0 ? (
-                                  <span className="text-gray-400">
-                                    {" "}({it.selectedOptions.map((opt: any) => opt.optionName).join(" + ")})
-                                  </span>
-                                ) : sizeLabel && (
-                                  <span className="text-gray-400"> ({sizeLabel})</span>
-                                )}
-                                {main.qty && main.qty > 1 ? ` x${main.qty}` : ""}
-                              </p>
-                              {fixedExtras.length > 0 && (
-                                <div className="flex flex-wrap gap-x-2 gap-y-0.5">
-                                  {fixedExtras.map((e, idx) => (
-                                    <span key={idx} className="text-xs text-gray-500">
-                                      {e.name || "Ítem"}{e.qty && e.qty > 1 ? ` x${e.qty}` : ""}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
+                              {(comboData.comboItems?.filter((x) => !x.isInclusion) ?? []).map((ci: any, idx: number) => {
+                                const opts: string[] = Array.isArray(ci.selectedOptions)
+                                  ? ci.selectedOptions.map((o: any) => o.optionName).filter(Boolean)
+                                  : [];
+                                // Para el item principal legacy, también leer it.selectedOptions
+                                const legacyOpts: string[] = ci.isMain && it.selectedOptions?.length > 0 && opts.length === 0
+                                  ? it.selectedOptions.map((o: any) => o.optionName).filter(Boolean)
+                                  : [];
+                                const allOpts = opts.length > 0 ? opts : legacyOpts;
+
+                                return (
+                                  <div key={idx} className="space-y-0.5">
+                                    <p className="text-xs text-gray-600 leading-snug">
+                                      {ci.qty && ci.qty > 1 ? `${ci.qty}x ` : ""}{ci.name || "Producto"}
+                                    </p>
+                                    {allOpts.length > 0 && (
+                                      <p className="text-xs text-gray-400">
+                                        {allOpts.join(" · ")}
+                                      </p>
+                                    )}
+                                    {ci.comment?.trim() && (
+                                      <p className="text-xs text-gray-400 italic">"{ci.comment}"</p>
+                                    )}
+                                  </div>
+                                );
+                              })}
                               {inclusionsChosen.length > 0 && (
-                                <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                                <div className="flex flex-wrap gap-x-2 gap-y-0.5 pt-0.5">
                                   {inclusionsChosen.map((ci, idx) => (
                                     <span key={idx} className="inline-flex items-center gap-0.5 text-xs text-gray-500">
                                       {ci.name}
@@ -329,15 +324,32 @@ export default function CartPage() {
                 pt-3 space-y-3
               "
             >
-              <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4 flex items-center justify-between">
-                <div className="text-sm font-semibold">Total:</div>
-                <div className="text-xl font-extrabold text-[var(--brand-color)]">
-                  {isRefreshing ? (
+              <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
+                {isRefreshing ? (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold">Total:</span>
                     <span className="text-sm font-normal text-gray-400 animate-pulse">Actualizando...</span>
-                  ) : (
-                    fmt(getTotalPrice())
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  <div className="w-full space-y-2">
+                    {cartSummary && (
+                      <>
+                        <div className="flex items-center justify-between text-sm text-muted-foreground">
+                          <span>Subtotal</span>
+                          <span>{fmt(cartSummary.originalSubtotal)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm" style={{ color: "var(--brand-color)" }}>
+                          <span className="font-medium truncate pr-2">{cartSummary.promoName ?? "Descuento promo"}</span>
+                          <span className="font-semibold shrink-0">−{fmt(cartSummary.savings)}</span>
+                        </div>
+                      </>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold">Total:</span>
+                      <span className="text-xl font-extrabold text-[var(--brand-color)]">{fmt(cartSummary?.total ?? getTotalPrice())}</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-3 flex-nowrap pb-1">

@@ -27,8 +27,7 @@ export default function TrackingPage({ params }: { params: { trackingToken: stri
             return (
                 <div className="flex flex-col flex-1 bg-gray-50">
                     <SiteHeader showBack={false} />
-                    <div className="h-[6px] w-full bg-white" />
-
+        
                     <main className="flex-1 max-w-md mx-auto p-4 space-y-6 w-full">
                         <div className="text-center mt-4">
                             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Seguimiento</p>
@@ -52,7 +51,6 @@ export default function TrackingPage({ params }: { params: { trackingToken: stri
         <div className="flex flex-col flex-1 bg-gray-50">
             <SiteHeader showBack={false} />
             {/* Brand strip */}
-            <div className="h-[6px] w-full bg-white" />
 
             <main className="flex-1 max-w-md mx-auto p-4 space-y-6 w-full">
 

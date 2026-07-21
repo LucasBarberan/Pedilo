@@ -11,7 +11,6 @@ export default function CheckoutPage() {
   return (
     <div className="bg-background">
       <SiteHeader showBack onBack={() => router.back()} />
-      <div className="h-[6px] w-full bg-white" />
 
       <div className="mx-auto w-full max-w-5xl p-4">
         <CheckoutForm

@@ -6,6 +6,8 @@ import { CartProvider } from "@/components/cart-context"
 import { DeveloperFooter } from "@/components/developer-footer"
 import { Suspense } from "react"
 import LayoutShell from "@/components/layout-shell"
+import { TestModeBanner } from "@/components/test-mode-banner"
+import { cookies } from "next/headers"
 import "./globals.css"
 import type { Viewport } from "next";
 
@@ -33,14 +35,18 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = { themeColor: BRAND_COLOR };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const cookieStore = await cookies();
+  const testModeActive = !!cookieStore.get("pedilo_test_token")?.value;
+
   return (
     <html lang="es" className="h-full" style={{ "--brand-color": BRAND_COLOR } as React.CSSProperties}>
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable} h-full flex flex-col`}>
+        {testModeActive && <TestModeBanner />}
         <Suspense fallback={null}>
           <CartProvider>
             <LayoutShell>

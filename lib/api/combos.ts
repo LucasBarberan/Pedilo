@@ -1,6 +1,6 @@
 import { isAllowedForDelivery } from "@/lib/channel";
 import type { Product } from "@/lib/api/products";
-import { normalizeProduct, fetchProductById, fetchProductsByCategory, fetchProductsBySubcategory  } from "@/lib/api/products";
+import { normalizeProduct, fetchProductById } from "@/lib/api/products";
 
 export type ComboItem = {
   id: string | number;
@@ -37,6 +37,53 @@ export type ComboCategoryInclusion = {
   } | null;
 };
 
+export type ComboModifierOverride = {
+  modifierOptionId: number;
+  isEnabled: boolean;
+  extraOverride: number | null;
+  productTemplateId?: number | null;
+};
+
+export type ModifierGroupRuleExpanded = {
+  modifierGroupId: number;
+  includedFreeCount: number;
+};
+
+export type ComboSlotExpanded = {
+  comboItemId: number;
+  slotIndex: number;
+  slotOrder: number;
+  product: {
+    id: number;
+    name: string;
+    modifierGroups: Array<{
+      id: number;
+      name: string;
+      isRequired: boolean;
+      minSelections: number;
+      maxSelections: number;
+      allowsQuantity?: boolean;
+      options: Array<{
+        id: number;
+        name: string;
+        priceExtra?: number | null;
+        isDefault?: boolean;
+        sortOrder?: number;
+        maxQuantity?: number | null;
+      }>;
+    }>;
+  };
+  modifierGroupRules: ModifierGroupRuleExpanded[];
+};
+
+export type SlotSelection = {
+  comboItemId: number;
+  slotIndex: number;
+  // optionId -> cantidad (0 = no seleccionada, se mantiene la entrada para no perder el "toggle off").
+  selectedByGroup: Map<number, Map<number, number>>;
+  comment: string;
+};
+
 export type Combo = {
   id: string | number;
   name: string;
@@ -44,6 +91,7 @@ export type Combo = {
   imageUrl?: string | null;
   basePrice?: number | null;
   effectivePrice?: number | null;
+  promoLabel?: string | null;
   active?: boolean | null;
   channel?: string | null;
   categoryId?: string | number | null;
@@ -54,7 +102,10 @@ export type Combo = {
     isComboCategory?: boolean | null;
   };
   items?: ComboItem[];
+  slots?: ComboSlotExpanded[];
   categoryInclusions?: ComboCategoryInclusion[];
+  modifierOverrides?: ComboModifierOverride[];
+  activePromoLabels?: string[];
 };
 
 type FetchCombosBaseOptions = {
@@ -100,6 +151,45 @@ function extractComboArray(payload: unknown): unknown[] {
     }
   }
   return [];
+}
+
+function normalizeSlot(raw: any): ComboSlotExpanded | null {
+  if (!raw) return null;
+  const comboItemId = Number(raw.comboItemId ?? raw.combo_item_id);
+  if (!Number.isFinite(comboItemId)) return null;
+
+  const rawProduct = raw.product ?? {};
+  const groups = Array.isArray(rawProduct.modifierGroups) ? rawProduct.modifierGroups : [];
+
+  return {
+    comboItemId,
+    slotIndex: Number(raw.slotIndex ?? raw.slot_index ?? 0),
+    slotOrder: Number(raw.slotOrder ?? raw.slot_order ?? 0),
+    product: {
+      id: Number(rawProduct.id ?? 0),
+      name: String(rawProduct.name ?? ""),
+      modifierGroups: groups.map((g: any) => ({
+        id: Number(g.id),
+        name: String(g.name ?? ""),
+        isRequired: g.isRequired ?? g.is_required ?? false,
+        minSelections: Number(g.minSelections ?? g.min_selections ?? 1),
+        maxSelections: Number(g.maxSelections ?? g.max_selections ?? 1),
+        allowsQuantity: g.allowsQuantity ?? g.allows_quantity ?? false,
+        options: Array.isArray(g.options) ? g.options.map((o: any) => ({
+          id: Number(o.id),
+          name: String(o.name ?? ""),
+          priceExtra: parseNullableNumber(o.priceExtra ?? o.price_extra ?? o.extra),
+          isDefault: o.isDefault ?? o.is_default ?? false,
+        })) : [],
+      })),
+    },
+    modifierGroupRules: Array.isArray(raw.modifierGroupRules)
+      ? raw.modifierGroupRules.map((r: any) => ({
+          modifierGroupId: Number(r.modifierGroupId ?? r.modifier_group_id),
+          includedFreeCount: Number(r.includedFreeCount ?? r.included_free_count ?? 0),
+        }))
+      : [],
+  };
 }
 
 function normalizeComboItem(raw: any): ComboItem | null {
@@ -217,6 +307,21 @@ function normalizeCombo(raw: any): Combo | null {
     .map((inc) => normalizeComboCategoryInclusion(inc))
     .filter((inc): inc is ComboCategoryInclusion => Boolean(inc));
 
+  const overridesRaw: any[] = Array.isArray(raw.optionOverrides) ? raw.optionOverrides : [];
+  const modifierOverrides: ComboModifierOverride[] = overridesRaw
+    .filter((o) => o && o.modifierOptionId != null)
+    .map((o) => ({
+      modifierOptionId: Number(o.modifierOptionId),
+      isEnabled: o.isEnabled !== false,
+      extraOverride: parseNullableNumber(o.extraOverride ?? o.extra_override),
+      productTemplateId: o.productTemplateId != null ? Number(o.productTemplateId) : null,
+    }));
+
+  const slotsRaw: any[] = Array.isArray(raw.slots) ? raw.slots : [];
+  const slots: ComboSlotExpanded[] = slotsRaw
+    .map(normalizeSlot)
+    .filter((s): s is ComboSlotExpanded => s !== null);
+
   if (!description) {
     const main = items.find((item) => item?.isMain && typeof item?.product?.description === "string" && item.product.description.trim());
     const first = items.find((item) => typeof item?.product?.description === "string" && item.product.description.trim());
@@ -230,13 +335,17 @@ function normalizeCombo(raw: any): Combo | null {
     imageUrl,
     basePrice,
     effectivePrice,
+    promoLabel: typeof raw.promoLabel === "string" ? raw.promoLabel : null,
     active: raw.active ?? raw.isActive ?? null,
     channel: raw.channel ?? raw.availableChannel ?? null,
     categoryId: raw.categoryId ?? raw.category_id ?? category?.id ?? null,
     categoryName: category?.name ?? null,
     category,
     items,
+    slots: slots.length > 0 ? slots : undefined,
     categoryInclusions,
+    modifierOverrides,
+    activePromoLabels: Array.isArray(raw.activePromoLabels) ? raw.activePromoLabels : undefined,
   };
 }
 
@@ -254,11 +363,6 @@ export async function fetchCombos({
   baseUrl,
   signal,
   categoryId,
-  withItems = false,
-  withCategoryInclusions = false,
-  withEffectivePrice = true,
-  page,
-  limit,
   onlyActive = false,
   onlyDeliveryAllowed = false,
   onlyComboCategory = false,
@@ -266,16 +370,7 @@ export async function fetchCombos({
   const base = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
   if (!base) return [];
 
-  const search = new URLSearchParams();
-  if (withItems) search.set("withItems", "true");
-  if (withCategoryInclusions) search.set("withCategoryInclusions", "true");
-  if (withEffectivePrice) search.set("withEffectivePrice", "true");
-  if (categoryId !== undefined && categoryId !== null) search.set("category", String(categoryId));
-  if (page) search.set("page", String(page));
-  if (limit) search.set("limit", String(limit));
-
-  const qs = search.toString();
-  const url = `${base}/combo${qs ? `?${qs}` : ""}`;
+  const url = `${base}/catalog/combos?channel=WEB`;
 
   try {
     const res = await fetch(url, { cache: "no-store", signal });
@@ -315,7 +410,10 @@ export async function fetchComboById(
   const search = new URLSearchParams();
   if (withItems) search.set("withItems", "true");
   if (withCategoryInclusions) search.set("withCategoryInclusions", "true");
-  if (withEffectivePrice) search.set("withEffectivePrice", "true");
+  if (withEffectivePrice) {
+    search.set("withEffectivePrice", "true");
+    search.set("pricingChannel", "WEB");
+  }
 
   const qs = search.toString();
   const url = `${base}/combo/${encodeURIComponent(String(id))}${qs ? `?${qs}` : ""}`;
@@ -346,83 +444,62 @@ export async function fetchComboDetail(
   mainProduct: Product | null;
   inclusionProducts: Record<string, Product[]>;
 }> {
-  const combo = await fetchComboById(comboId, {
-    baseUrl,
-    signal,
-    withItems: true,
-    withCategoryInclusions: true,
-    withEffectivePrice: true,
-  });
+  const base = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  if (!base) return { combo: null, mainProduct: null, inclusionProducts: {} };
 
-  if (!combo) {
+  try {
+    const res = await fetch(
+      `${base}/catalog/combos/${encodeURIComponent(String(comboId))}?channel=WEB&withInclusionProducts=true`,
+      { cache: "no-store", signal }
+    );
+    if (!res.ok) return { combo: null, mainProduct: null, inclusionProducts: {} };
+
+    const json = await res.json();
+    const raw = json?.data ?? json;
+    if (!raw) return { combo: null, mainProduct: null, inclusionProducts: {} };
+
+    const combo = normalizeCombo(raw);
+    if (!combo) return { combo: null, mainProduct: null, inclusionProducts: {} };
+
+    // mainProduct: hidratar desde items con modifiers
+    const mainItem = (combo.items ?? []).find((item) => item?.isMain);
+    let mainProduct = mainItem?.product ?? null;
+    const mainProductId = mainItem?.productId;
+
+    const needsHydration =
+      mainProductId !== undefined &&
+      mainProductId !== null &&
+      (!mainProduct ||
+        !Array.isArray(mainProduct.modifierGroups) ||
+        mainProduct.modifierGroups.length === 0);
+
+    if (needsHydration) {
+      const fetched = await fetchProductById(mainProductId, { baseUrl, signal, comboId: Number(comboId) });
+      if (fetched) {
+        mainProduct = mainProduct
+          ? {
+              ...mainProduct,
+              ...fetched,
+              productOptions: fetched.productOptions ?? mainProduct.productOptions,
+              modifierGroups: fetched.modifierGroups ?? mainProduct.modifierGroups,
+            }
+          : fetched;
+      }
+    }
+
+    // inclusionProducts ya vienen pre-hidratados del backend
+    const rawInclusionProducts = raw.inclusionProducts ?? {};
+    const inclusionProducts: Record<string, Product[]> = {};
+    for (const [key, minimalProducts] of Object.entries(rawInclusionProducts)) {
+      inclusionProducts[key] = (minimalProducts as any[])
+        .map((p: any) => normalizeProduct(p))
+        .filter((p): p is Product => p !== null && p.isActive !== false);
+    }
+
+    return { combo, mainProduct, inclusionProducts };
+  } catch {
     return { combo: null, mainProduct: null, inclusionProducts: {} };
   }
-
-  const mainItem = (combo.items ?? []).find((item) => item?.isMain);
-  let mainProduct = mainItem?.product ?? null;
-  const mainProductId = mainItem?.productId;
-
-  const needsHydratedMainProduct =
-    mainProductId !== undefined &&
-    mainProductId !== null &&
-    (!mainProduct || !Array.isArray(mainProduct.productOptions) || mainProduct.productOptions.length === 0);
-
-  if (needsHydratedMainProduct) {
-    const fetchedMain = await fetchProductById(mainProductId, { baseUrl, signal });
-    if (fetchedMain) {
-      mainProduct = mainProduct
-        ? {
-            ...mainProduct,
-            ...fetchedMain,
-            productOptions: fetchedMain.productOptions ?? mainProduct.productOptions,
-          }
-        : fetchedMain;
-    }
-  }
-
-  const inclusionProductsEntries = await Promise.all(
-    (combo.categoryInclusions ?? []).map(async (inc) => {
-      if (!inc?.id) return null;
-
-      // Preferimos subcategoría si está seteada
-      const subId = inc.subcategoryId ?? inc.subcategory?.id ?? null;
-      const catId = inc.categoryId ?? inc.category?.id ?? null;
-
-      let products: Product[] = [];
-      try {
-        if (subId != null) {
-          products = await fetchProductsBySubcategory(subId, {
-            baseUrl,
-            signal,
-            limit: 100,
-            includeInactive: false,
-          });
-        } else if (catId != null) {
-          products = await fetchProductsByCategory(catId, {
-            baseUrl,
-            signal,
-            limit: 100,
-            includeInactive: false,
-          });
-        } else {
-          return null; // nada que buscar
-        }
-      } catch {
-        products = [];
-      }
-
-      return [String(inc.id), products.filter((p) => p.isActive !== false)] as const;
-    })
-  );
-
-  const inclusionProducts: Record<string, Product[]> = {};
-  for (const entry of inclusionProductsEntries) {
-    if (!entry) continue;
-    const [key, products] = entry as [string, Product[]];
-    inclusionProducts[key] = products;
-  }
-
-  return { combo, mainProduct, inclusionProducts };
 }
 
 
