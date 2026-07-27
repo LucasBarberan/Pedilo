@@ -10,6 +10,7 @@ import { useCartRefresh } from "@/hooks/useCartRefresh";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { DeliveryMap } from "@/components/delivery-map";
 import { fetchDeliveryQuote, fetchDeliveryPricingEnabled, type DeliveryQuoteResponse } from "@/lib/api/delivery";
+import { fetchPaymentMethods } from "@/lib/api/business";
 
 type Customer = {
   name: string;
@@ -74,11 +75,31 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     fetchDeliveryPricingEnabled().then(setDeliveryPricingEnabled);
   }, []);
 
+  // Mercado Pago: el botón solo se muestra si el negocio lo tiene disponible
+  // (módulo habilitado + cuenta OAuth conectada) — hoy estaba hardcodeado sin
+  // ningún chequeo. Ver openspec/changes/mercadopago-marketplace-checkout/.
+  const [mercadoPagoAvailable, setMercadoPagoAvailable] = useState(false);
+  const [mercadoPagoServiceFeePercent, setMercadoPagoServiceFeePercent] = useState<number | null>(null);
+  useEffect(() => {
+    fetchPaymentMethods()
+      .then(({ mercadoPagoAvailable, mercadoPagoServiceFeePercent }) => {
+        setMercadoPagoAvailable(mercadoPagoAvailable);
+        setMercadoPagoServiceFeePercent(mercadoPagoServiceFeePercent);
+      })
+      .catch(() => setMercadoPagoAvailable(false));
+  }, []);
+
   const [deliveryMethod, setDeliveryMethod] = useState<"delivery" | "pickup" | null>(
     DELIVERY_ENABLED ? null : "pickup"
   );
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "mp">("cash");
   const [notes, setNotes] = useState("");
+
+  useEffect(() => {
+    if (paymentMethod === "mp" && !mercadoPagoAvailable) {
+      setPaymentMethod("cash");
+    }
+  }, [paymentMethod, mercadoPagoAvailable]);
 
   // Pedidos programados: se asume siempre para el mismo día — el input es solo horario (HH:mm)
   const [scheduleLater, setScheduleLater] = useState(false); // destildado por defecto = "pedir para ya"
@@ -609,7 +630,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         paymentMethod === "cash"
           ? "CASH"
           : paymentMethod === "mp"
-            ? "TRANSFER"
+            ? "MERCADOPAGO"
             : "CARD";
 
       const apiBodyRaw: any = {
@@ -660,6 +681,16 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           undefined;
         const rawTotal = parsed?.data?.total ?? parsed?.total;
         if (rawTotal != null) createdTotal = Number(rawTotal);
+
+        // Mercado Pago: la orden quedó en PAYMENT_PENDING esperando el webhook
+        // de confirmación — nunca se muestra el modal de WhatsApp para este
+        // método de pago, se redirige directo a Mercado Pago a pagar.
+        const paymentUrl = parsed?.data?.paymentUrl ?? parsed?.paymentUrl;
+        if (paymentUrl) {
+          clearCart();
+          window.location.href = paymentUrl;
+          return;
+        }
       } catch {
         // si no es JSON, dejamos undefined
       }
@@ -1005,15 +1036,17 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             >
               Efectivo
             </button>
-            <button
-              onClick={() => setPaymentMethod("mp")}
-              className={`px-3 py-2 rounded-lg border ${paymentMethod === "mp"
-                ? "border-[var(--brand-color)] bg-[#fff5f2]"
-                : "border-transparent hover:bg-black/5"
-                }`}
-            >
-              Mercado Pago
-            </button>
+            {mercadoPagoAvailable && (
+              <button
+                onClick={() => setPaymentMethod("mp")}
+                className={`px-3 py-2 rounded-lg border ${paymentMethod === "mp"
+                  ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                  : "border-transparent hover:bg-black/5"
+                  }`}
+              >
+                Mercado Pago
+              </button>
+            )}
           </div>
         </div>
 
@@ -1185,10 +1218,23 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                   </span>
                 </div>
               )}
+              {/* Tasa de servicio de Mercado Pago — informativa, el monto final
+                  autoritativo lo confirma el backend al crear la preferencia
+                  (nunca es un recargo por tarjeta/medio de pago específico). */}
+              {paymentMethod === "mp" && mercadoPagoServiceFeePercent != null && mercadoPagoServiceFeePercent > 0 && (
+                <div className="flex items-center justify-between text-sm text-muted-foreground">
+                  <span>Tasa de servicio ({mercadoPagoServiceFeePercent}%)</span>
+                  <span>{fmt(Math.round(totalWithDelivery * (mercadoPagoServiceFeePercent / 100)))}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold">Total:</span>
                 <span className="text-xl font-extrabold text-[var(--brand-color)]">
-                  {fmt(totalWithDelivery)}
+                  {fmt(
+                    paymentMethod === "mp" && mercadoPagoServiceFeePercent != null
+                      ? Math.round(totalWithDelivery * (1 + mercadoPagoServiceFeePercent / 100))
+                      : totalWithDelivery
+                  )}
                 </span>
               </div>
             </div>

@@ -26,3 +26,20 @@ export async function fetchBusinessStatus(): Promise<CombinedStatus> {
   if (!res.ok) throw new Error("No se pudo obtener el estado del negocio");
   return res.json();
 }
+
+export type PaymentMethodsAvailability = {
+  mercadoPagoAvailable: boolean;
+  mercadoPagoServiceFeePercent: number | null;
+};
+
+/**
+ * Ver openspec/changes/mercadopago-marketplace-checkout/ — Pedilo no tiene
+ * acceso al estado de módulos de Backend, consulta acá si debe mostrar el
+ * botón de Mercado Pago (y con qué tasa de servicio informativa).
+ */
+export async function fetchPaymentMethods(): Promise<PaymentMethodsAvailability> {
+  if (!API) throw new Error("Falta NEXT_PUBLIC_API_URL");
+  const res = await fetch(`${API}/business/payment-methods`, { cache: "no-store" });
+  if (!res.ok) throw new Error("No se pudo obtener los métodos de pago disponibles");
+  return res.json();
+}
