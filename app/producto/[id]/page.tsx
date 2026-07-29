@@ -16,6 +16,7 @@ import BlockingLoader from "@/components/blocking-loader";
 import { fixImageUrl } from "@/lib/img";
 import { fetchProductById, type Product, type ModifierGroup, type ModifierGroupOption } from "@/lib/api/products";
 import { buildPromoLabel } from "@/lib/pricing";
+import { useTableOrder } from "@/components/table-order-context";
 
 // ===== Helpers de formato y cálculos =====
 const MAX_NOTES = 50;
@@ -167,11 +168,13 @@ export default function ProductDetailPage() {
   const [submitting, setSubmitting] = useState(false);
   const { data: status } = useBusinessStatusSmart();
   const { config: onlineConfig } = useOnlineConfig();
+  const { isTableMode, context: tableContext, loading: tableLoading } = useTableOrder();
   // mientras carga: true => botón habilitado (si preferís bloquear hasta cargar, cambiá a !!status?.web.open)
   const isWebOpen = status?.web?.open ?? true;
   const pickupOnly = !!(status?.pos?.open && status?.web?.open === false);
 
-  const disabledByStatus = !isWebOpen;
+  const orderingEnabled = isTableMode ? tableContext?.canOrder === true : isWebOpen;
+  const disabledByStatus = !orderingEnabled || (isTableMode && tableLoading);
 
 
   const [prod, setProd] = useState<Product | null>(null);
@@ -767,7 +770,7 @@ export default function ProductDetailPage() {
                   active:bg-[color-mix(in_srgb,var(--brand-color),#000_18%)]
                   hover:brightness-95 active:brightness-90
                   disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none`}
-                onClick={isWebOpen ? handleAdd : undefined}
+                onClick={orderingEnabled ? handleAdd : undefined}
                 disabled={disabledByStatus || !prod || submitting}
                 title={
                   disabledByStatus
@@ -777,7 +780,7 @@ export default function ProductDetailPage() {
                 aria-disabled={disabledByStatus || !prod || submitting}
               >
                 {disabledByStatus
-                  ? (pickupOnly ? "Solo en el local" : "Local cerrado")
+                  ? (isTableMode ? "Mesa no habilitada" : pickupOnly ? "Solo en el local" : "Local cerrado")
                   : (justAdded ? "Agregado ✔" : "Agregar al Carrito")}
               </Button>
             </div>

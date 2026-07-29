@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { DeveloperFooter } from "@/components/developer-footer";
+import { TableOrderBanner } from "@/components/table-order-banner";
 
 type FooterCtx = { hide: () => void; show: () => void };
 const FooterContext = createContext<FooterCtx>({ hide: () => {}, show: () => {} });
@@ -24,6 +25,7 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
   return (
     <FooterContext.Provider value={{ hide, show }}>
       <div id="app-scroll" className="flex-1 overflow-auto flex flex-col">
+        <TableOrderBanner />
         {children}
         {!footerHidden && <DeveloperFooter />}
       </div>
