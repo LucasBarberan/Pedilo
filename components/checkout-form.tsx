@@ -9,7 +9,7 @@ import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import { useCartRefresh } from "@/hooks/useCartRefresh";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { DeliveryMap } from "@/components/delivery-map";
-import { fetchDeliveryQuote, fetchDeliveryPricingEnabled, type DeliveryQuoteResponse } from "@/lib/api/delivery";
+import { fetchDeliveryQuote, fetchDeliveryPricingEnabled, fetchDeliveryLocationBias, type DeliveryQuoteResponse } from "@/lib/api/delivery";
 
 type Customer = {
   name: string;
@@ -72,6 +72,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const [deliveryPricingEnabled, setDeliveryPricingEnabled] = useState(false);
   useEffect(() => {
     fetchDeliveryPricingEnabled().then(setDeliveryPricingEnabled);
+  }, []);
+
+  // Centro/radio para priorizar sugerencias del autocomplete cercanas a la
+  // zona real de cobertura del comercio (ver AddressAutocomplete locationBias).
+  const [deliveryLocationBias, setDeliveryLocationBias] = useState<{ latitude: number; longitude: number; radiusMeters: number } | null>(null);
+  useEffect(() => {
+    fetchDeliveryLocationBias().then(setDeliveryLocationBias);
   }, []);
 
   const [deliveryMethod, setDeliveryMethod] = useState<"delivery" | "pickup" | null>(
@@ -944,6 +951,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                       if (formError && v.trim() && /direcci[oó]n/i.test(formError)) setFormError("");
                     }}
                     onPlaceSelect={handleAddressSelect}
+                    locationBias={deliveryLocationBias}
                     className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
                     placeholder="Empezá a escribir tu dirección..."
                   />

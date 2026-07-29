@@ -24,6 +24,11 @@ type Suggestion = {
   text: string;
 };
 
+/** Centro + radio para priorizar sugerencias cercanas (el comercio y su zona
+ * de cobertura de delivery) — no excluye resultados fuera del radio, solo
+ * los reordena más abajo (Places API `locationBias`, no `Restriction`). */
+type LocationBias = { latitude: number; longitude: number; radiusMeters: number };
+
 interface AddressAutocompleteProps {
   value: string;
   onChange: (address: string) => void;
@@ -32,6 +37,7 @@ interface AddressAutocompleteProps {
   className?: string;
   /** Callback ref únicamente (no RefObject) — evita mutar una prop directamente. */
   onInputElement?: (el: HTMLInputElement | null) => void;
+  locationBias?: LocationBias | null;
 }
 
 const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_PLACES_API_KEY;
@@ -53,6 +59,7 @@ export function AddressAutocomplete({
   placeholder,
   className,
   onInputElement,
+  locationBias,
 }: AddressAutocompleteProps) {
   const internalRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -89,13 +96,30 @@ export function AddressAutocomplete({
           },
           body: JSON.stringify({
             input: value,
-            regionCode: "AR",
+            // includedRegionCodes es un filtro duro (excluye todo lo que no
+            // sea AR) — regionCode por sí solo es solo un "bias" suave que
+            // igual puede devolver resultados de otros países si el texto
+            // matchea fuerte ahí.
+            includedRegionCodes: ["ar"],
             languageCode: "es",
             // "route" (calle sin altura) queda afuera a propósito: si esa
             // sugerencia se elegía, el placeId resultante correspondía a la
             // vía genérica y perdía la altura numérica (bug reportado: "San
             // Luis 50" se guardaba como "San Luis" sin el 50).
             includedPrimaryTypes: ["street_address", "premise", "subpremise"],
+            // Prioriza (sin excluir) direcciones cercanas al comercio — ej.
+            // dentro de su radio de cobertura de delivery. Sigue mostrando
+            // resultados fuera del radio, solo los ordena más abajo.
+            ...(locationBias
+              ? {
+                  locationBias: {
+                    circle: {
+                      center: { latitude: locationBias.latitude, longitude: locationBias.longitude },
+                      radius: locationBias.radiusMeters,
+                    },
+                  },
+                }
+              : {}),
           }),
           signal: controller.signal,
         });
@@ -125,7 +149,8 @@ export function AddressAutocomplete({
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [value, selected]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, selected, locationBias?.latitude, locationBias?.longitude, locationBias?.radiusMeters]);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {

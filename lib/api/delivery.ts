@@ -22,8 +22,45 @@ export type DeliveryQuoteResponse = {
 
 const API = process.env.NEXT_PUBLIC_API_URL; // ej: http://localhost:5000/api
 
-let _configCache: boolean | null = null;
-let _configPromise: Promise<boolean> | null = null;
+type DeliveryConfigSnapshot = {
+  enabled: boolean;
+  latitude: number | null;
+  longitude: number | null;
+  maxKm: number | null;
+};
+
+let _configCache: DeliveryConfigSnapshot | null = null;
+let _configPromise: Promise<DeliveryConfigSnapshot> | null = null;
+
+const EMPTY_CONFIG: DeliveryConfigSnapshot = { enabled: false, latitude: null, longitude: null, maxKm: null };
+
+async function loadDeliveryConfig(): Promise<DeliveryConfigSnapshot> {
+  if (_configCache !== null) return _configCache;
+  if (_configPromise) return _configPromise;
+
+  _configPromise = (async () => {
+    try {
+      if (!API) return EMPTY_CONFIG;
+      const res = await fetch(`${API}/delivery/config`, { cache: "no-store" });
+      if (!res.ok) return EMPTY_CONFIG;
+      const body = await res.json();
+      const snapshot: DeliveryConfigSnapshot = {
+        enabled: Boolean(body?.data?.enabled),
+        latitude: body?.data?.latitude ?? null,
+        longitude: body?.data?.longitude ?? null,
+        maxKm: body?.data?.maxKm ?? null,
+      };
+      _configCache = snapshot;
+      return snapshot;
+    } catch {
+      return EMPTY_CONFIG;
+    } finally {
+      _configPromise = null;
+    }
+  })();
+
+  return _configPromise;
+}
 
 /**
  * Consulta si el módulo DELIVERY_PRICING está habilitado. Se llama ANTES de
@@ -32,26 +69,20 @@ let _configPromise: Promise<boolean> | null = null;
  * server-side), ver openspec/changes/delivery-pricing/design.md punto 6.
  */
 export async function fetchDeliveryPricingEnabled(): Promise<boolean> {
-  if (_configCache !== null) return _configCache;
-  if (_configPromise) return _configPromise;
+  const { enabled } = await loadDeliveryConfig();
+  return enabled;
+}
 
-  _configPromise = (async () => {
-    try {
-      if (!API) return false;
-      const res = await fetch(`${API}/delivery/config`, { cache: "no-store" });
-      if (!res.ok) return false;
-      const body = await res.json();
-      const enabled = Boolean(body?.data?.enabled);
-      _configCache = enabled;
-      return enabled;
-    } catch {
-      return false;
-    } finally {
-      _configPromise = null;
-    }
-  })();
-
-  return _configPromise;
+/**
+ * Centro (ubicación del comercio) + radio (maxKm de cobertura configurado)
+ * para priorizar sugerencias del autocomplete cercanas a la zona real de
+ * delivery — evita mostrar como primera opción una calle homónima en otra
+ * provincia. `null` si el comercio todavía no tiene ubicación configurada.
+ */
+export async function fetchDeliveryLocationBias(): Promise<{ latitude: number; longitude: number; radiusMeters: number } | null> {
+  const { latitude, longitude, maxKm } = await loadDeliveryConfig();
+  if (latitude == null || longitude == null || maxKm == null) return null;
+  return { latitude, longitude, radiusMeters: maxKm * 1000 };
 }
 
 /**
