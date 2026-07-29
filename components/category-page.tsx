@@ -239,7 +239,11 @@ export default function CategoryPageClient({
                       tabIndex={0}
                       className="rounded-2xl bg-white/60 ring-1 ring-black/5 shadow-sm p-4 flex gap-3 cursor-pointer hover:shadow-md transition"
                     >
-                      <div className="relative h-20 w-24 rounded-lg overflow-hidden flex-shrink-0">
+                      {/* 4:3 — mismo ratio que ya usa la página de detalle y en el que
+                          se recorta la imagen al subirla en el panel admin, así se
+                          muestra tal cual la encuadró quien la cargó, sin recortes
+                          adicionales "a ciegas" acá. */}
+                      <div className="relative h-24 w-32 rounded-lg overflow-hidden flex-shrink-0">
                         <Image
                           src={fixImageUrl((p as any).imageUrl) || "/placeholder.svg"}
                           alt={String((p as any).name)}
