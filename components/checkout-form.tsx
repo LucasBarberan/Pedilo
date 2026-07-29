@@ -9,7 +9,7 @@ import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import { useCartRefresh } from "@/hooks/useCartRefresh";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { DeliveryMap } from "@/components/delivery-map";
-import { fetchDeliveryQuote, fetchDeliveryPricingEnabled, type DeliveryQuoteResponse } from "@/lib/api/delivery";
+import { fetchDeliveryQuote, fetchDeliveryPricingEnabled, fetchDeliveryLocationBias, type DeliveryQuoteResponse } from "@/lib/api/delivery";
 
 type Customer = {
   name: string;
@@ -74,6 +74,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     fetchDeliveryPricingEnabled().then(setDeliveryPricingEnabled);
   }, []);
 
+  // Centro/radio para priorizar sugerencias del autocomplete cercanas a la
+  // zona real de cobertura del comercio (ver AddressAutocomplete locationBias).
+  const [deliveryLocationBias, setDeliveryLocationBias] = useState<{ latitude: number; longitude: number; radiusMeters: number } | null>(null);
+  useEffect(() => {
+    fetchDeliveryLocationBias().then(setDeliveryLocationBias);
+  }, []);
+
   const [deliveryMethod, setDeliveryMethod] = useState<"delivery" | "pickup" | null>(
     DELIVERY_ENABLED ? null : "pickup"
   );
@@ -126,15 +133,19 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
 
   // Precio de envío a mostrar: prioriza la cotización real por distancia.
-  // Si no hay cotización, la dirección está fuera de cobertura, o el servicio
-  // de ruteo falló, cae al fee fijo configurado ("a coordinar con el local"
-  // si DELIVERY_FEE es 0). El Backend vuelve a calcular todo al confirmar.
+  // Con el módulo DELIVERY_PRICING habilitado, el fee fijo legado ya no
+  // aplica como respaldo — si no hay cotización, la dirección está fuera de
+  // cobertura, o el servicio de ruteo falló, el envío queda en 0 ("a
+  // coordinar con el local"), nunca en el valor fijo que pudiera haber
+  // quedado cargado de antes. Ese fee fijo solo se usa con el módulo
+  // deshabilitado. El Backend vuelve a calcular todo al confirmar.
   const resolvedDeliveryPrice = useMemo(() => {
     if (deliveryQuote?.withinCoverage && deliveryQuote.price != null) {
       return deliveryQuote.price;
     }
+    if (deliveryPricingEnabled) return 0;
     return DELIVERY_FEE;
-  }, [deliveryQuote, DELIVERY_FEE]);
+  }, [deliveryQuote, DELIVERY_FEE, deliveryPricingEnabled]);
 
   const deliveryOutOfCoverage = deliveryQuote != null && !deliveryQuote.withinCoverage;
 
@@ -940,6 +951,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                       if (formError && v.trim() && /direcci[oó]n/i.test(formError)) setFormError("");
                     }}
                     onPlaceSelect={handleAddressSelect}
+                    locationBias={deliveryLocationBias}
                     className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
                     placeholder="Empezá a escribir tu dirección..."
                   />
