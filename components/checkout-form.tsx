@@ -10,6 +10,7 @@ import { useCartRefresh } from "@/hooks/useCartRefresh";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { DeliveryMap } from "@/components/delivery-map";
 import { fetchDeliveryQuote, fetchDeliveryPricingEnabled, fetchDeliveryLocationBias, type DeliveryQuoteResponse } from "@/lib/api/delivery";
+import { isWholesaleMode } from "@/lib/storeMode";
 
 type Customer = {
   name: string;
@@ -17,6 +18,7 @@ type Customer = {
   address: string;
   addressUnit: string;
   placeId?: string;
+  dni: string;
 };
 
 type Props = {
@@ -57,6 +59,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     phone: "",
     address: "",
     addressUnit: "",
+    dni: "",
   });
 
   // Cotización de envío por distancia real (delivery-pricing). El precio
@@ -132,9 +135,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   }, [configLoading]);
 
   const [phoneTouched, setPhoneTouched] = useState(false);
+  const [dniTouched, setDniTouched] = useState(false);
   const [formError, setFormError] = useState<string>("");
   const nameRef = useRef<HTMLInputElement>(null);
   const phoneRef = useRef<HTMLInputElement>(null);
+  const dniRef = useRef<HTMLInputElement>(null);
   const addressRef = useRef<HTMLInputElement | null>(null);
 
   const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
@@ -322,6 +327,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     return "Revisá el formato del teléfono";
   };
 
+  // DNI argentino: 7-8 dígitos — solo se pide/valida en modo wholesale.
+  const isDniValid = (v: string) => /^\d{7,8}$/.test(v.trim());
+
   // debajo de isPhoneValid:
   const isNonEmpty = (s: string) => !!s.trim();
 
@@ -455,6 +463,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       phoneRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
+    if (isWholesaleMode() && !isDniValid(customer.dni)) {
+      setDniTouched(true);
+      setFormError("Ingresá un DNI válido (7 u 8 dígitos, sin puntos).");
+      dniRef.current?.focus();
+      dniRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
     // validar que eligió un método de envío
     if (DELIVERY_ENABLED && deliveryMethod === null) {
       setFormError("Seleccioná un método de entrega: Delivery o Retiro en el local.");
@@ -474,6 +489,14 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       setFormError("Elegí tu dirección de la lista de sugerencias (no alcanza con escribirla).");
       addressRef.current?.focus();
       addressRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    // Red de seguridad además del disabled del botón: mientras se está
+    // calculando el envío no dejamos enviar, para que nunca quede un pedido
+    // creado con envío "a coordinar con el local" cuando en realidad la
+    // cotización todavía estaba en vuelo.
+    if (DELIVERY_ENABLED && deliveryMethod === "delivery" && deliveryPricingEnabled && quotingDelivery) {
+      setFormError("Estamos calculando el costo de envío, esperá un momento.");
       return;
     }
     // si eligió programar el pedido, validamos el horario (ayuda de UX — el backend vuelve a validar)
@@ -646,6 +669,35 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             ? "TRANSFER"
             : "CARD";
 
+      // Modo wholesale: resolver/crear el Customer por DNI antes de armar el
+      // pedido — el back necesita customerId para asociarlo (ver
+      // openspec/changes/pedilo-wholesale-pickup/specs/customers/spec.md).
+      // Si falla, no seguimos: sin customerId el pedido quedaría a nombre de
+      // "Consumidor Final" en vez del cliente real.
+      let resolvedCustomerId: number | undefined;
+      if (isWholesaleMode()) {
+        try {
+          const dniRes = await fetch(`${BASE}/customers/resolve-by-dni`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              dni: customer.dni.trim(),
+              name: customer.name.trim(),
+              phone: phoneNormalized,
+            }),
+          });
+          if (!dniRes.ok) throw new Error(`HTTP ${dniRes.status}`);
+          const dniJson = await dniRes.json();
+          resolvedCustomerId = dniJson?.data?.id ?? dniJson?.id;
+          if (!resolvedCustomerId) throw new Error("Respuesta sin id de cliente");
+        } catch (err) {
+          console.error("❌ No se pudo resolver el cliente por DNI", err);
+          setFormError("No pudimos validar tu DNI. Revisalo e intentá de nuevo.");
+          setSubmitting(false);
+          return;
+        }
+      }
+
       const apiBodyRaw: any = {
         items: itemsForApi,
         combos: combosForApi,
@@ -655,6 +707,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         delivery_info,
         channel,                  // "WEB"
         fulfillment,              // "DELIVERY" | "TAKEAWAY"
+        ...(resolvedCustomerId != null ? { customerId: resolvedCustomerId } : {}),
       };
 
       // limpieza defensiva (sin undefined). OJO: "options" ({id,qty}[]) es un campo
@@ -958,6 +1011,46 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             )}
           </p>
 
+          {/* DNI — solo en modo wholesale, para resolver/crear el Customer asociado al pedido */}
+          {isWholesaleMode() && (
+            <>
+              <label className="block text-sm mb-1">DNI</label>
+              <input
+                ref={dniRef}
+                id="dni-input"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={8}
+                className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 mb-1 ${
+                  dniTouched && !isDniValid(customer.dni)
+                    ? "border-red-500 focus:ring-red-400"
+                    : "focus:ring-[var(--brand-color)]"
+                }`}
+                value={customer.dni}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/\D/g, "");
+                  setCustomer({ ...customer, dni: v });
+                  if (formError && isDniValid(v)) setFormError("");
+                }}
+                onBlur={() => setDniTouched(true)}
+                placeholder="Ej: 12345678"
+                aria-invalid={dniTouched && !isDniValid(customer.dni)}
+                aria-describedby="dni-help"
+              />
+              <p
+                id="dni-help"
+                className={`text-xs mb-3 ${
+                  dniTouched && !isDniValid(customer.dni) ? "text-red-600" : "text-muted-foreground"
+                }`}
+              >
+                {dniTouched && !isDniValid(customer.dni)
+                  ? "El DNI debe tener 7 u 8 dígitos, sin puntos ni letras."
+                  : "* Necesario para asociar tu pedido a tu cuenta de cliente."}
+              </p>
+            </>
+          )}
+
           {/* Dirección SOLO si delivery */}
           {deliveryMethod === "delivery" && (
             <>
@@ -1259,8 +1352,14 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                                     hover:brightness-95 active:brightness-90
                                     disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none
                                     ${!storeOpen ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`
-          } onClick={submitOrder} disabled={submitting || isRefreshing}>
-            {isRefreshing ? "Verificando precios..." : submitting ? "Enviando..." : "Enviar Pedido"}
+          } onClick={submitOrder} disabled={submitting || isRefreshing || quotingDelivery}>
+            {isRefreshing
+              ? "Verificando precios..."
+              : quotingDelivery
+                ? "Calculando envío..."
+                : submitting
+                  ? "Enviando..."
+                  : "Enviar Pedido"}
           </Button>
           <Button
             className="w-full"
