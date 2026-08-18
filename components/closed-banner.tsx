@@ -3,10 +3,13 @@
 
 import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
+import { useTableOrder } from "@/components/table-order-context";
 
 export default function ClosedBanner() {
   const { data: status, error } = useBusinessStatusSmart();
   const { config } = useOnlineConfig();
+  const { isTableMode } = useTableOrder();
+  if (isTableMode) return null;
   if (error || !status) return null;
 
   const tz = status.timezone || "America/Argentina/Cordoba";

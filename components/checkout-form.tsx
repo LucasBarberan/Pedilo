@@ -13,6 +13,7 @@ import { fetchDeliveryQuote, fetchDeliveryPricingEnabled, fetchDeliveryLocationB
 import { fetchLoyaltyEnabled, fetchLoyaltyStatus, fetchLoyaltyEarnPreview, type LoyaltyCustomerStatus } from "@/lib/api/loyalty";
 import { isWholesaleMode } from "@/lib/storeMode";
 import { Sparkles, PartyPopper, Coins } from "lucide-react";
+import { useTableOrder } from "@/components/table-order-context";
 
 type Customer = {
   name: string;
@@ -29,6 +30,25 @@ type Props = {
 };
 
 const fmt = (n: number) => `$${n.toLocaleString("es-AR")}`;
+
+const createClientRequestId = () => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
 
 // ranking de tamaños: triple -> doble -> simple
 const SIZE_RANK: Record<string, number> = { triple: 0, doble: 1, simple: 2 };
@@ -49,6 +69,12 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const { items, getTotalPrice, clearCart } = useCart();
   const { config, isLoading: configLoading } = useOnlineConfig();
   const { data: businessStatus } = useBusinessStatusSmart();
+  const {
+    isTableMode,
+    context: tableContext,
+    loading: tableContextLoading,
+    refresh: refreshTableContext,
+  } = useTableOrder();
   const DELIVERY_ENABLED = config.deliveryEnabled;
   const DELIVERY_FEE = config.deliveryFee;
   const SCHEDULED_ORDERS_ENABLED = config.scheduledOrdersEnabled;
@@ -212,6 +238,12 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   // siempre el número real de ESTE pedido, sin importar que después se
   // limpie el carrito/estado del formulario.
   const [confirmedLoyalty, setConfirmedLoyalty] = useState<{ ganados: number; canjeados: number; descuento: number } | null>(null);
+  const [submittedTableCommand, setSubmittedTableCommand] = useState<{
+    trackingToken: string;
+    tableName: string;
+  } | null>(null);
+  const tableRequestIdRef = useRef<string | null>(null);
+  const orderingAllowed = isTableMode ? tableContext?.canOrder === true : storeOpen;
 
   // Precio de envío a mostrar: prioriza la cotización real por distancia.
   // Con el módulo DELIVERY_PRICING habilitado, el fee fijo legado ya no
@@ -580,7 +612,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       nameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
-    if (!isPhoneValid(customer.phone)) {
+    if (!isTableMode && !isPhoneValid(customer.phone)) {
       setPhoneTouched(true);
       const errorMsg = getPhoneErrorMessage(customer.phone);
       setFormError(errorMsg);
@@ -596,12 +628,12 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       return;
     }
     // validar que eligió un método de envío
-    if (DELIVERY_ENABLED && deliveryMethod === null) {
+    if (!isTableMode && DELIVERY_ENABLED && deliveryMethod === null) {
       setFormError("Seleccioná un método de entrega: Delivery o Retiro en el local.");
       return;
     }
     // si es delivery, pedimos dirección
-    if (DELIVERY_ENABLED && deliveryMethod === "delivery" && !customer.address.trim()) {
+    if (!isTableMode && DELIVERY_ENABLED && deliveryMethod === "delivery" && !customer.address.trim()) {
       setFormError("Ingresá la dirección para el delivery.");
       addressRef.current?.focus();
       addressRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -625,7 +657,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       return;
     }
     // si eligió programar el pedido, validamos el horario (ayuda de UX — el backend vuelve a validar)
-    if (SCHEDULED_ORDERS_ENABLED && scheduleLater) {
+    if (!isTableMode && SCHEDULED_ORDERS_ENABLED && scheduleLater) {
       if (!scheduledTime) {
         setFormError("Elegí un horario para tu pedido.");
         return;
@@ -634,6 +666,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         setFormError(`El horario debe tener al menos ${SCHEDULED_ORDERS_LEAD_MINUTES} minutos de anticipación.`);
         return;
       }
+    }
+    if (isTableMode && !tableContext?.canOrder) {
+      setFormError(tableContext?.message || "La mesa no está habilitada para recibir pedidos.");
+      await refreshTableContext();
+      return;
     }
 
     setFormError(""); // OK, seguimos
@@ -746,6 +783,43 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           itemsForApi.push(payload);
         }
       }
+
+      if (isTableMode) {
+        const clientRequestId = tableRequestIdRef.current ?? createClientRequestId();
+        tableRequestIdRef.current = clientRequestId;
+        const response = await fetch("/api/table-orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clientRequestId,
+            guestName: customer.name.trim(),
+            notes: notes.trim() || null,
+            items: itemsForApi,
+            combos: combosForApi,
+          }),
+        });
+        const responseText = await response.text();
+        const parsed = (() => {
+          try {
+            return JSON.parse(responseText);
+          } catch {
+            return null;
+          }
+        })();
+        if (!response.ok || !parsed?.success) {
+          if (response.status === 409) await refreshTableContext();
+          throw new Error(parsed?.error || "No se pudo enviar la comanda");
+        }
+
+        setSubmittedTableCommand({
+          trackingToken: parsed.data.trackingToken,
+          tableName: tableContext?.table.name || "la mesa",
+        });
+        tableRequestIdRef.current = null;
+        clearCart();
+        return;
+      }
+
       const channel = "WEB" as const;
       const fulfillment = deliveryMethod === "delivery" ? "DELIVERY" : "TAKEAWAY";
       const phoneNormalized = normalizePhoneAR(customer.phone);
@@ -988,7 +1062,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       }
     } catch (e) {
       console.error("❌ Error en submitOrder:", e);
-      alert("Ocurrió un error al procesar el pedido. Revisá consola.");
+      if (isTableMode) {
+        setFormError(e instanceof Error ? e.message : "No se pudo enviar la comanda.");
+      } else {
+        alert("Ocurrió un error al procesar el pedido. Revisá consola.");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -997,6 +1075,29 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
 
 
+
+  if (submittedTableCommand) {
+    return (
+      <div className="mx-auto w-full max-w-lg rounded-2xl border border-emerald-200 bg-white p-6 text-center shadow-sm">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-700">
+          ✓
+        </div>
+        <h2 className="text-xl font-bold text-slate-900">Pedido enviado</h2>
+        <p className="mt-2 text-sm text-slate-600">
+          Tu comanda para <strong>{submittedTableCommand.tableName}</strong> está esperando la confirmación del personal.
+        </p>
+        <p className="mt-2 text-xs text-slate-500">
+          Cuando quieras pedir algo más, podés volver al menú y enviar otra comanda.
+        </p>
+        <Button
+          className="mt-5 w-full bg-[var(--brand-color)] text-white hover:brightness-95"
+          onClick={onSuccess}
+        >
+          Volver al menú
+        </Button>
+      </div>
+    );
+  }
 
   if (items.length === 0) {
     return (
@@ -1011,6 +1112,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       <div className="space-y-4">
 
         {/* Entrega — MOVER ARRIBA */}
+        {!isTableMode && (
         <div className={`rounded-2xl ring-1 bg-white/60 p-4 ${
           formError.includes("método de entrega") ? "ring-red-400" : "ring-black/5"
         }`}>
@@ -1098,11 +1200,14 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             </div>
           )}
         </div>
+        )}
 
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
-          <div className="text-sm font-semibold mb-3">Datos del cliente</div>
+          <div className="text-sm font-semibold mb-3">
+            {isTableMode ? "¿Quién realiza el pedido?" : "Datos del cliente"}
+          </div>
 
-          <label className="block text-sm mb-1">Nombre y Apellido</label>
+          <label className="block text-sm mb-1">{isTableMode ? "Nombre" : "Nombre y Apellido"}</label>
           <input
             ref={nameRef}
             className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)] mb-3"
@@ -1115,6 +1220,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             placeholder="Tu nombre"
           />
 
+          {!isTableMode && (
+          <>
           <label className="block text-sm mb-1">Teléfono</label>
           <input
             ref={phoneRef}
@@ -1376,10 +1483,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               )}
             </>
           )}
+          </>
+          )}
         </div>
 
 
 
+        {!isTableMode && (
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-3">Pago</div>
           <div className="flex gap-2">
@@ -1403,6 +1513,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             </button>
           </div>
         </div>
+        )}
 
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-2">Observaciones</div>
@@ -1412,7 +1523,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             onChange={(e) => setNotes(e.target.value.slice(0, CHECKOUT_NOTES_MAX))} // hard limit
             maxLength={CHECKOUT_NOTES_MAX}
             rows={2} // arranca chico
-            placeholder="Usá este campo para indicar timbre roto, forma de pago, referencias del domicilio, etc."
+            placeholder={isTableMode
+              ? "Ej. sin sal, cubiertos, pedido para compartir..."
+              : "Usá este campo para indicar timbre roto, forma de pago, referencias del domicilio, etc."}
             className="w-full rounded-md border px-3 py-2 text-sm outline-none
                     focus:ring-2 focus:ring-[var(--brand-color)]
                     resize-none min-h-[40px]"
@@ -1654,15 +1767,17 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                                     active:bg-[color-mix(in_srgb,var(--brand-color),#000_18%)]
                                     hover:brightness-95 active:brightness-90
                                     disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none
-                                    ${!storeOpen ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`
-          } onClick={submitOrder} disabled={submitting || isRefreshing || quotingDelivery}>
+                                    ${!orderingAllowed ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`
+          } onClick={submitOrder} disabled={submitting || isRefreshing || quotingDelivery || tableContextLoading || !orderingAllowed}>
             {isRefreshing
               ? "Verificando precios..."
               : quotingDelivery
                 ? "Calculando envío..."
                 : submitting
                   ? "Enviando..."
-                  : "Enviar Pedido"}
+                  : isTableMode
+                    ? `Enviar comanda a ${tableContext?.table.name || "la mesa"}`
+                    : "Enviar Pedido"}
           </Button>
           <Button
             className="w-full"

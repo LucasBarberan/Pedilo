@@ -19,6 +19,7 @@ import type { Combo as ApiCombo, ComboCategoryInclusion as CategoryInclusion, Co
 import type { Product as ApiProduct, ModifierGroup, ModifierGroupOption } from "@/lib/api/products";
 import { quoteCombo, quoteComboSlots, buildPromoLabel, type QuoteComboItem, type QuoteComboSlotInput, type QuoteComboInclusionInput } from "@/lib/pricing";
 import { useHideLayoutFooter } from "@/components/layout-shell";
+import { useTableOrder } from "@/components/table-order-context";
 
 const MAX_NOTES = 50;
 
@@ -278,9 +279,11 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   // Igual que en producto: estado comercial
   const { data: status } = useBusinessStatusSmart();
   const { config: onlineConfig } = useOnlineConfig();
+  const { isTableMode, context: tableContext, loading: tableLoading } = useTableOrder();
   const isWebOpen = status?.web?.open ?? true; // mientras carga, asumimos abierto
   const pickupOnly = !!(status?.pos?.open && status?.web?.open === false);
-  const disabledByStatus = !isWebOpen;
+  const orderingEnabled = isTableMode ? tableContext?.canOrder === true : isWebOpen;
+  const disabledByStatus = !orderingEnabled || (isTableMode && tableLoading);
 
   const loading = false; // si en tu caso hay fetch para combo, actualizá este flag
 
@@ -1479,14 +1482,14 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
               {slotStep === 0 ? "Cancelar" : "← Anterior"}
             </Button>
             <Button
-              onClick={isWebOpen ? goSlotNext : undefined}
+              onClick={orderingEnabled ? goSlotNext : undefined}
               disabled={disabledByStatus || submitting}
               className="flex-1 h-11 text-sm rounded-xl text-white bg-[var(--brand-color)] hover:brightness-95 active:brightness-90 disabled:opacity-60"
             >
               {submitting
                 ? "Agregando..."
                 : disabledByStatus
-                ? pickupOnly ? "Solo en el local" : "Local cerrado"
+                ? isTableMode ? "Mesa no habilitada" : pickupOnly ? "Solo en el local" : "Local cerrado"
                 : isLastStep
                 ? (justAdded ? "Agregado ✔" : "Agregar al carrito")
                 : "Siguiente →"}
@@ -1983,7 +1986,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                           active:bg-[color-mix(in_srgb,var(--brand-color),#000_18%)]
                           hover:brightness-95 active:brightness-90
                           disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none`}
-              onClick={isWebOpen ? handleAdd : undefined}
+              onClick={orderingEnabled ? handleAdd : undefined}
               disabled={disabledByStatus || loading || submitting}
               title={
                 disabledByStatus
@@ -1993,7 +1996,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
               aria-disabled={disabledByStatus || loading || submitting}
             >
               {disabledByStatus
-                ? (pickupOnly ? "Solo en el local" : "Local cerrado")
+                ? (isTableMode ? "Mesa no habilitada" : pickupOnly ? "Solo en el local" : "Local cerrado")
                 : (justAdded ? "Agregado ✔" : "Agregar al Carrito")}
             </Button>
           </div>
