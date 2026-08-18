@@ -10,7 +10,9 @@ import { useCartRefresh } from "@/hooks/useCartRefresh";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { DeliveryMap } from "@/components/delivery-map";
 import { fetchDeliveryQuote, fetchDeliveryPricingEnabled, fetchDeliveryLocationBias, type DeliveryQuoteResponse } from "@/lib/api/delivery";
+import { fetchLoyaltyEnabled, fetchLoyaltyStatus, fetchLoyaltyEarnPreview, type LoyaltyCustomerStatus } from "@/lib/api/loyalty";
 import { isWholesaleMode } from "@/lib/storeMode";
+import { Sparkles, PartyPopper, Coins } from "lucide-react";
 
 type Customer = {
   name: string;
@@ -85,6 +87,67 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     fetchDeliveryPricingEnabled().then(setDeliveryPricingEnabled);
   }, []);
 
+  // Módulo LOYALTY: mismo patrón que DELIVERY_PRICING arriba — mientras no se
+  // confirme habilitado, no se muestra nada de fidelización ni se gasta ningún
+  // request. Reusa el mismo campo customer.dni que el modo wholesale (más
+  // abajo) — son dos usos independientes del mismo dato: resolve-by-dni arma
+  // el Order.customerId (facturación/mayorista), esto arma
+  // Order.loyaltyCustomerId (fidelización). Deliberadamente separados en el
+  // payload, igual que en el Backend — nunca uno como fallback del otro.
+  const [loyaltyEnabled, setLoyaltyEnabled] = useState(false);
+  useEffect(() => {
+    fetchLoyaltyEnabled().then(setLoyaltyEnabled);
+  }, []);
+
+  const [loyaltyStatus, setLoyaltyStatus] = useState<LoyaltyCustomerStatus | null>(null);
+  const [loyaltyLoading, setLoyaltyLoading] = useState(false);
+  const lastLoyaltyDniRef = useRef<string | null>(null);
+
+  // Puntos a canjear: input local (string, mientras se tipea) + valor
+  // confirmado (el que realmente viaja en el payload). Se aplica al perder
+  // foco o con "Max", no en cada tecla — mismo criterio que hamburger-pos.
+  const [puntosACanjearInput, setPuntosACanjearInput] = useState("");
+  const [puntosACanjear, setPuntosACanjear] = useState(0);
+  const [puntosAGanar, setPuntosAGanar] = useState(0);
+
+  // Busca el estado de fidelización apenas el DNI es válido (7-8 dígitos).
+  // No depende de isWholesaleMode() — un cliente normal también puede sumar/
+  // canjear puntos sin necesitar cuenta de facturación mayorista.
+  useEffect(() => {
+    if (!loyaltyEnabled) {
+      setLoyaltyStatus(null);
+      return;
+    }
+    if (!isDniValid(customer.dni)) {
+      setLoyaltyStatus(null);
+      setPuntosACanjear(0);
+      setPuntosACanjearInput("");
+      lastLoyaltyDniRef.current = null;
+      return;
+    }
+    const dniTrim = customer.dni.trim();
+    if (lastLoyaltyDniRef.current === dniTrim) return; // ya se buscó este mismo DNI
+    lastLoyaltyDniRef.current = dniTrim;
+
+    let active = true;
+    setLoyaltyLoading(true);
+    // Sí mandamos nombre/teléfono ya tipeados en este pedido — pero solo tienen
+    // efecto si el DNI es NUEVO (el Backend, buscarOCrearClientePorDni, ignora
+    // datosContacto por completo cuando el Customer ya existe: no hay ninguna
+    // verificación de que quien tipea el DNI sea su dueño real, así que nunca
+    // se actualiza con esto, sin importar lo que mandemos acá — se protege del
+    // lado seguro, no confiando en que el cliente no mande nada).
+    fetchLoyaltyStatus(dniTrim, {
+      name: customer.name.trim() || undefined,
+      phone: normalizePhoneAR(customer.phone) || undefined,
+    })
+      .then((status) => { if (active) setLoyaltyStatus(status); })
+      .catch(() => { if (active) setLoyaltyStatus(null); })
+      .finally(() => { if (active) setLoyaltyLoading(false); });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer.dni, loyaltyEnabled]);
+
   // Centro/radio para priorizar sugerencias del autocomplete cercanas a la
   // zona real de cobertura del comercio (ver AddressAutocomplete locationBias).
   const [deliveryLocationBias, setDeliveryLocationBias] = useState<{ latitude: number; longitude: number; radiusMeters: number } | null>(null);
@@ -144,6 +207,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
   const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  // Snapshot de fidelización al momento de confirmar — se congela acá (no se
+  // sigue leyendo el estado en vivo) para que el cartel post-pedido muestre
+  // siempre el número real de ESTE pedido, sin importar que después se
+  // limpie el carrito/estado del formulario.
+  const [confirmedLoyalty, setConfirmedLoyalty] = useState<{ ganados: number; canjeados: number; descuento: number } | null>(null);
 
   // Precio de envío a mostrar: prioriza la cotización real por distancia.
   // Con el módulo DELIVERY_PRICING habilitado, el fee fijo legado ya no
@@ -162,9 +230,64 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
   const deliveryOutOfCoverage = deliveryQuote != null && !deliveryQuote.withinCoverage;
 
-  const totalWithDelivery = useMemo(() => {
-    return deliveryMethod === "delivery" ? total + resolvedDeliveryPrice : total;
-  }, [total, deliveryMethod, resolvedDeliveryPrice]);
+  // ratioCanje no viaja directo en LoyaltyCustomerStatus — se deriva igual
+  // que en hamburger-pos (LoyaltyCustomerLookup.tsx) a partir de los dos
+  // valores que sí vienen: valorDescuentoDisponible / saldoEfectivo.
+  // Viene directo del Backend (settings.ratioCanje) — antes se derivaba como
+  // valorDescuentoDisponible/saldoEfectivo, que da 0/0 cuando el cliente
+  // todavía no tiene puntos (justo el caso donde más útil es mostrarle
+  // cuánto vale cada punto, para motivarlo a empezar a juntar).
+  const loyaltyRatioCanje = loyaltyStatus?.ratioCanje ?? 0;
+  const loyaltyDescuentoPreview = Math.round(puntosACanjear * loyaltyRatioCanje * 100) / 100;
+  // Mensaje al cliente anclado en $1.000 de DESCUENTO (no en 1 punto crudo,
+  // que con ratios chicos se ve feo — ej. "$0,01 por punto"): cuántos puntos
+  // hacen falta para llegar a $1.000 de descuento.
+  const loyaltyPuntosParaMilDeDescuento = loyaltyRatioCanje > 0 ? Math.ceil(1000 / loyaltyRatioCanje) : 0;
+  // El descuento por puntos SOLO se aplica sobre el subtotal (productos) —
+  // el envío nunca entra al cálculo de precios en el Backend (es un campo
+  // puramente visual de OrderDeliveryInfo, no se suma a order.total). Sin
+  // este tope acá, canjear más puntos de los que cubre el subtotal terminaba
+  // "comiéndose" el envío en la preview (hasta mostrarlo gratis), aunque el
+  // Backend jamás lo va a descontar así al confirmar el pedido.
+  const loyaltyDescuentoAplicado = Math.min(loyaltyDescuentoPreview, total);
+
+  // Preview de "vas a sumar X puntos" con esta compra. Usa el subtotal YA
+  // NETO del descuento por puntos, sin envío — es exactamente lo que el
+  // Backend usa como montoOrden al acumular (Order.total = cartResult.total,
+  // que nunca incluye el envío y ya viene neto de todos los descuentos,
+  // fidelización incluida — ver acumularPuntos en loyalty.service.ts).
+  const montoOrdenParaGanar = Math.max(0, total - loyaltyDescuentoAplicado);
+  useEffect(() => {
+    if (!loyaltyEnabled || !loyaltyStatus) {
+      setPuntosAGanar(0);
+      return;
+    }
+    let active = true;
+    fetchLoyaltyEarnPreview(montoOrdenParaGanar)
+      .then((p) => { if (active) setPuntosAGanar(p); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [loyaltyEnabled, loyaltyStatus, montoOrdenParaGanar]);
+
+  // Proyección para la barra de progreso debajo del Total: saldo actual +
+  // lo que se gana con ESTE pedido, hacia el mínimo canjeable. Solo tiene
+  // sentido mostrarla si el cliente todavía no puede canjear (si ya puede,
+  // la barra de la caja de arriba ya está al 100% y esto sería redundante).
+  const loyaltyProjectedSaldo = loyaltyStatus ? loyaltyStatus.saldoEfectivo + puntosAGanar : 0;
+  const loyaltyProjectedPct = loyaltyStatus && loyaltyStatus.canjeMinimo > 0
+    ? Math.min(100, Math.round((loyaltyProjectedSaldo / loyaltyStatus.canjeMinimo) * 100))
+    : 0;
+  const loyaltyWillUnlockRedeem = !!loyaltyStatus && !loyaltyStatus.puedeCanjear && loyaltyProjectedSaldo >= loyaltyStatus.canjeMinimo;
+
+  // Confirma el canje (dispara el descuento en el preview local — el Backend
+  // vuelve a validar/topear todo server-side al cotizar y al crear la orden,
+  // esto es solo para mostrar el número mientras se arma el pedido).
+  const applyPuntosACanjear = (value: number) => {
+    if (!loyaltyStatus) return;
+    const clamped = Math.min(Math.max(0, Math.floor(value) || 0), loyaltyStatus.saldoEfectivo);
+    setPuntosACanjear(clamped);
+  };
+
   const CHECKOUT_NOTES_MAX = 50; // o el número que prefieras
 
 
@@ -327,8 +450,10 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     return "Revisá el formato del teléfono";
   };
 
-  // DNI argentino: 7-8 dígitos — solo se pide/valida en modo wholesale.
-  const isDniValid = (v: string) => /^\d{7,8}$/.test(v.trim());
+  // DNI argentino: se exige siempre 8 dígitos exactos (ni 7 ni más), a
+  // propósito — reduce el universo de DNIs "adivinables" tipeando al azar
+  // contra este campo (wholesale y fidelización comparten el mismo input).
+  const isDniValid = (v: string) => /^\d{8}$/.test(v.trim());
 
   // debajo de isPhoneValid:
   const isNonEmpty = (s: string) => !!s.trim();
@@ -465,7 +590,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     }
     if (isWholesaleMode() && !isDniValid(customer.dni)) {
       setDniTouched(true);
-      setFormError("Ingresá un DNI válido (7 u 8 dígitos, sin puntos).");
+      setFormError("Ingresá un DNI válido (8 dígitos, sin puntos).");
       dniRef.current?.focus();
       dniRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
@@ -708,6 +833,12 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         channel,                  // "WEB"
         fulfillment,              // "DELIVERY" | "TAKEAWAY"
         ...(resolvedCustomerId != null ? { customerId: resolvedCustomerId } : {}),
+        // Fidelización — deliberadamente separado de customerId de arriba (ver
+        // Order.loyaltyCustomerId en schema.prisma del Backend): aunque salgan
+        // del mismo campo customer.dni acá, facturación/mayorista y
+        // fidelización son selecciones independientes en la orden.
+        ...(loyaltyStatus?.customerId != null ? { loyaltyCustomerId: loyaltyStatus.customerId } : {}),
+        ...(puntosACanjear > 0 ? { loyaltyPointsToRedeem: puntosACanjear } : {}),
       };
 
       // limpieza defensiva (sin undefined). OJO: "options" ({id,qty}[]) es un campo
@@ -749,6 +880,18 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         if (rawTotal != null) createdTotal = Number(rawTotal);
       } catch {
         // si no es JSON, dejamos undefined
+      }
+
+      // Fidelización: congelar el resultado de ESTE pedido para mostrarlo en
+      // el cartel de confirmación (ver Requirement "Confirmación de puntos
+      // ganados al cliente" — spec pide mostrarlo en la confirmación, no solo
+      // en el preview previo a confirmar).
+      if (loyaltyEnabled && loyaltyStatus) {
+        setConfirmedLoyalty({
+          ganados: puntosAGanar,
+          canjeados: puntosACanjear,
+          descuento: loyaltyDescuentoAplicado,
+        });
       }
 
       setShowWhatsAppModal(true);
@@ -1011,10 +1154,22 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             )}
           </p>
 
-          {/* DNI — solo en modo wholesale, para resolver/crear el Customer asociado al pedido */}
-          {isWholesaleMode() && (
+          {/* DNI — mismo campo para dos usos independientes: modo wholesale
+              (resolver/crear el Customer para facturación) y fidelización de
+              puntos (siempre que el módulo LOYALTY esté activo, sin importar
+              el modo). Se muestra si cualquiera de los dos aplica. */}
+          {(isWholesaleMode() || loyaltyEnabled) && (
             <>
-              <label className="block text-sm mb-1">DNI</label>
+              <label className="block text-sm mb-1">
+                {isWholesaleMode()
+                  ? "DNI"
+                  : (
+                    <>
+                      Colocá tu DNI para sumar puntos{" "}
+                      <span className="font-normal text-muted-foreground">(opcional)</span>
+                    </>
+                  )}
+              </label>
               <input
                 ref={dniRef}
                 id="dni-input"
@@ -1045,9 +1200,107 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                 }`}
               >
                 {dniTouched && !isDniValid(customer.dni)
-                  ? "El DNI debe tener 7 u 8 dígitos, sin puntos ni letras."
-                  : "* Necesario para asociar tu pedido a tu cuenta de cliente."}
+                  ? "El DNI debe tener 8 dígitos, sin puntos ni letras."
+                  : isWholesaleMode()
+                    ? "* Necesario para asociar tu pedido a tu cuenta de cliente."
+                    : "Si no querés sumar puntos, podés dejarlo en blanco."}
               </p>
+
+              {/* Fidelización — solo si el módulo está activo y ya hay un DNI válido.
+                  Identidad visual propia (dorado/"secondary-highlight" del design
+                  system de Pedilo) para que se lea como "moneda de puntos", separada
+                  del resto del formulario — pero contenida a esta caja nada más
+                  (Ten Percent Accent Rule del DESIGN.md: el acento no baña la pantalla). */}
+              {loyaltyEnabled && isDniValid(customer.dni) && (
+                <div className="mb-3 rounded-2xl border border-accent bg-accent/15 p-3.5 space-y-2.5 animate-in fade-in slide-in-from-top-1 duration-300">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-accent-foreground/70">
+                    <Coins className="h-3.5 w-3.5" />
+                    <span>Tus puntos</span>
+                  </div>
+
+                  {loyaltyPuntosParaMilDeDescuento > 0 && (
+                    <p className="text-[11px] text-muted-foreground -mt-1">
+                      Por cada {loyaltyPuntosParaMilDeDescuento.toLocaleString("es-AR")} puntos, canjeás {fmt(1000)} de descuento en tus próximos pedidos
+                    </p>
+                  )}
+
+                  {loyaltyLoading && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="h-3.5 w-3.5 rounded-full border-2 border-accent-foreground/30 border-t-accent-foreground animate-spin" />
+                      Buscando tus puntos…
+                    </div>
+                  )}
+
+                  {!loyaltyLoading && loyaltyStatus && (
+                    <>
+                      {loyaltyStatus.puedeCanjear ? (
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-accent text-accent-foreground text-sm font-extrabold px-3 py-1.5 shadow-sm">
+                            <Sparkles className="h-3.5 w-3.5" />
+                            {fmt(loyaltyStatus.valorDescuentoDisponible)} para descontar
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span className="font-medium">Tenés {loyaltyStatus.saldoEfectivo} puntos</span>
+                            <span>Mínimo para canjear: {loyaltyStatus.canjeMinimo}</span>
+                          </div>
+                          <div className="h-1.5 w-full rounded-full bg-black/5 overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-accent transition-all duration-500"
+                              style={{
+                                width: `${loyaltyStatus.canjeMinimo > 0
+                                  ? Math.min(100, Math.round((loyaltyStatus.saldoEfectivo / loyaltyStatus.canjeMinimo) * 100))
+                                  : 0}%`,
+                              }}
+                            />
+                          </div>
+                          <p className="text-[11px] text-muted-foreground/80">
+                            Te faltan {loyaltyStatus.puntosFaltantesParaCanje} para poder canjear
+                          </p>
+                        </div>
+                      )}
+
+                      {loyaltyStatus.puedeCanjear && (
+                        <div className="flex items-center gap-2 pt-0.5">
+                          <input
+                            type="number"
+                            min={0}
+                            max={loyaltyStatus.saldoEfectivo}
+                            value={puntosACanjearInput}
+                            onChange={(e) => setPuntosACanjearInput(e.target.value)}
+                            onBlur={() => applyPuntosACanjear(Number(puntosACanjearInput) || 0)}
+                            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                            placeholder={`Máx. ${loyaltyStatus.saldoEfectivo}`}
+                            className="flex-1 rounded-lg border border-accent/50 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPuntosACanjearInput(String(loyaltyStatus.saldoEfectivo));
+                              applyPuntosACanjear(loyaltyStatus.saldoEfectivo);
+                            }}
+                            className="rounded-lg bg-accent text-accent-foreground text-sm font-bold px-3.5 py-2 shrink-0 shadow-sm hover:brightness-95 active:brightness-90 transition"
+                          >
+                            Max
+                          </button>
+                        </div>
+                      )}
+
+                      {puntosACanjear > 0 && (
+                        <p className="flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                          <Coins className="h-3.5 w-3.5" />
+                          Descuento aplicado: {fmt(loyaltyDescuentoAplicado)}
+                          {loyaltyDescuentoAplicado < loyaltyDescuentoPreview && (
+                            <span className="font-normal text-emerald-700/70">(topeado al subtotal)</span>
+                          )}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </>
           )}
 
@@ -1306,7 +1559,18 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                   <span className="font-semibold shrink-0">−{fmt(cartSummary.savings)}</span>
                 </div>
               )}
-              {/* Envío */}
+              {/* Puntos canjeados — se aplica SOLO sobre el subtotal, nunca sobre
+                  el envío (que no forma parte del cálculo de precios del Backend,
+                  ver comentario de loyaltyDescuentoAplicado arriba). Preview local:
+                  el Backend recalcula/topea el descuento real al confirmar el
+                  pedido, server-authoritative igual que el resto de esta pantalla. */}
+              {puntosACanjear > 0 && (
+                <div className="flex items-center justify-between text-sm" style={{ color: "var(--brand-color)" }}>
+                  <span className="font-medium truncate pr-2">Puntos canjeados</span>
+                  <span className="font-semibold shrink-0">−{fmt(loyaltyDescuentoAplicado)}</span>
+                </div>
+              )}
+              {/* Envío — siempre a precio real, nunca afectado por el descuento de puntos */}
               {deliveryMethod === "delivery" && (
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                   <span>Envío</span>
@@ -1322,9 +1586,48 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold">Total:</span>
                 <span className="text-xl font-extrabold text-[var(--brand-color)]">
-                  {fmt(totalWithDelivery)}
+                  {fmt(Math.max(0, total - loyaltyDescuentoAplicado) + (deliveryMethod === "delivery" ? resolvedDeliveryPrice : 0))}
                 </span>
               </div>
+              {/* Puntos a ganar — separado a propósito de la caja de "Tus puntos"
+                  de arriba (que es sobre el saldo/canje ya acumulado): esto es
+                  sobre EL PEDIDO en curso, tiene más sentido pegado al total que
+                  el cliente está por pagar. Si todavía no llega al mínimo
+                  canjeable, se agrega la proyección: cuánto le va a quedar
+                  DESPUÉS de sumar los puntos de esta compra, con su propia
+                  barra de progreso — motiva a completar el pedido mostrando
+                  qué tan cerca queda de poder canjear la próxima vez. */}
+              {loyaltyEnabled && puntosAGanar > 0 && (
+                <div className="pt-1 space-y-1.5">
+                  <div className="flex items-center justify-end gap-1">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-accent/20 text-accent-foreground text-[11px] font-semibold px-2.5 py-1">
+                      <Sparkles className="h-3 w-3" />
+                      Sumás {puntosAGanar} {puntosAGanar === 1 ? "punto" : "puntos"} con esta compra
+                    </span>
+                  </div>
+
+                  {loyaltyStatus && !loyaltyStatus.puedeCanjear && (
+                    <div className="rounded-lg border border-accent/40 bg-accent/10 p-2 space-y-1">
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>Vas a tener {loyaltyProjectedSaldo} puntos</span>
+                        <span>Mínimo: {loyaltyStatus.canjeMinimo}</span>
+                      </div>
+                      <div className="h-1.5 w-full rounded-full bg-black/5 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-accent transition-all duration-500"
+                          style={{ width: `${loyaltyProjectedPct}%` }}
+                        />
+                      </div>
+                      {loyaltyWillUnlockRedeem && (
+                        <p className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
+                          <PartyPopper className="h-3 w-3" />
+                          ¡Con esta compra ya vas a poder canjear la próxima vez!
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1372,7 +1675,29 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         </div>
         {showWhatsAppModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-            <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center">
+            <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center animate-in zoom-in-95 fade-in duration-300">
+              {/* Fidelización — cartel de confirmación (ver Requirement "Confirmación
+                  de puntos ganados al cliente" de la spec: debe mostrarse EN la
+                  confirmación del pedido, no solo como preview antes de confirmar). */}
+              {confirmedLoyalty && (confirmedLoyalty.ganados > 0 || confirmedLoyalty.canjeados > 0) && (
+                <div className="mb-4 rounded-2xl border border-accent bg-accent/25 p-4 animate-in zoom-in-90 fade-in duration-500 delay-150">
+                  <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-accent text-accent-foreground shadow-sm">
+                    <PartyPopper className="h-6 w-6" strokeWidth={2.2} />
+                  </div>
+                  {confirmedLoyalty.ganados > 0 && (
+                    <p className="text-base font-extrabold text-accent-foreground leading-snug">
+                      ¡Ganaste {confirmedLoyalty.ganados} {confirmedLoyalty.ganados === 1 ? "punto" : "puntos"}!
+                    </p>
+                  )}
+                  {confirmedLoyalty.canjeados > 0 && (
+                    <p className={`flex items-center justify-center gap-1 text-xs text-accent-foreground/80 ${confirmedLoyalty.ganados > 0 ? "mt-1" : ""}`}>
+                      <Coins className="h-3.5 w-3.5" />
+                      Usaste {confirmedLoyalty.canjeados} {confirmedLoyalty.canjeados === 1 ? "punto" : "puntos"} · −{fmt(confirmedLoyalty.descuento)}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="text-3xl mb-2">📲</div>
               <h3 className="text-lg font-bold mb-2">Pedido casi listo</h3>
               <p className="text-sm text-gray-700 mb-4">
