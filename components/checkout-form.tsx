@@ -9,7 +9,7 @@ import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import { useCartRefresh } from "@/hooks/useCartRefresh";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { DeliveryMap } from "@/components/delivery-map";
-import { fetchDeliveryQuote, fetchDeliveryPricingEnabled, type DeliveryQuoteResponse } from "@/lib/api/delivery";
+import { fetchDeliveryQuote, fetchDeliveryPricingEnabled, fetchDeliveryLocationBias, type DeliveryQuoteResponse } from "@/lib/api/delivery";
 import { useTableOrder } from "@/components/table-order-context";
 
 type Customer = {
@@ -92,12 +92,27 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const [quotingDelivery, setQuotingDelivery] = useState(false);
   const [deliveryQuoteError, setDeliveryQuoteError] = useState<string>("");
 
+  // Con DELIVERY_PRICING activo, no alcanza con tipear texto libre: el
+  // usuario tiene que elegir una sugerencia real del autocomplete (o soltar
+  // el pin en el mapa) para que exista una ubicación geocodificada. Sin esto,
+  // el cajero termina teniendo que llamar para preguntar la dirección y
+  // calcular el envío a mano. Se resetea a false apenas el usuario vuelve a
+  // tipear en el input.
+  const [addressConfirmed, setAddressConfirmed] = useState(false);
+
   // Módulo DELIVERY_PRICING: mientras no se confirme habilitado, no se monta
   // el autocomplete ni se llama a /api/delivery/quote — se usa directo el fee
   // fijo (mismo comportamiento que si la dirección estuviera fuera de cobertura).
   const [deliveryPricingEnabled, setDeliveryPricingEnabled] = useState(false);
   useEffect(() => {
     fetchDeliveryPricingEnabled().then(setDeliveryPricingEnabled);
+  }, []);
+
+  // Centro/radio para priorizar sugerencias del autocomplete cercanas a la
+  // zona real de cobertura del comercio (ver AddressAutocomplete locationBias).
+  const [deliveryLocationBias, setDeliveryLocationBias] = useState<{ latitude: number; longitude: number; radiusMeters: number } | null>(null);
+  useEffect(() => {
+    fetchDeliveryLocationBias().then(setDeliveryLocationBias);
   }, []);
 
   const [deliveryMethod, setDeliveryMethod] = useState<"delivery" | "pickup" | null>(
@@ -158,15 +173,19 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const orderingAllowed = isTableMode ? tableContext?.canOrder === true : storeOpen;
 
   // Precio de envío a mostrar: prioriza la cotización real por distancia.
-  // Si no hay cotización, la dirección está fuera de cobertura, o el servicio
-  // de ruteo falló, cae al fee fijo configurado ("a coordinar con el local"
-  // si DELIVERY_FEE es 0). El Backend vuelve a calcular todo al confirmar.
+  // Con el módulo DELIVERY_PRICING habilitado, el fee fijo legado ya no
+  // aplica como respaldo — si no hay cotización, la dirección está fuera de
+  // cobertura, o el servicio de ruteo falló, el envío queda en 0 ("a
+  // coordinar con el local"), nunca en el valor fijo que pudiera haber
+  // quedado cargado de antes. Ese fee fijo solo se usa con el módulo
+  // deshabilitado. El Backend vuelve a calcular todo al confirmar.
   const resolvedDeliveryPrice = useMemo(() => {
     if (deliveryQuote?.withinCoverage && deliveryQuote.price != null) {
       return deliveryQuote.price;
     }
+    if (deliveryPricingEnabled) return 0;
     return DELIVERY_FEE;
-  }, [deliveryQuote, DELIVERY_FEE]);
+  }, [deliveryQuote, DELIVERY_FEE, deliveryPricingEnabled]);
 
   const deliveryOutOfCoverage = deliveryQuote != null && !deliveryQuote.withinCoverage;
 
@@ -222,6 +241,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     // causaba un "salto" visual si difería levemente del texto tipeado.
     setCustomer((prev) => ({ ...prev, placeId: selection.placeId }));
     setDeliveryQuoteError("");
+    setAddressConfirmed(true);
     setQuotingDelivery(true);
     try {
       const quote = await fetchDeliveryQuote({ placeId: selection.placeId });
@@ -245,6 +265,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   async function handlePinDrag(location: { latitude: number; longitude: number }) {
     setCustomer((prev) => ({ ...prev, placeId: undefined }));
     setDeliveryQuoteError("");
+    setAddressConfirmed(true);
     setQuotingDelivery(true);
     try {
       const quote = await fetchDeliveryQuote(location);
@@ -265,7 +286,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   useEffect(() => {
     try {
       const raw = localStorage.getItem("checkout.customer");
-      if (raw) setCustomer((prev) => ({ ...prev, ...JSON.parse(raw) }));
+      if (raw) {
+        const saved = JSON.parse(raw);
+        setCustomer((prev) => ({ ...prev, ...saved }));
+        if (saved.placeId) setAddressConfirmed(true);
+      }
     } catch { }
   }, []);
   useEffect(() => {
@@ -470,6 +495,15 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     // si es delivery, pedimos dirección
     if (!isTableMode && DELIVERY_ENABLED && deliveryMethod === "delivery" && !customer.address.trim()) {
       setFormError("Ingresá la dirección para el delivery.");
+      addressRef.current?.focus();
+      addressRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    // con DELIVERY_PRICING activo no alcanza con tipear texto libre: hace
+    // falta elegir una sugerencia del autocomplete (o soltar el pin en el
+    // mapa) para tener una ubicación geocodificada y poder cotizar el envío
+    if (DELIVERY_ENABLED && deliveryMethod === "delivery" && deliveryPricingEnabled && !addressConfirmed) {
+      setFormError("Elegí tu dirección de la lista de sugerencias (no alcanza con escribirla).");
       addressRef.current?.focus();
       addressRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
@@ -1044,9 +1078,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                       setCustomer((prev) => ({ ...prev, address: v, placeId: undefined }));
                       setDeliveryQuote(null);
                       setDeliveryQuoteError("");
+                      setAddressConfirmed(false);
                       if (formError && v.trim() && /direcci[oó]n/i.test(formError)) setFormError("");
                     }}
                     onPlaceSelect={handleAddressSelect}
+                    locationBias={deliveryLocationBias}
                     className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)]"
                     placeholder="Empezá a escribir tu dirección..."
                   />
@@ -1057,6 +1093,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                   )}
                   {!quotingDelivery && deliveryQuoteError && (
                     <p className="mt-1 text-xs text-amber-600">{deliveryQuoteError}</p>
+                  )}
+                  {!quotingDelivery && !addressConfirmed && !deliveryQuoteError && customer.address.trim() && (
+                    <p className="mt-1 text-xs text-amber-600">
+                      Elegí tu dirección de la lista de sugerencias para poder calcular el envío.
+                    </p>
                   )}
                 </>
               ) : (
