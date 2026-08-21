@@ -6,6 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
 import { useState } from "react";
+import { TableOrderBanner } from "@/components/table-order-banner";
 
 type Props = {
   showBack?: boolean;
@@ -26,6 +27,7 @@ export default function SiteHeader({
   const STORE_NAME = config.storeName || "SRA. BURGA";
 
   return (
+    <>
     <div
       className="
         bg-[var(--brand-color)] text-primary-foreground
@@ -114,5 +116,7 @@ export default function SiteHeader({
         <div className="w-[40px] sm:w-[44px]" />
       )}
     </div>
+    <TableOrderBanner />
+    </>
   );
 }

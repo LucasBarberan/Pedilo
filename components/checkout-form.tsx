@@ -1,6 +1,7 @@
 // components/checkout-form.tsx
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCart, CartComboItem } from "@/components/cart-context";
 import { Button } from "@/components/ui/button";
 import { useRef, useEffect, useMemo, useState } from "react";
@@ -66,6 +67,7 @@ type MaybeCombo = {
 };
 
 export default function CheckoutForm({ onCancel, onSuccess }: Props) {
+  const router = useRouter();
   const { items, getTotalPrice, clearCart } = useCart();
   const { config, isLoading: configLoading } = useOnlineConfig();
   const { data: businessStatus } = useBusinessStatusSmart();
@@ -186,6 +188,18 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   );
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "mp">("cash");
   const [notes, setNotes] = useState("");
+  // Solo se pide cuando esta comanda va a abrir la mesa sola (auto-apertura por
+  // QR, ver tableGuestCount más abajo) — si ya hay una sesión (la abrió el
+  // cajero o un pedido anterior), el número de personas ya está definido y no
+  // tiene sentido volver a preguntarlo.
+  const [tableGuestCount, setTableGuestCount] = useState(2);
+  // Tope real: la capacidad de la mesa (el Backend vuelve a validar esto al
+  // confirmar el pedido — ver processPublicCommand/table-service.service.ts).
+  // 30 es solo un fallback mientras tableContext todavía no cargó.
+  const tableGuestCountMax = tableContext?.table.capacity ?? 30;
+  useEffect(() => {
+    setTableGuestCount((current) => Math.min(current, tableGuestCountMax));
+  }, [tableGuestCountMax]);
 
   // Pedidos programados: se asume siempre para el mismo día — el input es solo horario (HH:mm)
   const [scheduleLater, setScheduleLater] = useState(false); // destildado por defecto = "pedir para ya"
@@ -226,6 +240,24 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const [phoneTouched, setPhoneTouched] = useState(false);
   const [dniTouched, setDniTouched] = useState(false);
   const [formError, setFormError] = useState<string>("");
+  // En mesa, si el nombre ya estaba guardado de un pedido anterior en este
+  // mismo navegador (checkout.customer en localStorage), no tiene sentido
+  // volver a pedirlo en cada comanda — se muestra como texto, con opción de
+  // cambiarlo por si en la práctica pide otra persona de la mesa.
+  //
+  // IMPORTANTE: nameLockedFromStorage se decide UNA SOLA VEZ al montar, a
+  // partir de lo que realmente había en localStorage — nunca se recalcula a
+  // partir de customer.name en cada render. Si se recalculara así, escribir
+  // el primer carácter del nombre (que deja de estar vacío) lo bloquearía
+  // solo, sin dejar terminar de escribir.
+  const [nameLockedFromStorage, setNameLockedFromStorage] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const showNameAsLocked = isTableMode && nameLockedFromStorage && !editingName;
+  // El primer disparo del efecto de guardado (en el mount) no debe pisar
+  // localStorage con el estado inicial vacío de customer, antes de que el
+  // efecto de carga (declarado antes, corre primero) termine de aplicar lo
+  // leído — sino se pierde el nombre guardado en cada mount nuevo.
+  const skipNextCustomerSaveRef = useRef(true);
   const nameRef = useRef<HTMLInputElement>(null);
   const phoneRef = useRef<HTMLInputElement>(null);
   const dniRef = useRef<HTMLInputElement>(null);
@@ -238,12 +270,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   // siempre el número real de ESTE pedido, sin importar que después se
   // limpie el carrito/estado del formulario.
   const [confirmedLoyalty, setConfirmedLoyalty] = useState<{ ganados: number; canjeados: number; descuento: number } | null>(null);
-  const [submittedTableCommand, setSubmittedTableCommand] = useState<{
-    trackingToken: string;
-    tableName: string;
-  } | null>(null);
   const tableRequestIdRef = useRef<string | null>(null);
   const orderingAllowed = isTableMode ? tableContext?.canOrder === true : storeOpen;
+  // Esta comanda es la que va a abrir la mesa sola (auto-apertura por QR):
+  // no hay sesión todavía, y este envío es justo lo que la crea.
+  const willAutoOpenTable = isTableMode && tableContext?.state === "AVAILABLE" && tableContext?.canOrder === true;
 
   // Precio de envío a mostrar: prioriza la cotización real por distancia.
   // Con el módulo DELIVERY_PRICING habilitado, el fee fijo legado ya no
@@ -418,13 +449,31 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         const saved = JSON.parse(raw);
         setCustomer((prev) => ({ ...prev, ...saved }));
         if (saved.placeId) setAddressConfirmed(true);
+        if (typeof saved.name === "string" && saved.name.trim().length > 0) {
+          setNameLockedFromStorage(true);
+        }
       }
-    } catch { }
+    } catch {
+      // localStorage no disponible (ej. modo incógnito con storage bloqueado)
+      // — simplemente no hay nada para precargar, se pide el nombre como siempre.
+    }
   }, []);
   useEffect(() => {
+    // El efecto de arriba (carga) corre antes que este en el mismo mount,
+    // pero el setCustomer que dispara ahí no se refleja en `customer` hasta
+    // el siguiente render — este primer disparo automático todavía ve el
+    // estado inicial vacío. Sin este guard, se pisaría el localStorage recién
+    // leído con "" apenas un instante después de haberlo leído.
+    if (skipNextCustomerSaveRef.current) {
+      skipNextCustomerSaveRef.current = false;
+      return;
+    }
     try {
       localStorage.setItem("checkout.customer", JSON.stringify(customer));
-    } catch { }
+    } catch {
+      // localStorage no disponible — el pedido sigue andando igual, solo no
+      // se va a poder precargar el nombre en un próximo pedido de esta mesa.
+    }
   }, [customer]);
   // Normaliza teléfonos AR para guardar/enviar en formato "nacional limpio":
   // - sin 54, sin 0 inicial, sin 9 de móvil internacional, sin 15.
@@ -796,6 +845,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             notes: notes.trim() || null,
             items: itemsForApi,
             combos: combosForApi,
+            ...(willAutoOpenTable ? { guestCount: tableGuestCount } : {}),
           }),
         });
         const responseText = await response.text();
@@ -811,12 +861,24 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           throw new Error(parsed?.error || "No se pudo enviar la comanda");
         }
 
-        setSubmittedTableCommand({
-          trackingToken: parsed.data.trackingToken,
-          tableName: tableContext?.table.name || "la mesa",
-        });
+        const trackingToken: string = parsed.data.trackingToken;
         tableRequestIdRef.current = null;
         clearCart();
+        // El seguimiento solo tiene sentido con autoservicio activo (sin
+        // KITCHEN) — ver selfServiceTracking en table-order-context.tsx. Sin
+        // eso, el flujo vuelve directo al menú, como cualquier pedido de mesa.
+        if (tableContext?.selfServiceTracking) {
+          if (tableContext.table.code) {
+            try {
+              localStorage.setItem(`pedilo:table:${tableContext.table.code}:trackingToken`, trackingToken);
+            } catch {
+              // localStorage no disponible — el reconocimiento de "ya pedí" simplemente no aplica
+            }
+          }
+          router.push(`/mesa-seguimiento/${trackingToken}`);
+        } else {
+          onSuccess?.();
+        }
         return;
       }
 
@@ -1076,29 +1138,6 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
 
 
-  if (submittedTableCommand) {
-    return (
-      <div className="mx-auto w-full max-w-lg rounded-2xl border border-emerald-200 bg-white p-6 text-center shadow-sm">
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-700">
-          ✓
-        </div>
-        <h2 className="text-xl font-bold text-slate-900">Pedido enviado</h2>
-        <p className="mt-2 text-sm text-slate-600">
-          Tu comanda para <strong>{submittedTableCommand.tableName}</strong> está esperando la confirmación del personal.
-        </p>
-        <p className="mt-2 text-xs text-slate-500">
-          Cuando quieras pedir algo más, podés volver al menú y enviar otra comanda.
-        </p>
-        <Button
-          className="mt-5 w-full bg-[var(--brand-color)] text-white hover:brightness-95"
-          onClick={onSuccess}
-        >
-          Volver al menú
-        </Button>
-      </div>
-    );
-  }
-
   if (items.length === 0) {
     return (
       <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-6 text-center">
@@ -1208,17 +1247,59 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           </div>
 
           <label className="block text-sm mb-1">{isTableMode ? "Nombre" : "Nombre y Apellido"}</label>
-          <input
-            ref={nameRef}
-            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)] mb-3"
-            value={customer.name}
-            onChange={(e) => {
-              const v = e.target.value;
-              setCustomer({ ...customer, name: v });
-              if (formError && v.trim() && /nombre/i.test(formError)) setFormError("");
-            }}
-            placeholder="Tu nombre"
-          />
+          {showNameAsLocked ? (
+            <div className="mb-3 flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+              <span className="truncate">{customer.name}</span>
+              <button
+                type="button"
+                className="shrink-0 text-xs font-semibold text-[var(--brand-color)] hover:underline"
+                onClick={() => setEditingName(true)}
+              >
+                Cambiar
+              </button>
+            </div>
+          ) : (
+            <input
+              ref={nameRef}
+              className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)] mb-3"
+              value={customer.name}
+              onChange={(e) => {
+                const v = e.target.value;
+                setCustomer({ ...customer, name: v });
+                if (formError && v.trim() && /nombre/i.test(formError)) setFormError("");
+              }}
+              placeholder="Tu nombre"
+            />
+          )}
+
+          {willAutoOpenTable && (
+            <>
+              <label className="block text-sm mb-1">¿Cuántas personas son?</label>
+              <div className="mb-1 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setTableGuestCount((current) => Math.max(1, current - 1))}
+                  className="grid h-9 w-9 place-items-center rounded-md border text-lg font-semibold hover:bg-black/5"
+                  aria-label="Restar persona"
+                >
+                  −
+                </button>
+                <span className="w-6 text-center text-sm font-semibold tabular-nums">{tableGuestCount}</span>
+                <button
+                  type="button"
+                  onClick={() => setTableGuestCount((current) => Math.min(tableGuestCountMax, current + 1))}
+                  disabled={tableGuestCount >= tableGuestCountMax}
+                  className="grid h-9 w-9 place-items-center rounded-md border text-lg font-semibold hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent"
+                  aria-label="Sumar persona"
+                >
+                  +
+                </button>
+              </div>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Esta mesa tiene capacidad para {tableGuestCountMax} personas.
+              </p>
+            </>
+          )}
 
           {!isTableMode && (
           <>
