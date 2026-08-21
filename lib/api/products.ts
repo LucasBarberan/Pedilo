@@ -61,6 +61,8 @@ export type Product = {
   // Opciones gratuitas incluidas por grupo cuando el producto se vende suelto
   // (independiente de la regla que ese mismo producto tenga dentro de un combo).
   modifierGroupRules?: Array<{ modifierGroupId: number; includedFreeCount: number }>;
+  // undefined si el negocio no trackea stock para ese producto.
+  stock?: number;
 };
 
 type FetchProductsOptions = {
@@ -238,6 +240,7 @@ export function normalizeProduct(raw: any): Product | null {
     basePrice,
     activePromoLabels: Array.isArray(raw.activePromoLabels) ? raw.activePromoLabels : undefined,
     modifierGroupRules: Array.isArray(raw.modifierGroupRules) ? raw.modifierGroupRules : undefined,
+    stock: parseNumber(raw.stock),
   };
 }
 

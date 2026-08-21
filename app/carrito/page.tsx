@@ -14,6 +14,7 @@ import InfoBanner from "@/components/info-banner";
 import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
 import { fixImageUrl } from "@/lib/img";
 import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
+import { useTableOrder } from "@/components/table-order-context";
 
 const fmt = (n: number) => `$${n.toLocaleString("es-AR")}`;
 
@@ -74,9 +75,11 @@ export default function CartPage() {
   // === Estado comercial (igual que en producto/combos) ===
   const { data: status } = useBusinessStatusSmart();
   const { config: onlineConfig } = useOnlineConfig();
+  const { isTableMode, context: tableContext, loading: tableLoading } = useTableOrder();
   const isWebOpen  = status?.web?.open ?? true;                       // mientras carga, asumimos abierto
   const pickupOnly = !!(status?.pos?.open && status?.web?.open === false);
-  const disabledByStatus = !isWebOpen;
+  const orderingEnabled = isTableMode ? tableContext?.canOrder === true : isWebOpen;
+  const disabledByStatus = !orderingEnabled || (isTableMode && tableLoading);
 
   // Ordenar ítems según regla pedida
   const sortedItems = useMemo(() => {
@@ -360,7 +363,7 @@ export default function CartPage() {
                              active:bg-[color-mix(in_srgb,var(--brand-color),#000_18%)]
                              hover:brightness-95 active:brightness-90
                              disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none"
-                  onClick={isWebOpen ? () => router.push("/checkout") : undefined}
+                  onClick={orderingEnabled ? () => router.push("/checkout") : undefined}
                   disabled={disabledByStatus}
                   title={
                     disabledByStatus
@@ -369,9 +372,15 @@ export default function CartPage() {
                   }
                   aria-disabled={disabledByStatus}
                 >
-                  {disabledByStatus
-                    ? (pickupOnly ? "Solo en el local" : "Local cerrado")
-                    : "Realizar Pedido"}
+                  {isTableMode
+                    ? tableLoading
+                      ? "Validando mesa..."
+                      : tableContext?.canOrder
+                        ? `Pedir para ${tableContext.table.name}`
+                        : "Mesa no habilitada"
+                    : disabledByStatus
+                      ? (pickupOnly ? "Solo en el local" : "Local cerrado")
+                      : "Realizar Pedido"}
                 </Button>
 
                 <Button

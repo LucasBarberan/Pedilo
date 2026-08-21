@@ -7,6 +7,7 @@ import { DeveloperFooter } from "@/components/developer-footer"
 import { Suspense } from "react"
 import LayoutShell from "@/components/layout-shell"
 import { TestModeBanner } from "@/components/test-mode-banner"
+import { TableOrderProvider } from "@/components/table-order-context"
 import { cookies } from "next/headers"
 import "./globals.css"
 import type { Viewport } from "next";
@@ -42,6 +43,7 @@ export default async function RootLayout({
 }>) {
   const cookieStore = await cookies();
   const testModeActive = !!cookieStore.get("pedilo_test_token")?.value;
+  const tableModeActive = !!cookieStore.get("pedilo_table_token")?.value;
 
   return (
     <html lang="es" className="h-full" style={{ "--brand-color": BRAND_COLOR } as React.CSSProperties}>
@@ -49,9 +51,11 @@ export default async function RootLayout({
         {testModeActive && <TestModeBanner />}
         <Suspense fallback={null}>
           <CartProvider>
-            <LayoutShell>
-              {children}
-            </LayoutShell>
+            <TableOrderProvider initialActive={tableModeActive}>
+              <LayoutShell>
+                {children}
+              </LayoutShell>
+            </TableOrderProvider>
           </CartProvider>
         </Suspense>
       </body>
