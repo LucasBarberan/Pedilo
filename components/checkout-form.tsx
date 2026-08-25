@@ -1,6 +1,7 @@
 // components/checkout-form.tsx
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCart, CartComboItem } from "@/components/cart-context";
 import { Button } from "@/components/ui/button";
 import { useRef, useEffect, useMemo, useState } from "react";
@@ -10,6 +11,10 @@ import { useCartRefresh } from "@/hooks/useCartRefresh";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { DeliveryMap } from "@/components/delivery-map";
 import { fetchDeliveryQuote, fetchDeliveryPricingEnabled, fetchDeliveryLocationBias, type DeliveryQuoteResponse } from "@/lib/api/delivery";
+import { fetchLoyaltyEnabled, fetchLoyaltyStatus, fetchLoyaltyEarnPreview, type LoyaltyCustomerStatus } from "@/lib/api/loyalty";
+import { isWholesaleMode } from "@/lib/storeMode";
+import { Sparkles, PartyPopper, Coins } from "lucide-react";
+import { useTableOrder } from "@/components/table-order-context";
 
 type Customer = {
   name: string;
@@ -17,6 +22,7 @@ type Customer = {
   address: string;
   addressUnit: string;
   placeId?: string;
+  dni: string;
 };
 
 type Props = {
@@ -25,6 +31,25 @@ type Props = {
 };
 
 const fmt = (n: number) => `$${n.toLocaleString("es-AR")}`;
+
+const createClientRequestId = () => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
 
 // ranking de tamaños: triple -> doble -> simple
 const SIZE_RANK: Record<string, number> = { triple: 0, doble: 1, simple: 2 };
@@ -42,9 +67,16 @@ type MaybeCombo = {
 };
 
 export default function CheckoutForm({ onCancel, onSuccess }: Props) {
+  const router = useRouter();
   const { items, getTotalPrice, clearCart } = useCart();
   const { config, isLoading: configLoading } = useOnlineConfig();
   const { data: businessStatus } = useBusinessStatusSmart();
+  const {
+    isTableMode,
+    context: tableContext,
+    loading: tableContextLoading,
+    refresh: refreshTableContext,
+  } = useTableOrder();
   const DELIVERY_ENABLED = config.deliveryEnabled;
   const DELIVERY_FEE = config.deliveryFee;
   const SCHEDULED_ORDERS_ENABLED = config.scheduledOrdersEnabled;
@@ -57,6 +89,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     phone: "",
     address: "",
     addressUnit: "",
+    dni: "",
   });
 
   // Cotización de envío por distancia real (delivery-pricing). El precio
@@ -82,6 +115,67 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     fetchDeliveryPricingEnabled().then(setDeliveryPricingEnabled);
   }, []);
 
+  // Módulo LOYALTY: mismo patrón que DELIVERY_PRICING arriba — mientras no se
+  // confirme habilitado, no se muestra nada de fidelización ni se gasta ningún
+  // request. Reusa el mismo campo customer.dni que el modo wholesale (más
+  // abajo) — son dos usos independientes del mismo dato: resolve-by-dni arma
+  // el Order.customerId (facturación/mayorista), esto arma
+  // Order.loyaltyCustomerId (fidelización). Deliberadamente separados en el
+  // payload, igual que en el Backend — nunca uno como fallback del otro.
+  const [loyaltyEnabled, setLoyaltyEnabled] = useState(false);
+  useEffect(() => {
+    fetchLoyaltyEnabled().then(setLoyaltyEnabled);
+  }, []);
+
+  const [loyaltyStatus, setLoyaltyStatus] = useState<LoyaltyCustomerStatus | null>(null);
+  const [loyaltyLoading, setLoyaltyLoading] = useState(false);
+  const lastLoyaltyDniRef = useRef<string | null>(null);
+
+  // Puntos a canjear: input local (string, mientras se tipea) + valor
+  // confirmado (el que realmente viaja en el payload). Se aplica al perder
+  // foco o con "Max", no en cada tecla — mismo criterio que hamburger-pos.
+  const [puntosACanjearInput, setPuntosACanjearInput] = useState("");
+  const [puntosACanjear, setPuntosACanjear] = useState(0);
+  const [puntosAGanar, setPuntosAGanar] = useState(0);
+
+  // Busca el estado de fidelización apenas el DNI es válido (7-8 dígitos).
+  // No depende de isWholesaleMode() — un cliente normal también puede sumar/
+  // canjear puntos sin necesitar cuenta de facturación mayorista.
+  useEffect(() => {
+    if (!loyaltyEnabled) {
+      setLoyaltyStatus(null);
+      return;
+    }
+    if (!isDniValid(customer.dni)) {
+      setLoyaltyStatus(null);
+      setPuntosACanjear(0);
+      setPuntosACanjearInput("");
+      lastLoyaltyDniRef.current = null;
+      return;
+    }
+    const dniTrim = customer.dni.trim();
+    if (lastLoyaltyDniRef.current === dniTrim) return; // ya se buscó este mismo DNI
+    lastLoyaltyDniRef.current = dniTrim;
+
+    let active = true;
+    setLoyaltyLoading(true);
+    // Sí mandamos nombre/teléfono ya tipeados en este pedido — pero solo tienen
+    // efecto si el DNI es NUEVO (el Backend, buscarOCrearClientePorDni, ignora
+    // datosContacto por completo cuando el Customer ya existe: no hay ninguna
+    // verificación de que quien tipea el DNI sea su dueño real, así que nunca
+    // se actualiza con esto, sin importar lo que mandemos acá — se protege del
+    // lado seguro, no confiando en que el cliente no mande nada).
+    fetchLoyaltyStatus(dniTrim, {
+      name: customer.name.trim() || undefined,
+      phone: normalizePhoneAR(customer.phone) || undefined,
+    })
+      .then((status) => { if (active) setLoyaltyStatus(status); })
+      .catch(() => { if (active) setLoyaltyStatus(null); })
+      .finally(() => { if (active) setLoyaltyLoading(false); });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer.dni, loyaltyEnabled]);
+
   // Centro/radio para priorizar sugerencias del autocomplete cercanas a la
   // zona real de cobertura del comercio (ver AddressAutocomplete locationBias).
   const [deliveryLocationBias, setDeliveryLocationBias] = useState<{ latitude: number; longitude: number; radiusMeters: number } | null>(null);
@@ -94,6 +188,18 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   );
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "mp">("cash");
   const [notes, setNotes] = useState("");
+  // Solo se pide cuando esta comanda va a abrir la mesa sola (auto-apertura por
+  // QR, ver tableGuestCount más abajo) — si ya hay una sesión (la abrió el
+  // cajero o un pedido anterior), el número de personas ya está definido y no
+  // tiene sentido volver a preguntarlo.
+  const [tableGuestCount, setTableGuestCount] = useState(2);
+  // Tope real: la capacidad de la mesa (el Backend vuelve a validar esto al
+  // confirmar el pedido — ver processPublicCommand/table-service.service.ts).
+  // 30 es solo un fallback mientras tableContext todavía no cargó.
+  const tableGuestCountMax = tableContext?.table.capacity ?? 30;
+  useEffect(() => {
+    setTableGuestCount((current) => Math.min(current, tableGuestCountMax));
+  }, [tableGuestCountMax]);
 
   // Pedidos programados: se asume siempre para el mismo día — el input es solo horario (HH:mm)
   const [scheduleLater, setScheduleLater] = useState(false); // destildado por defecto = "pedir para ya"
@@ -132,13 +238,43 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   }, [configLoading]);
 
   const [phoneTouched, setPhoneTouched] = useState(false);
+  const [dniTouched, setDniTouched] = useState(false);
   const [formError, setFormError] = useState<string>("");
+  // En mesa, si el nombre ya estaba guardado de un pedido anterior en este
+  // mismo navegador (checkout.customer en localStorage), no tiene sentido
+  // volver a pedirlo en cada comanda — se muestra como texto, con opción de
+  // cambiarlo por si en la práctica pide otra persona de la mesa.
+  //
+  // IMPORTANTE: nameLockedFromStorage se decide UNA SOLA VEZ al montar, a
+  // partir de lo que realmente había en localStorage — nunca se recalcula a
+  // partir de customer.name en cada render. Si se recalculara así, escribir
+  // el primer carácter del nombre (que deja de estar vacío) lo bloquearía
+  // solo, sin dejar terminar de escribir.
+  const [nameLockedFromStorage, setNameLockedFromStorage] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const showNameAsLocked = isTableMode && nameLockedFromStorage && !editingName;
+  // El primer disparo del efecto de guardado (en el mount) no debe pisar
+  // localStorage con el estado inicial vacío de customer, antes de que el
+  // efecto de carga (declarado antes, corre primero) termine de aplicar lo
+  // leído — sino se pierde el nombre guardado en cada mount nuevo.
+  const skipNextCustomerSaveRef = useRef(true);
   const nameRef = useRef<HTMLInputElement>(null);
   const phoneRef = useRef<HTMLInputElement>(null);
+  const dniRef = useRef<HTMLInputElement>(null);
   const addressRef = useRef<HTMLInputElement | null>(null);
 
   const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  // Snapshot de fidelización al momento de confirmar — se congela acá (no se
+  // sigue leyendo el estado en vivo) para que el cartel post-pedido muestre
+  // siempre el número real de ESTE pedido, sin importar que después se
+  // limpie el carrito/estado del formulario.
+  const [confirmedLoyalty, setConfirmedLoyalty] = useState<{ ganados: number; canjeados: number; descuento: number } | null>(null);
+  const tableRequestIdRef = useRef<string | null>(null);
+  const orderingAllowed = isTableMode ? tableContext?.canOrder === true : storeOpen;
+  // Esta comanda es la que va a abrir la mesa sola (auto-apertura por QR):
+  // no hay sesión todavía, y este envío es justo lo que la crea.
+  const willAutoOpenTable = isTableMode && tableContext?.state === "AVAILABLE" && tableContext?.canOrder === true;
 
   // Precio de envío a mostrar: prioriza la cotización real por distancia.
   // Con el módulo DELIVERY_PRICING habilitado, el fee fijo legado ya no
@@ -157,9 +293,64 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
   const deliveryOutOfCoverage = deliveryQuote != null && !deliveryQuote.withinCoverage;
 
-  const totalWithDelivery = useMemo(() => {
-    return deliveryMethod === "delivery" ? total + resolvedDeliveryPrice : total;
-  }, [total, deliveryMethod, resolvedDeliveryPrice]);
+  // ratioCanje no viaja directo en LoyaltyCustomerStatus — se deriva igual
+  // que en hamburger-pos (LoyaltyCustomerLookup.tsx) a partir de los dos
+  // valores que sí vienen: valorDescuentoDisponible / saldoEfectivo.
+  // Viene directo del Backend (settings.ratioCanje) — antes se derivaba como
+  // valorDescuentoDisponible/saldoEfectivo, que da 0/0 cuando el cliente
+  // todavía no tiene puntos (justo el caso donde más útil es mostrarle
+  // cuánto vale cada punto, para motivarlo a empezar a juntar).
+  const loyaltyRatioCanje = loyaltyStatus?.ratioCanje ?? 0;
+  const loyaltyDescuentoPreview = Math.round(puntosACanjear * loyaltyRatioCanje * 100) / 100;
+  // Mensaje al cliente anclado en $1.000 de DESCUENTO (no en 1 punto crudo,
+  // que con ratios chicos se ve feo — ej. "$0,01 por punto"): cuántos puntos
+  // hacen falta para llegar a $1.000 de descuento.
+  const loyaltyPuntosParaMilDeDescuento = loyaltyRatioCanje > 0 ? Math.ceil(1000 / loyaltyRatioCanje) : 0;
+  // El descuento por puntos SOLO se aplica sobre el subtotal (productos) —
+  // el envío nunca entra al cálculo de precios en el Backend (es un campo
+  // puramente visual de OrderDeliveryInfo, no se suma a order.total). Sin
+  // este tope acá, canjear más puntos de los que cubre el subtotal terminaba
+  // "comiéndose" el envío en la preview (hasta mostrarlo gratis), aunque el
+  // Backend jamás lo va a descontar así al confirmar el pedido.
+  const loyaltyDescuentoAplicado = Math.min(loyaltyDescuentoPreview, total);
+
+  // Preview de "vas a sumar X puntos" con esta compra. Usa el subtotal YA
+  // NETO del descuento por puntos, sin envío — es exactamente lo que el
+  // Backend usa como montoOrden al acumular (Order.total = cartResult.total,
+  // que nunca incluye el envío y ya viene neto de todos los descuentos,
+  // fidelización incluida — ver acumularPuntos en loyalty.service.ts).
+  const montoOrdenParaGanar = Math.max(0, total - loyaltyDescuentoAplicado);
+  useEffect(() => {
+    if (!loyaltyEnabled || !loyaltyStatus) {
+      setPuntosAGanar(0);
+      return;
+    }
+    let active = true;
+    fetchLoyaltyEarnPreview(montoOrdenParaGanar)
+      .then((p) => { if (active) setPuntosAGanar(p); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [loyaltyEnabled, loyaltyStatus, montoOrdenParaGanar]);
+
+  // Proyección para la barra de progreso debajo del Total: saldo actual +
+  // lo que se gana con ESTE pedido, hacia el mínimo canjeable. Solo tiene
+  // sentido mostrarla si el cliente todavía no puede canjear (si ya puede,
+  // la barra de la caja de arriba ya está al 100% y esto sería redundante).
+  const loyaltyProjectedSaldo = loyaltyStatus ? loyaltyStatus.saldoEfectivo + puntosAGanar : 0;
+  const loyaltyProjectedPct = loyaltyStatus && loyaltyStatus.canjeMinimo > 0
+    ? Math.min(100, Math.round((loyaltyProjectedSaldo / loyaltyStatus.canjeMinimo) * 100))
+    : 0;
+  const loyaltyWillUnlockRedeem = !!loyaltyStatus && !loyaltyStatus.puedeCanjear && loyaltyProjectedSaldo >= loyaltyStatus.canjeMinimo;
+
+  // Confirma el canje (dispara el descuento en el preview local — el Backend
+  // vuelve a validar/topear todo server-side al cotizar y al crear la orden,
+  // esto es solo para mostrar el número mientras se arma el pedido).
+  const applyPuntosACanjear = (value: number) => {
+    if (!loyaltyStatus) return;
+    const clamped = Math.min(Math.max(0, Math.floor(value) || 0), loyaltyStatus.saldoEfectivo);
+    setPuntosACanjear(clamped);
+  };
+
   const CHECKOUT_NOTES_MAX = 50; // o el número que prefieras
 
 
@@ -258,13 +449,31 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         const saved = JSON.parse(raw);
         setCustomer((prev) => ({ ...prev, ...saved }));
         if (saved.placeId) setAddressConfirmed(true);
+        if (typeof saved.name === "string" && saved.name.trim().length > 0) {
+          setNameLockedFromStorage(true);
+        }
       }
-    } catch { }
+    } catch {
+      // localStorage no disponible (ej. modo incógnito con storage bloqueado)
+      // — simplemente no hay nada para precargar, se pide el nombre como siempre.
+    }
   }, []);
   useEffect(() => {
+    // El efecto de arriba (carga) corre antes que este en el mismo mount,
+    // pero el setCustomer que dispara ahí no se refleja en `customer` hasta
+    // el siguiente render — este primer disparo automático todavía ve el
+    // estado inicial vacío. Sin este guard, se pisaría el localStorage recién
+    // leído con "" apenas un instante después de haberlo leído.
+    if (skipNextCustomerSaveRef.current) {
+      skipNextCustomerSaveRef.current = false;
+      return;
+    }
     try {
       localStorage.setItem("checkout.customer", JSON.stringify(customer));
-    } catch { }
+    } catch {
+      // localStorage no disponible — el pedido sigue andando igual, solo no
+      // se va a poder precargar el nombre en un próximo pedido de esta mesa.
+    }
   }, [customer]);
   // Normaliza teléfonos AR para guardar/enviar en formato "nacional limpio":
   // - sin 54, sin 0 inicial, sin 9 de móvil internacional, sin 15.
@@ -321,6 +530,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
     return "Revisá el formato del teléfono";
   };
+
+  // DNI argentino: se exige siempre 8 dígitos exactos (ni 7 ni más), a
+  // propósito — reduce el universo de DNIs "adivinables" tipeando al azar
+  // contra este campo (wholesale y fidelización comparten el mismo input).
+  const isDniValid = (v: string) => /^\d{8}$/.test(v.trim());
 
   // debajo de isPhoneValid:
   const isNonEmpty = (s: string) => !!s.trim();
@@ -447,7 +661,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       nameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
-    if (!isPhoneValid(customer.phone)) {
+    if (!isTableMode && !isPhoneValid(customer.phone)) {
       setPhoneTouched(true);
       const errorMsg = getPhoneErrorMessage(customer.phone);
       setFormError(errorMsg);
@@ -455,13 +669,20 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       phoneRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
+    if (isWholesaleMode() && !isDniValid(customer.dni)) {
+      setDniTouched(true);
+      setFormError("Ingresá un DNI válido (8 dígitos, sin puntos).");
+      dniRef.current?.focus();
+      dniRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
     // validar que eligió un método de envío
-    if (DELIVERY_ENABLED && deliveryMethod === null) {
+    if (!isTableMode && DELIVERY_ENABLED && deliveryMethod === null) {
       setFormError("Seleccioná un método de entrega: Delivery o Retiro en el local.");
       return;
     }
     // si es delivery, pedimos dirección
-    if (DELIVERY_ENABLED && deliveryMethod === "delivery" && !customer.address.trim()) {
+    if (!isTableMode && DELIVERY_ENABLED && deliveryMethod === "delivery" && !customer.address.trim()) {
       setFormError("Ingresá la dirección para el delivery.");
       addressRef.current?.focus();
       addressRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -476,8 +697,16 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       addressRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
+    // Red de seguridad además del disabled del botón: mientras se está
+    // calculando el envío no dejamos enviar, para que nunca quede un pedido
+    // creado con envío "a coordinar con el local" cuando en realidad la
+    // cotización todavía estaba en vuelo.
+    if (DELIVERY_ENABLED && deliveryMethod === "delivery" && deliveryPricingEnabled && quotingDelivery) {
+      setFormError("Estamos calculando el costo de envío, esperá un momento.");
+      return;
+    }
     // si eligió programar el pedido, validamos el horario (ayuda de UX — el backend vuelve a validar)
-    if (SCHEDULED_ORDERS_ENABLED && scheduleLater) {
+    if (!isTableMode && SCHEDULED_ORDERS_ENABLED && scheduleLater) {
       if (!scheduledTime) {
         setFormError("Elegí un horario para tu pedido.");
         return;
@@ -486,6 +715,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         setFormError(`El horario debe tener al menos ${SCHEDULED_ORDERS_LEAD_MINUTES} minutos de anticipación.`);
         return;
       }
+    }
+    if (isTableMode && !tableContext?.canOrder) {
+      setFormError(tableContext?.message || "La mesa no está habilitada para recibir pedidos.");
+      await refreshTableContext();
+      return;
     }
 
     setFormError(""); // OK, seguimos
@@ -598,6 +832,56 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           itemsForApi.push(payload);
         }
       }
+
+      if (isTableMode) {
+        const clientRequestId = tableRequestIdRef.current ?? createClientRequestId();
+        tableRequestIdRef.current = clientRequestId;
+        const response = await fetch("/api/table-orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clientRequestId,
+            guestName: customer.name.trim(),
+            notes: notes.trim() || null,
+            items: itemsForApi,
+            combos: combosForApi,
+            ...(willAutoOpenTable ? { guestCount: tableGuestCount } : {}),
+          }),
+        });
+        const responseText = await response.text();
+        const parsed = (() => {
+          try {
+            return JSON.parse(responseText);
+          } catch {
+            return null;
+          }
+        })();
+        if (!response.ok || !parsed?.success) {
+          if (response.status === 409) await refreshTableContext();
+          throw new Error(parsed?.error || "No se pudo enviar la comanda");
+        }
+
+        const trackingToken: string = parsed.data.trackingToken;
+        tableRequestIdRef.current = null;
+        clearCart();
+        // El seguimiento solo tiene sentido con autoservicio activo (sin
+        // KITCHEN) — ver selfServiceTracking en table-order-context.tsx. Sin
+        // eso, el flujo vuelve directo al menú, como cualquier pedido de mesa.
+        if (tableContext?.selfServiceTracking) {
+          if (tableContext.table.code) {
+            try {
+              localStorage.setItem(`pedilo:table:${tableContext.table.code}:trackingToken`, trackingToken);
+            } catch {
+              // localStorage no disponible — el reconocimiento de "ya pedí" simplemente no aplica
+            }
+          }
+          router.push(`/mesa-seguimiento/${trackingToken}`);
+        } else {
+          onSuccess?.();
+        }
+        return;
+      }
+
       const channel = "WEB" as const;
       const fulfillment = deliveryMethod === "delivery" ? "DELIVERY" : "TAKEAWAY";
       const phoneNormalized = normalizePhoneAR(customer.phone);
@@ -646,6 +930,35 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             ? "TRANSFER"
             : "CARD";
 
+      // Modo wholesale: resolver/crear el Customer por DNI antes de armar el
+      // pedido — el back necesita customerId para asociarlo (ver
+      // openspec/changes/pedilo-wholesale-pickup/specs/customers/spec.md).
+      // Si falla, no seguimos: sin customerId el pedido quedaría a nombre de
+      // "Consumidor Final" en vez del cliente real.
+      let resolvedCustomerId: number | undefined;
+      if (isWholesaleMode()) {
+        try {
+          const dniRes = await fetch(`${BASE}/customers/resolve-by-dni`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              dni: customer.dni.trim(),
+              name: customer.name.trim(),
+              phone: phoneNormalized,
+            }),
+          });
+          if (!dniRes.ok) throw new Error(`HTTP ${dniRes.status}`);
+          const dniJson = await dniRes.json();
+          resolvedCustomerId = dniJson?.data?.id ?? dniJson?.id;
+          if (!resolvedCustomerId) throw new Error("Respuesta sin id de cliente");
+        } catch (err) {
+          console.error("❌ No se pudo resolver el cliente por DNI", err);
+          setFormError("No pudimos validar tu DNI. Revisalo e intentá de nuevo.");
+          setSubmitting(false);
+          return;
+        }
+      }
+
       const apiBodyRaw: any = {
         items: itemsForApi,
         combos: combosForApi,
@@ -655,6 +968,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         delivery_info,
         channel,                  // "WEB"
         fulfillment,              // "DELIVERY" | "TAKEAWAY"
+        ...(resolvedCustomerId != null ? { customerId: resolvedCustomerId } : {}),
+        // Fidelización — deliberadamente separado de customerId de arriba (ver
+        // Order.loyaltyCustomerId en schema.prisma del Backend): aunque salgan
+        // del mismo campo customer.dni acá, facturación/mayorista y
+        // fidelización son selecciones independientes en la orden.
+        ...(loyaltyStatus?.customerId != null ? { loyaltyCustomerId: loyaltyStatus.customerId } : {}),
+        ...(puntosACanjear > 0 ? { loyaltyPointsToRedeem: puntosACanjear } : {}),
       };
 
       // limpieza defensiva (sin undefined). OJO: "options" ({id,qty}[]) es un campo
@@ -696,6 +1016,18 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         if (rawTotal != null) createdTotal = Number(rawTotal);
       } catch {
         // si no es JSON, dejamos undefined
+      }
+
+      // Fidelización: congelar el resultado de ESTE pedido para mostrarlo en
+      // el cartel de confirmación (ver Requirement "Confirmación de puntos
+      // ganados al cliente" — spec pide mostrarlo en la confirmación, no solo
+      // en el preview previo a confirmar).
+      if (loyaltyEnabled && loyaltyStatus) {
+        setConfirmedLoyalty({
+          ganados: puntosAGanar,
+          canjeados: puntosACanjear,
+          descuento: loyaltyDescuentoAplicado,
+        });
       }
 
       setShowWhatsAppModal(true);
@@ -792,7 +1124,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       }
     } catch (e) {
       console.error("❌ Error en submitOrder:", e);
-      alert("Ocurrió un error al procesar el pedido. Revisá consola.");
+      if (isTableMode) {
+        setFormError(e instanceof Error ? e.message : "No se pudo enviar la comanda.");
+      } else {
+        alert("Ocurrió un error al procesar el pedido. Revisá consola.");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -815,6 +1151,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       <div className="space-y-4">
 
         {/* Entrega — MOVER ARRIBA */}
+        {!isTableMode && (
         <div className={`rounded-2xl ring-1 bg-white/60 p-4 ${
           formError.includes("método de entrega") ? "ring-red-400" : "ring-black/5"
         }`}>
@@ -902,23 +1239,70 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             </div>
           )}
         </div>
+        )}
 
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
-          <div className="text-sm font-semibold mb-3">Datos del cliente</div>
+          <div className="text-sm font-semibold mb-3">
+            {isTableMode ? "¿Quién realiza el pedido?" : "Datos del cliente"}
+          </div>
 
-          <label className="block text-sm mb-1">Nombre y Apellido</label>
-          <input
-            ref={nameRef}
-            className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)] mb-3"
-            value={customer.name}
-            onChange={(e) => {
-              const v = e.target.value;
-              setCustomer({ ...customer, name: v });
-              if (formError && v.trim() && /nombre/i.test(formError)) setFormError("");
-            }}
-            placeholder="Tu nombre"
-          />
+          <label className="block text-sm mb-1">{isTableMode ? "Nombre" : "Nombre y Apellido"}</label>
+          {showNameAsLocked ? (
+            <div className="mb-3 flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+              <span className="truncate">{customer.name}</span>
+              <button
+                type="button"
+                className="shrink-0 text-xs font-semibold text-[var(--brand-color)] hover:underline"
+                onClick={() => setEditingName(true)}
+              >
+                Cambiar
+              </button>
+            </div>
+          ) : (
+            <input
+              ref={nameRef}
+              className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)] mb-3"
+              value={customer.name}
+              onChange={(e) => {
+                const v = e.target.value;
+                setCustomer({ ...customer, name: v });
+                if (formError && v.trim() && /nombre/i.test(formError)) setFormError("");
+              }}
+              placeholder="Tu nombre"
+            />
+          )}
 
+          {willAutoOpenTable && (
+            <>
+              <label className="block text-sm mb-1">¿Cuántas personas son?</label>
+              <div className="mb-1 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setTableGuestCount((current) => Math.max(1, current - 1))}
+                  className="grid h-9 w-9 place-items-center rounded-md border text-lg font-semibold hover:bg-black/5"
+                  aria-label="Restar persona"
+                >
+                  −
+                </button>
+                <span className="w-6 text-center text-sm font-semibold tabular-nums">{tableGuestCount}</span>
+                <button
+                  type="button"
+                  onClick={() => setTableGuestCount((current) => Math.min(tableGuestCountMax, current + 1))}
+                  disabled={tableGuestCount >= tableGuestCountMax}
+                  className="grid h-9 w-9 place-items-center rounded-md border text-lg font-semibold hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent"
+                  aria-label="Sumar persona"
+                >
+                  +
+                </button>
+              </div>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Esta mesa tiene capacidad para {tableGuestCountMax} personas.
+              </p>
+            </>
+          )}
+
+          {!isTableMode && (
+          <>
           <label className="block text-sm mb-1">Teléfono</label>
           <input
             ref={phoneRef}
@@ -957,6 +1341,156 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               "* Sin 0 inicial ni 15. Ejemplos: 1155554444 o +541155554444"
             )}
           </p>
+
+          {/* DNI — mismo campo para dos usos independientes: modo wholesale
+              (resolver/crear el Customer para facturación) y fidelización de
+              puntos (siempre que el módulo LOYALTY esté activo, sin importar
+              el modo). Se muestra si cualquiera de los dos aplica. */}
+          {(isWholesaleMode() || loyaltyEnabled) && (
+            <>
+              <label className="block text-sm mb-1">
+                {isWholesaleMode()
+                  ? "DNI"
+                  : (
+                    <>
+                      Colocá tu DNI para sumar puntos{" "}
+                      <span className="font-normal text-muted-foreground">(opcional)</span>
+                    </>
+                  )}
+              </label>
+              <input
+                ref={dniRef}
+                id="dni-input"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={8}
+                className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 mb-1 ${
+                  dniTouched && !isDniValid(customer.dni)
+                    ? "border-red-500 focus:ring-red-400"
+                    : "focus:ring-[var(--brand-color)]"
+                }`}
+                value={customer.dni}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/\D/g, "");
+                  setCustomer({ ...customer, dni: v });
+                  if (formError && isDniValid(v)) setFormError("");
+                }}
+                onBlur={() => setDniTouched(true)}
+                placeholder="Ej: 12345678"
+                aria-invalid={dniTouched && !isDniValid(customer.dni)}
+                aria-describedby="dni-help"
+              />
+              <p
+                id="dni-help"
+                className={`text-xs mb-3 ${
+                  dniTouched && !isDniValid(customer.dni) ? "text-red-600" : "text-muted-foreground"
+                }`}
+              >
+                {dniTouched && !isDniValid(customer.dni)
+                  ? "El DNI debe tener 8 dígitos, sin puntos ni letras."
+                  : isWholesaleMode()
+                    ? "* Necesario para asociar tu pedido a tu cuenta de cliente."
+                    : "Si no querés sumar puntos, podés dejarlo en blanco."}
+              </p>
+
+              {/* Fidelización — solo si el módulo está activo y ya hay un DNI válido.
+                  Identidad visual propia (dorado/"secondary-highlight" del design
+                  system de Pedilo) para que se lea como "moneda de puntos", separada
+                  del resto del formulario — pero contenida a esta caja nada más
+                  (Ten Percent Accent Rule del DESIGN.md: el acento no baña la pantalla). */}
+              {loyaltyEnabled && isDniValid(customer.dni) && (
+                <div className="mb-3 rounded-2xl border border-accent bg-accent/15 p-3.5 space-y-2.5 animate-in fade-in slide-in-from-top-1 duration-300">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-accent-foreground/70">
+                    <Coins className="h-3.5 w-3.5" />
+                    <span>Tus puntos</span>
+                  </div>
+
+                  {loyaltyPuntosParaMilDeDescuento > 0 && (
+                    <p className="text-[11px] text-muted-foreground -mt-1">
+                      Por cada {loyaltyPuntosParaMilDeDescuento.toLocaleString("es-AR")} puntos, canjeás {fmt(1000)} de descuento en tus próximos pedidos
+                    </p>
+                  )}
+
+                  {loyaltyLoading && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="h-3.5 w-3.5 rounded-full border-2 border-accent-foreground/30 border-t-accent-foreground animate-spin" />
+                      Buscando tus puntos…
+                    </div>
+                  )}
+
+                  {!loyaltyLoading && loyaltyStatus && (
+                    <>
+                      {loyaltyStatus.puedeCanjear ? (
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-accent text-accent-foreground text-sm font-extrabold px-3 py-1.5 shadow-sm">
+                            <Sparkles className="h-3.5 w-3.5" />
+                            {fmt(loyaltyStatus.valorDescuentoDisponible)} para descontar
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span className="font-medium">Tenés {loyaltyStatus.saldoEfectivo} puntos</span>
+                            <span>Mínimo para canjear: {loyaltyStatus.canjeMinimo}</span>
+                          </div>
+                          <div className="h-1.5 w-full rounded-full bg-black/5 overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-accent transition-all duration-500"
+                              style={{
+                                width: `${loyaltyStatus.canjeMinimo > 0
+                                  ? Math.min(100, Math.round((loyaltyStatus.saldoEfectivo / loyaltyStatus.canjeMinimo) * 100))
+                                  : 0}%`,
+                              }}
+                            />
+                          </div>
+                          <p className="text-[11px] text-muted-foreground/80">
+                            Te faltan {loyaltyStatus.puntosFaltantesParaCanje} para poder canjear
+                          </p>
+                        </div>
+                      )}
+
+                      {loyaltyStatus.puedeCanjear && (
+                        <div className="flex items-center gap-2 pt-0.5">
+                          <input
+                            type="number"
+                            min={0}
+                            max={loyaltyStatus.saldoEfectivo}
+                            value={puntosACanjearInput}
+                            onChange={(e) => setPuntosACanjearInput(e.target.value)}
+                            onBlur={() => applyPuntosACanjear(Number(puntosACanjearInput) || 0)}
+                            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                            placeholder={`Máx. ${loyaltyStatus.saldoEfectivo}`}
+                            className="flex-1 rounded-lg border border-accent/50 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPuntosACanjearInput(String(loyaltyStatus.saldoEfectivo));
+                              applyPuntosACanjear(loyaltyStatus.saldoEfectivo);
+                            }}
+                            className="rounded-lg bg-accent text-accent-foreground text-sm font-bold px-3.5 py-2 shrink-0 shadow-sm hover:brightness-95 active:brightness-90 transition"
+                          >
+                            Max
+                          </button>
+                        </div>
+                      )}
+
+                      {puntosACanjear > 0 && (
+                        <p className="flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                          <Coins className="h-3.5 w-3.5" />
+                          Descuento aplicado: {fmt(loyaltyDescuentoAplicado)}
+                          {loyaltyDescuentoAplicado < loyaltyDescuentoPreview && (
+                            <span className="font-normal text-emerald-700/70">(topeado al subtotal)</span>
+                          )}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </>
+          )}
 
           {/* Dirección SOLO si delivery */}
           {deliveryMethod === "delivery" && (
@@ -1030,10 +1564,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               )}
             </>
           )}
+          </>
+          )}
         </div>
 
 
 
+        {!isTableMode && (
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-3">Pago</div>
           <div className="flex gap-2">
@@ -1057,6 +1594,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             </button>
           </div>
         </div>
+        )}
 
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-2">Observaciones</div>
@@ -1066,7 +1604,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             onChange={(e) => setNotes(e.target.value.slice(0, CHECKOUT_NOTES_MAX))} // hard limit
             maxLength={CHECKOUT_NOTES_MAX}
             rows={2} // arranca chico
-            placeholder="Usá este campo para indicar timbre roto, forma de pago, referencias del domicilio, etc."
+            placeholder={isTableMode
+              ? "Ej. sin sal, cubiertos, pedido para compartir..."
+              : "Usá este campo para indicar timbre roto, forma de pago, referencias del domicilio, etc."}
             className="w-full rounded-md border px-3 py-2 text-sm outline-none
                     focus:ring-2 focus:ring-[var(--brand-color)]
                     resize-none min-h-[40px]"
@@ -1213,7 +1753,18 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                   <span className="font-semibold shrink-0">−{fmt(cartSummary.savings)}</span>
                 </div>
               )}
-              {/* Envío */}
+              {/* Puntos canjeados — se aplica SOLO sobre el subtotal, nunca sobre
+                  el envío (que no forma parte del cálculo de precios del Backend,
+                  ver comentario de loyaltyDescuentoAplicado arriba). Preview local:
+                  el Backend recalcula/topea el descuento real al confirmar el
+                  pedido, server-authoritative igual que el resto de esta pantalla. */}
+              {puntosACanjear > 0 && (
+                <div className="flex items-center justify-between text-sm" style={{ color: "var(--brand-color)" }}>
+                  <span className="font-medium truncate pr-2">Puntos canjeados</span>
+                  <span className="font-semibold shrink-0">−{fmt(loyaltyDescuentoAplicado)}</span>
+                </div>
+              )}
+              {/* Envío — siempre a precio real, nunca afectado por el descuento de puntos */}
               {deliveryMethod === "delivery" && (
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                   <span>Envío</span>
@@ -1229,9 +1780,48 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold">Total:</span>
                 <span className="text-xl font-extrabold text-[var(--brand-color)]">
-                  {fmt(totalWithDelivery)}
+                  {fmt(Math.max(0, total - loyaltyDescuentoAplicado) + (deliveryMethod === "delivery" ? resolvedDeliveryPrice : 0))}
                 </span>
               </div>
+              {/* Puntos a ganar — separado a propósito de la caja de "Tus puntos"
+                  de arriba (que es sobre el saldo/canje ya acumulado): esto es
+                  sobre EL PEDIDO en curso, tiene más sentido pegado al total que
+                  el cliente está por pagar. Si todavía no llega al mínimo
+                  canjeable, se agrega la proyección: cuánto le va a quedar
+                  DESPUÉS de sumar los puntos de esta compra, con su propia
+                  barra de progreso — motiva a completar el pedido mostrando
+                  qué tan cerca queda de poder canjear la próxima vez. */}
+              {loyaltyEnabled && puntosAGanar > 0 && (
+                <div className="pt-1 space-y-1.5">
+                  <div className="flex items-center justify-end gap-1">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-accent/20 text-accent-foreground text-[11px] font-semibold px-2.5 py-1">
+                      <Sparkles className="h-3 w-3" />
+                      Sumás {puntosAGanar} {puntosAGanar === 1 ? "punto" : "puntos"} con esta compra
+                    </span>
+                  </div>
+
+                  {loyaltyStatus && !loyaltyStatus.puedeCanjear && (
+                    <div className="rounded-lg border border-accent/40 bg-accent/10 p-2 space-y-1">
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>Vas a tener {loyaltyProjectedSaldo} puntos</span>
+                        <span>Mínimo: {loyaltyStatus.canjeMinimo}</span>
+                      </div>
+                      <div className="h-1.5 w-full rounded-full bg-black/5 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-accent transition-all duration-500"
+                          style={{ width: `${loyaltyProjectedPct}%` }}
+                        />
+                      </div>
+                      {loyaltyWillUnlockRedeem && (
+                        <p className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
+                          <PartyPopper className="h-3 w-3" />
+                          ¡Con esta compra ya vas a poder canjear la próxima vez!
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1258,9 +1848,17 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                                     active:bg-[color-mix(in_srgb,var(--brand-color),#000_18%)]
                                     hover:brightness-95 active:brightness-90
                                     disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none
-                                    ${!storeOpen ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`
-          } onClick={submitOrder} disabled={submitting || isRefreshing}>
-            {isRefreshing ? "Verificando precios..." : submitting ? "Enviando..." : "Enviar Pedido"}
+                                    ${!orderingAllowed ? "opacity-60 cursor-not-allowed pointer-events-none" : ""}`
+          } onClick={submitOrder} disabled={submitting || isRefreshing || quotingDelivery || tableContextLoading || !orderingAllowed}>
+            {isRefreshing
+              ? "Verificando precios..."
+              : quotingDelivery
+                ? "Calculando envío..."
+                : submitting
+                  ? "Enviando..."
+                  : isTableMode
+                    ? `Enviar comanda a ${tableContext?.table.name || "la mesa"}`
+                    : "Enviar Pedido"}
           </Button>
           <Button
             className="w-full"
@@ -1273,7 +1871,29 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         </div>
         {showWhatsAppModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-            <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center">
+            <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center animate-in zoom-in-95 fade-in duration-300">
+              {/* Fidelización — cartel de confirmación (ver Requirement "Confirmación
+                  de puntos ganados al cliente" de la spec: debe mostrarse EN la
+                  confirmación del pedido, no solo como preview antes de confirmar). */}
+              {confirmedLoyalty && (confirmedLoyalty.ganados > 0 || confirmedLoyalty.canjeados > 0) && (
+                <div className="mb-4 rounded-2xl border border-accent bg-accent/25 p-4 animate-in zoom-in-90 fade-in duration-500 delay-150">
+                  <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-accent text-accent-foreground shadow-sm">
+                    <PartyPopper className="h-6 w-6" strokeWidth={2.2} />
+                  </div>
+                  {confirmedLoyalty.ganados > 0 && (
+                    <p className="text-base font-extrabold text-accent-foreground leading-snug">
+                      ¡Ganaste {confirmedLoyalty.ganados} {confirmedLoyalty.ganados === 1 ? "punto" : "puntos"}!
+                    </p>
+                  )}
+                  {confirmedLoyalty.canjeados > 0 && (
+                    <p className={`flex items-center justify-center gap-1 text-xs text-accent-foreground/80 ${confirmedLoyalty.ganados > 0 ? "mt-1" : ""}`}>
+                      <Coins className="h-3.5 w-3.5" />
+                      Usaste {confirmedLoyalty.canjeados} {confirmedLoyalty.canjeados === 1 ? "punto" : "puntos"} · −{fmt(confirmedLoyalty.descuento)}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="text-3xl mb-2">📲</div>
               <h3 className="text-lg font-bold mb-2">Pedido casi listo</h3>
               <p className="text-sm text-gray-700 mb-4">

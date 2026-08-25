@@ -2,6 +2,7 @@
 "use client";
 
 import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
+import { useTableOrder } from "@/components/table-order-context";
 
 const levelClasses: Record<string, {wrap: string; text: string; border: string; bg: string}> = {
   info:    { wrap: "border-sky-200",    text: "text-sky-800",    border: "border", bg: "bg-sky-50" },
@@ -11,8 +12,9 @@ const levelClasses: Record<string, {wrap: string; text: string; border: string; 
 
 export default function InfoBanner() {
   const { config } = useOnlineConfig();
+  const { isTableMode } = useTableOrder();
 
-  if (!config.infoBannerEnabled) return null;
+  if (isTableMode || !config.infoBannerEnabled) return null;
 
   const msg = config.infoBannerMsg?.trim();
   if (!msg) return null;

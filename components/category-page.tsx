@@ -12,6 +12,7 @@ import { fixImageUrl } from "@/lib/img";
 import type { Category } from "@/lib/categories";
 import type { Product } from "@/lib/api/products";
 import { fetchProductsByCategory, fetchProductsBySubcategory } from "@/lib/api/products";
+import { isWholesaleMode } from "@/lib/storeMode";
 import PromoBanner from "./promo-banner";
 
 type CategoryPageProps = {
@@ -143,7 +144,11 @@ export default function CategoryPageClient({
 
   // Agrupar por subcategoría si existe; si no, grupo plano
   const groups = useMemo(() => {
-    const list = products;
+    // En modo wholesale, un producto sin stock ni siquiera se lista — el
+    // Backend solo empieza a trackear stock por producto para negocios que
+    // realmente lo usan, así que este filtro queda gateado por modo (fuera
+    // de wholesale, stock:0 suele significar "no trackeado", no "agotado").
+    const list = isWholesaleMode() ? products.filter((p) => (p.stock ?? 1) > 0) : products;
 
     const anySub = list.some((p) => p?.subcategory?.id != null || p?.subcategoryId != null);
     if (!anySub) {
@@ -275,6 +280,12 @@ export default function CategoryPageClient({
                             {fmtPrice(unit)}
                           </span>
                         </div>
+
+                        {isWholesaleMode() && p.stock !== undefined && (
+                          <div className="mt-1 text-xs font-medium text-muted-foreground">
+                            Stock: {p.stock}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );

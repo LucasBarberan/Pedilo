@@ -16,6 +16,8 @@ import BlockingLoader from "@/components/blocking-loader";
 import { fixImageUrl } from "@/lib/img";
 import { fetchProductById, type Product, type ModifierGroup, type ModifierGroupOption } from "@/lib/api/products";
 import { buildPromoLabel } from "@/lib/pricing";
+import { isWholesaleMode } from "@/lib/storeMode";
+import { useTableOrder } from "@/components/table-order-context";
 
 // ===== Helpers de formato y cálculos =====
 const MAX_NOTES = 50;
@@ -167,11 +169,13 @@ export default function ProductDetailPage() {
   const [submitting, setSubmitting] = useState(false);
   const { data: status } = useBusinessStatusSmart();
   const { config: onlineConfig } = useOnlineConfig();
+  const { isTableMode, context: tableContext, loading: tableLoading } = useTableOrder();
   // mientras carga: true => botón habilitado (si preferís bloquear hasta cargar, cambiá a !!status?.web.open)
   const isWebOpen = status?.web?.open ?? true;
   const pickupOnly = !!(status?.pos?.open && status?.web?.open === false);
 
-  const disabledByStatus = !isWebOpen;
+  const orderingEnabled = isTableMode ? tableContext?.canOrder === true : isWebOpen;
+  const disabledByStatus = !orderingEnabled || (isTableMode && tableLoading);
 
 
   const [prod, setProd] = useState<Product | null>(null);
@@ -698,7 +702,14 @@ export default function ProductDetailPage() {
             })}
 
             <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
-              <div className="text-sm font-semibold mb-2">Cantidad:</div>
+              <div className="text-sm font-semibold mb-2 flex items-center justify-between">
+                <span>Cantidad:</span>
+                {isWholesaleMode() && prod?.stock !== undefined && (
+                  <span className="text-xs font-normal text-muted-foreground">
+                    Disponible: {prod.stock}
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-3">
                 <Button
                   variant="outline"
@@ -710,34 +721,43 @@ export default function ProductDetailPage() {
                 <div className="w-8 text-center font-semibold">{qty}</div>
                 <Button
                   variant="outline"
-                  onClick={() => setQty((q) => q + 1)}
-                  disabled={loading && !prod}
+                  onClick={() =>
+                    setQty((q) =>
+                      isWholesaleMode() && prod?.stock !== undefined ? Math.min(prod.stock, q + 1) : q + 1
+                    )
+                  }
+                  disabled={
+                    (loading && !prod) ||
+                    (isWholesaleMode() && prod?.stock !== undefined && qty >= prod.stock)
+                  }
                 >
                   ＋
                 </Button>
               </div>
             </div>
 
-            <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
-              <div className="text-sm font-semibold mb-2">Observaciones:</div>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value.slice(0, MAX_NOTES))}
-                maxLength={MAX_NOTES}
-                rows={2}
-                placeholder="Escribe aquí cualquier observación especial para tu pedido..."
-                className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)] resize-none min-h-[40px]"
-                onInput={(e) => {
-                  const ta = e.currentTarget;
-                  ta.style.height = "auto";
-                  ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
-                }}
-                disabled={loading && !prod}
-              />
-              <div className="mt-1 text-xs text-muted-foreground text-right">
-                {notes.length}/{MAX_NOTES}
+            {!isWholesaleMode() && (
+              <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
+                <div className="text-sm font-semibold mb-2">Observaciones:</div>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value.slice(0, MAX_NOTES))}
+                  maxLength={MAX_NOTES}
+                  rows={2}
+                  placeholder="Escribe aquí cualquier observación especial para tu pedido..."
+                  className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand-color)] resize-none min-h-[40px]"
+                  onInput={(e) => {
+                    const ta = e.currentTarget;
+                    ta.style.height = "auto";
+                    ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+                  }}
+                  disabled={loading && !prod}
+                />
+                <div className="mt-1 text-xs text-muted-foreground text-right">
+                  {notes.length}/{MAX_NOTES}
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3">
               <div className="flex items-center justify-between mb-3">
@@ -767,7 +787,7 @@ export default function ProductDetailPage() {
                   active:bg-[color-mix(in_srgb,var(--brand-color),#000_18%)]
                   hover:brightness-95 active:brightness-90
                   disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none`}
-                onClick={isWebOpen ? handleAdd : undefined}
+                onClick={orderingEnabled ? handleAdd : undefined}
                 disabled={disabledByStatus || !prod || submitting}
                 title={
                   disabledByStatus
@@ -777,7 +797,7 @@ export default function ProductDetailPage() {
                 aria-disabled={disabledByStatus || !prod || submitting}
               >
                 {disabledByStatus
-                  ? (pickupOnly ? "Solo en el local" : "Local cerrado")
+                  ? (isTableMode ? "Mesa no habilitada" : pickupOnly ? "Solo en el local" : "Local cerrado")
                   : (justAdded ? "Agregado ✔" : "Agregar al Carrito")}
               </Button>
             </div>
