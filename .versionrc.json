@@ -1,0 +1,15 @@
+{
+  "types": [
+    { "type": "feat", "section": "Added" },
+    { "type": "fix", "section": "Fixed" },
+    { "type": "perf", "section": "Performance" },
+    { "type": "refactor", "section": "Changed" },
+    { "type": "docs", "section": "Docs" },
+    { "type": "revert", "section": "Removed" },
+    { "type": "chore", "section": "Changed" },
+    { "type": "style", "section": "Changed" },
+    { "type": "test", "section": "Changed" },
+    { "type": "build", "section": "Changed" },
+    { "type": "ci", "section": "Changed" }
+  ]
+}
