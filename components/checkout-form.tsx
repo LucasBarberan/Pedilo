@@ -12,6 +12,7 @@ import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { DeliveryMap } from "@/components/delivery-map";
 import { fetchDeliveryQuote, fetchDeliveryPricingEnabled, fetchDeliveryLocationBias, type DeliveryQuoteResponse } from "@/lib/api/delivery";
 import { fetchLoyaltyEnabled, fetchLoyaltyStatus, fetchLoyaltyEarnPreview, type LoyaltyCustomerStatus } from "@/lib/api/loyalty";
+import { fetchPublicPaymentMethods, type PublicPaymentMethod } from "@/lib/api/paymentMethods";
 import { isWholesaleMode } from "@/lib/storeMode";
 import { Sparkles, PartyPopper, Coins } from "lucide-react";
 import { useTableOrder } from "@/components/table-order-context";
@@ -186,7 +187,20 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const [deliveryMethod, setDeliveryMethod] = useState<"delivery" | "pickup" | null>(
     DELIVERY_ENABLED ? null : "pickup"
   );
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "mp">("cash");
+  // Medios de pago configurados desde el admin (admin/tesoreria/metodos-de-pago,
+  // "Visible en App Online") — reemplaza el hardcode "cash"|"mp" viejo, que
+  // mandaba un paymentMethodCode inventado sin id real. Ver
+  // openspec/changes/pedilo-medios-pago-config/.
+  const [paymentMethods, setPaymentMethods] = useState<PublicPaymentMethod[]>([]);
+  const [paymentMethodsLoaded, setPaymentMethodsLoaded] = useState(false);
+  const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<number | null>(null);
+  useEffect(() => {
+    fetchPublicPaymentMethods().then((methods) => {
+      setPaymentMethods(methods);
+      setSelectedPaymentMethodId(methods.find((m) => m.isDefault)?.id ?? methods[0]?.id ?? null);
+      setPaymentMethodsLoaded(true);
+    });
+  }, []);
   const [notes, setNotes] = useState("");
   // Solo se pide cuando esta comanda va a abrir la mesa sola (auto-apertura por
   // QR, ver tableGuestCount más abajo) — si ya hay una sesión (la abrió el
@@ -313,6 +327,21 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   // "comiéndose" el envío en la preview (hasta mostrarlo gratis), aunque el
   // Backend jamás lo va a descontar así al confirmar el pedido.
   const loyaltyDescuentoAplicado = Math.min(loyaltyDescuentoPreview, total);
+
+  // Descuento/recargo del medio de pago elegido — preview local (nunca
+  // re-cotiza en vivo, mismo criterio que loyaltyDescuentoAplicado arriba):
+  // se calcula sobre el subtotal ya neto de promo/puntos, sin envío (el
+  // Backend tampoco lo aplica sobre el envío). El monto final autoritativo
+  // lo recalcula el Backend al confirmar el pedido — ver
+  // openspec/changes/pedilo-medios-pago-config/design.md.
+  const selectedPaymentMethod = paymentMethods.find((m) => m.id === selectedPaymentMethodId) ?? null;
+  const paymentMethodAdjustmentBase = Math.max(0, total - loyaltyDescuentoAplicado);
+  const paymentMethodDiscountPreview = selectedPaymentMethod
+    ? Math.round((paymentMethodAdjustmentBase * selectedPaymentMethod.discountPercent) / 100)
+    : 0;
+  const paymentMethodSurchargePreview = selectedPaymentMethod
+    ? Math.round((paymentMethodAdjustmentBase * selectedPaymentMethod.surchargePercent) / 100)
+    : 0;
 
   // Preview de "vas a sumar X puntos" con esta compra. Usa el subtotal YA
   // NETO del descuento por puntos, sin envío — es exactamente lo que el
@@ -563,9 +592,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     if (SCHEDULED_ORDERS_ENABLED && scheduleLater && scheduledTime) {
       lines.push(`*Horario pedido:* ${scheduledTime} hs`);
     }
-    lines.push(
-      `*Pago:* ${paymentMethod === "cash" ? "Efectivo" : "Mercado Pago"}`
-    );
+    const selectedPaymentMethodName =
+      paymentMethods.find((m) => m.id === selectedPaymentMethodId)?.name ?? "—";
+    lines.push(`*Pago:* ${selectedPaymentMethodName}`);
     if (notes?.trim()) lines.push(`*Obs generales:* ${notes.trim()}`);
     lines.push("");
     lines.push("*Detalle:*");
@@ -625,16 +654,37 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
     lines.push("");
 
-    // Prioridad: total del quote (con promo) > total confirmado por API > total del carrito
-    const baseTotal = cartSummary?.total ?? confirmedTotal ?? total;
-    const confirmedTotalWithDelivery = Math.round(deliveryMethod === "delivery" ? baseTotal + resolvedDeliveryPrice : baseTotal);
+    // Mismo desglose que el panel "Resumen" en pantalla (ver footer fijo más
+    // abajo en el JSX) — antes acá se colapsaba todo en un "Subtotal"/"Total"
+    // que en realidad ya venía neto de promo, sin mostrar ni el descuento de
+    // promo ni el de/recargo por medio de pago (y el Total ni los contemplaba
+    // cuando había promo). Subtotal = precio de lista, sin ningún descuento.
+    const subtotalDisplay = cartSummary ? cartSummary.originalSubtotal : total;
+    lines.push(`*Subtotal:* ${fmt(Math.round(subtotalDisplay))}`);
 
+    if (cartSummary && cartSummary.savings > 0) {
+      lines.push(`*${cartSummary.promoName ?? "Descuento promo"}:* -${fmt(Math.round(cartSummary.savings))}`);
+    }
+    if (puntosACanjear > 0 && loyaltyDescuentoAplicado > 0) {
+      lines.push(`*Puntos canjeados:* -${fmt(Math.round(loyaltyDescuentoAplicado))}`);
+    }
+    if (paymentMethodDiscountPreview > 0) {
+      lines.push(`*Descuento (${selectedPaymentMethod?.name}):* -${fmt(paymentMethodDiscountPreview)}`);
+    }
+    if (paymentMethodSurchargePreview > 0) {
+      lines.push(`*Recargo (${selectedPaymentMethod?.name}):* +${fmt(paymentMethodSurchargePreview)}`);
+    }
     if (deliveryMethod === "delivery") {
-      lines.push(`*Subtotal:* ${fmt(Math.round(baseTotal))}`);
       lines.push(`*Envío:* ${deliveryQuote?.withinCoverage && deliveryQuote.price != null ? fmt(deliveryQuote.price) : (resolvedDeliveryPrice > 0 ? fmt(resolvedDeliveryPrice) : "A coordinar con el local")}`);
     }
 
-    lines.push(`*Total:* ${fmt(confirmedTotalWithDelivery)}`);
+    // Prioridad para el neto sin envío: total confirmado por el Backend al
+    // crear la orden (autoritativo, ya incluye promo+puntos+medio de pago)
+    // > cálculo local (mismo que el panel en pantalla), por si todavía no
+    // llegó la confirmación. El Backend nunca incluye el envío en Order.total.
+    const netBeforeDelivery = confirmedTotal ?? (paymentMethodAdjustmentBase - paymentMethodDiscountPreview + paymentMethodSurchargePreview);
+    const finalTotal = Math.round(deliveryMethod === "delivery" ? netBeforeDelivery + resolvedDeliveryPrice : netBeforeDelivery);
+    lines.push(`*Total:* ${fmt(finalTotal)}`);
 
     // Agregar link de seguimiento si existe
     if (trackingToken) {
@@ -719,6 +769,10 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     if (isTableMode && !tableContext?.canOrder) {
       setFormError(tableContext?.message || "La mesa no está habilitada para recibir pedidos.");
       await refreshTableContext();
+      return;
+    }
+    if (!isTableMode && selectedPaymentMethodId == null) {
+      setFormError("Elegí un medio de pago.");
       return;
     }
 
@@ -922,14 +976,6 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
             mapUrl: null,
           };
 
-      // body
-      const paymentMethodCode =
-        paymentMethod === "cash"
-          ? "CASH"
-          : paymentMethod === "mp"
-            ? "TRANSFER"
-            : "CARD";
-
       // Modo wholesale: resolver/crear el Customer por DNI antes de armar el
       // pedido — el back necesita customerId para asociarlo (ver
       // openspec/changes/pedilo-wholesale-pickup/specs/customers/spec.md).
@@ -962,8 +1008,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       const apiBodyRaw: any = {
         items: itemsForApi,
         combos: combosForApi,
-        // New backend expects id/code. Send code; legacy enum deprecated.
-        paymentMethodCode,
+        // Id real del medio de pago configurado en el admin — ya no se manda
+        // un paymentMethodCode inventado (ver openspec/changes/pedilo-medios-pago-config/).
+        paymentMethodId: selectedPaymentMethodId,
         amount_paid: Math.round(Number(total)),
         delivery_info,
         channel,                  // "WEB"
@@ -1573,26 +1620,38 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         {!isTableMode && (
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-3">Pago</div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPaymentMethod("cash")}
-              className={`px-3 py-2 rounded-lg border ${paymentMethod === "cash"
-                ? "border-[var(--brand-color)] bg-[#fff5f2]"
-                : "border-transparent hover:bg-black/5"
-                }`}
-            >
-              Efectivo
-            </button>
-            <button
-              onClick={() => setPaymentMethod("mp")}
-              className={`px-3 py-2 rounded-lg border ${paymentMethod === "mp"
-                ? "border-[var(--brand-color)] bg-[#fff5f2]"
-                : "border-transparent hover:bg-black/5"
-                }`}
-            >
-              Mercado Pago
-            </button>
-          </div>
+          {paymentMethods.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {paymentMethods.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => setSelectedPaymentMethodId(m.id)}
+                  className={`px-3 py-2 rounded-lg border ${selectedPaymentMethodId === m.id
+                    ? "border-[var(--brand-color)] bg-[#fff5f2]"
+                    : "border-transparent hover:bg-black/5"
+                    }`}
+                >
+                  {m.name}
+                  {m.discountPercent > 0 && (
+                    <span className="ml-1.5 text-xs font-semibold text-emerald-600">
+                      -{m.discountPercent}%
+                    </span>
+                  )}
+                  {m.surchargePercent > 0 && (
+                    <span className="ml-1.5 text-xs font-semibold text-amber-600">
+                      +{m.surchargePercent}%
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          ) : paymentMethodsLoaded ? (
+            <p className="text-sm text-muted-foreground">
+              No hay medios de pago disponibles — contactá al local.
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">Cargando medios de pago…</p>
+          )}
         </div>
         )}
 
@@ -1777,10 +1836,30 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                   </span>
                 </div>
               )}
+              {/* Descuento/recargo del medio de pago — preview local, ver
+                  paymentMethodDiscountPreview/paymentMethodSurchargePreview
+                  más arriba (nunca re-cotiza en vivo). */}
+              {paymentMethodDiscountPreview > 0 && (
+                <div className="flex items-center justify-between text-sm text-emerald-600">
+                  <span className="font-medium truncate pr-2">Descuento ({selectedPaymentMethod?.name})</span>
+                  <span className="font-semibold shrink-0">−{fmt(paymentMethodDiscountPreview)}</span>
+                </div>
+              )}
+              {paymentMethodSurchargePreview > 0 && (
+                <div className="flex items-center justify-between text-sm text-amber-600">
+                  <span className="font-medium truncate pr-2">Recargo ({selectedPaymentMethod?.name})</span>
+                  <span className="font-semibold shrink-0">+{fmt(paymentMethodSurchargePreview)}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold">Total:</span>
                 <span className="text-xl font-extrabold text-[var(--brand-color)]">
-                  {fmt(Math.max(0, total - loyaltyDescuentoAplicado) + (deliveryMethod === "delivery" ? resolvedDeliveryPrice : 0))}
+                  {fmt(
+                    paymentMethodAdjustmentBase -
+                    paymentMethodDiscountPreview +
+                    paymentMethodSurchargePreview +
+                    (deliveryMethod === "delivery" ? resolvedDeliveryPrice : 0)
+                  )}
                 </span>
               </div>
               {/* Puntos a ganar — separado a propósito de la caja de "Tus puntos"
