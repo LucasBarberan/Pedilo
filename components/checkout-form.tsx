@@ -654,16 +654,37 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
     lines.push("");
 
-    // Prioridad: total del quote (con promo) > total confirmado por API > total del carrito
-    const baseTotal = cartSummary?.total ?? confirmedTotal ?? total;
-    const confirmedTotalWithDelivery = Math.round(deliveryMethod === "delivery" ? baseTotal + resolvedDeliveryPrice : baseTotal);
+    // Mismo desglose que el panel "Resumen" en pantalla (ver footer fijo más
+    // abajo en el JSX) — antes acá se colapsaba todo en un "Subtotal"/"Total"
+    // que en realidad ya venía neto de promo, sin mostrar ni el descuento de
+    // promo ni el de/recargo por medio de pago (y el Total ni los contemplaba
+    // cuando había promo). Subtotal = precio de lista, sin ningún descuento.
+    const subtotalDisplay = cartSummary ? cartSummary.originalSubtotal : total;
+    lines.push(`*Subtotal:* ${fmt(Math.round(subtotalDisplay))}`);
 
+    if (cartSummary && cartSummary.savings > 0) {
+      lines.push(`*${cartSummary.promoName ?? "Descuento promo"}:* -${fmt(Math.round(cartSummary.savings))}`);
+    }
+    if (puntosACanjear > 0 && loyaltyDescuentoAplicado > 0) {
+      lines.push(`*Puntos canjeados:* -${fmt(Math.round(loyaltyDescuentoAplicado))}`);
+    }
+    if (paymentMethodDiscountPreview > 0) {
+      lines.push(`*Descuento (${selectedPaymentMethod?.name}):* -${fmt(paymentMethodDiscountPreview)}`);
+    }
+    if (paymentMethodSurchargePreview > 0) {
+      lines.push(`*Recargo (${selectedPaymentMethod?.name}):* +${fmt(paymentMethodSurchargePreview)}`);
+    }
     if (deliveryMethod === "delivery") {
-      lines.push(`*Subtotal:* ${fmt(Math.round(baseTotal))}`);
       lines.push(`*Envío:* ${deliveryQuote?.withinCoverage && deliveryQuote.price != null ? fmt(deliveryQuote.price) : (resolvedDeliveryPrice > 0 ? fmt(resolvedDeliveryPrice) : "A coordinar con el local")}`);
     }
 
-    lines.push(`*Total:* ${fmt(confirmedTotalWithDelivery)}`);
+    // Prioridad para el neto sin envío: total confirmado por el Backend al
+    // crear la orden (autoritativo, ya incluye promo+puntos+medio de pago)
+    // > cálculo local (mismo que el panel en pantalla), por si todavía no
+    // llegó la confirmación. El Backend nunca incluye el envío en Order.total.
+    const netBeforeDelivery = confirmedTotal ?? (paymentMethodAdjustmentBase - paymentMethodDiscountPreview + paymentMethodSurchargePreview);
+    const finalTotal = Math.round(deliveryMethod === "delivery" ? netBeforeDelivery + resolvedDeliveryPrice : netBeforeDelivery);
+    lines.push(`*Total:* ${fmt(finalTotal)}`);
 
     // Agregar link de seguimiento si existe
     if (trackingToken) {
