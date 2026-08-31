@@ -5,7 +5,8 @@ import { useCart } from "@/components/cart-context";
 import Link from "next/link";
 import Image from "next/image";
 import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
-import { useState } from "react";
+import { fetchPublicPaymentMethods } from "@/lib/api/paymentMethods";
+import { useEffect, useState } from "react";
 import { TableOrderBanner } from "@/components/table-order-banner";
 
 type Props = {
@@ -25,6 +26,14 @@ export default function SiteHeader({
   const { config } = useOnlineConfig();
   const [logoError, setLogoError] = useState(false);
   const STORE_NAME = config.storeName || "SRA. BURGA";
+
+  // Precarga (caché singleton) de los medios de pago de Pedilo — SiteHeader
+  // está montado en todas las pantallas previas al checkout, así que para
+  // cuando checkout-form.tsx los pide ya están tibios (sin flash de "refetch"
+  // recién al llegar al paso de pago). Ver lib/api/paymentMethods.ts.
+  useEffect(() => {
+    fetchPublicPaymentMethods();
+  }, []);
 
   return (
     <>
