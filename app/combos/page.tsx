@@ -1,6 +1,7 @@
 ﻿import CombosListScreen from "@/components/combos-list-page";
 import { fetchCombos } from "@/lib/api/combos";
 import { fetchCategories } from "@/lib/categories";
+import { apiBase as resolveApiBase } from "@/lib/apiBase";
 
 interface CombosPageProps {
   searchParams?: {
@@ -9,7 +10,8 @@ interface CombosPageProps {
 }
 
 export default async function CombosPage({ searchParams }: CombosPageProps) {
-  const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? null;
+  // demo-mode Fase 5 (tasks.md 5.4): sin token de demo, comportamiento actual sin cambios.
+  const apiBase = await resolveApiBase();
   const categoryId = searchParams?.categoryId ?? null;
 
   const combos = await fetchCombos({

@@ -1,4 +1,5 @@
 // lib/api/onlineConfig.ts
+import { getClientApiBase } from "@/lib/apiBase.client";
 
 export type OnlineConfigResponse = {
   storeName: string;
@@ -28,7 +29,8 @@ export const ONLINE_CONFIG_DEFAULTS: OnlineConfigResponse = {
   infoBannerLevel: "info",
 };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
+// demo-mode Fase 5 (tasks.md 5.5): sin cookie de demo, comportamiento actual sin cambios.
+const API_URL = getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL;
 
 let _cache: OnlineConfigResponse | null = null;
 let _promise: Promise<OnlineConfigResponse> | null = null;

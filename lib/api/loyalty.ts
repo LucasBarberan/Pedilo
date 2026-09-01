@@ -1,4 +1,5 @@
 // lib/api/loyalty.ts
+import { getClientApiBase } from "@/lib/apiBase.client";
 
 export type LoyaltyCustomerStatus = {
   customerId: number;
@@ -17,7 +18,8 @@ export type LoyaltyCustomerStatus = {
   puntosFaltantesParaCanje: number;
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL; // ej: http://localhost:5000/api
+// demo-mode Fase 5 (tasks.md 5.5): sin cookie de demo, comportamiento actual sin cambios.
+const API = getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL; // ej: http://localhost:5000/api
 
 let _enabledCache: boolean | null = null;
 let _enabledPromise: Promise<boolean> | null = null;

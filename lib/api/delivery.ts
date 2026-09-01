@@ -1,4 +1,5 @@
 // lib/api/delivery.ts
+import { getClientApiBase } from "@/lib/apiBase.client";
 
 export type DeliveryQuoteRequest = {
   address?: string;
@@ -20,7 +21,8 @@ export type DeliveryQuoteResponse = {
   destinationLocation: LatLng | null;
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL; // ej: http://localhost:5000/api
+// demo-mode Fase 5 (tasks.md 5.5): sin cookie de demo, comportamiento actual sin cambios.
+const API = getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL; // ej: http://localhost:5000/api
 
 type DeliveryConfigSnapshot = {
   enabled: boolean;

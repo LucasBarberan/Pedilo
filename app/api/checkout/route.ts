@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { apiBase } from "@/lib/apiBase";
 
 const COOKIE_NAME = "pedilo_test_token";
 
@@ -12,7 +13,12 @@ export async function POST(req: Request) {
   const headers: HeadersInit = { "Content-Type": "application/json" };
   if (testToken) headers["authorization"] = `Bearer ${testToken}`;
 
-  const r = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/orders`, {
+  // demo-mode Fase 5 (tasks.md 5.8, gap detectado): sin esto, un pedido hecho desde una demo
+  // se creaba en `public` en vez de `demo_N` — Route Handler server-side, `apiBase()` (server,
+  // next/headers) es seguro acá, a diferencia de los fetchers client-side de lib/api/*.
+  const base = (await apiBase()) ?? process.env.NEXT_PUBLIC_API_URL;
+
+  const r = await fetch(`${base}/orders`, {
     method: "POST",
     headers,
     body,

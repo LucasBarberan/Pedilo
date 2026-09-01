@@ -1,4 +1,6 @@
 ﻿// lib/pricing.ts
+import { getClientApiBase } from "@/lib/apiBase.client";
+
 export type QuoteItemProductView = {
   kind: "PRODUCT";
   productId: number;
@@ -49,7 +51,9 @@ export async function quoteProduct({
   signal?: AbortSignal;
 }): Promise<QuoteItemProductView | null> {
   try {
-    const BASE = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+    // demo-mode Fase 5 (tasks.md 5.6): baseUrl explícito > cookie de demo (client-side) >
+    // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
+    const BASE = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
     if (!BASE) return null;
 
     const body = {
@@ -180,7 +184,9 @@ export async function quoteCombo({
   signal?: AbortSignal;
 }): Promise<QuoteItemComboView | null> {
   try {
-    const BASE = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+    // demo-mode Fase 5 (tasks.md 5.6): baseUrl explícito > cookie de demo (client-side) >
+    // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
+    const BASE = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
     if (!BASE) return null;
 
     const body = {
@@ -250,7 +256,9 @@ export async function quoteComboSlots({
   signal?: AbortSignal;
 }): Promise<QuoteItemComboView | null> {
   try {
-    const BASE = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+    // demo-mode Fase 5 (tasks.md 5.6): baseUrl explícito > cookie de demo (client-side) >
+    // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
+    const BASE = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
     if (!BASE) return null;
 
     const body = {

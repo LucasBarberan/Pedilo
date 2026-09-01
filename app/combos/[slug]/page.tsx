@@ -3,6 +3,7 @@
 import ComboDetailPage from "@/components/combo-page";
 import { fetchComboDetail } from "@/lib/api/combos";
 import { isAllowedForDelivery } from "@/lib/channel";
+import { apiBase as resolveApiBase } from "@/lib/apiBase";
 
 interface ComboPageProps {
   params: { slug: string };
@@ -10,7 +11,8 @@ interface ComboPageProps {
 
 export default async function ComboPage({ params }: ComboPageProps) {
   const comboId = params.slug;
-  const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? null;
+  // demo-mode Fase 5 (tasks.md 5.4): sin token de demo, comportamiento actual sin cambios.
+  const apiBase = await resolveApiBase();
 
   const { combo, mainProduct, inclusionProducts } = await fetchComboDetail(comboId, {
     baseUrl: apiBase ?? undefined,

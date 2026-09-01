@@ -5,6 +5,7 @@ import { fetchCategories } from "@/lib/categories";
 import { fetchProductsByCategory } from "@/lib/api/products";
 import type { Product } from "@/lib/api/products";
 import type { Category } from "@/lib/categories";
+import { apiBase as resolveApiBase } from "@/lib/apiBase";
 
 type CategoryPageProps = {
   params: { slug: string };
@@ -22,7 +23,8 @@ const slugify = (s: string) =>
 
 export default async function CategoryPage({ params, searchParams }: CategoryPageProps) {
   const slug = params.slug;
-  const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? null;
+  // demo-mode Fase 5 (tasks.md 5.4): sin token de demo, comportamiento actual sin cambios.
+  const apiBase = await resolveApiBase();
 
   if (slug && slug.toLowerCase() === "combos") {
     redirect("/combos");

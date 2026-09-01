@@ -18,6 +18,7 @@ import { fetchProductById, type Product, type ModifierGroup, type ModifierGroupO
 import { buildPromoLabel } from "@/lib/pricing";
 import { isWholesaleMode } from "@/lib/storeMode";
 import { useTableOrder } from "@/components/table-order-context";
+import { getClientApiBase } from "@/lib/apiBase.client";
 
 // ===== Helpers de formato y cálculos =====
 const MAX_NOTES = 50;
@@ -127,7 +128,8 @@ async function quoteProduct(
   comment?: string
 ): Promise<QuoteItemProductView | null> {
   try {
-    const BASE = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
+    // demo-mode Fase 5 (tasks.md 5.5): sin cookie de demo, comportamiento actual sin cambios.
+    const BASE = getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
     if (!BASE) return null;
 
     const body = {
@@ -218,7 +220,8 @@ export default function ProductDetailPage() {
 
   // 2) fetch real (reemplaza o completa el warm)
   useEffect(() => {
-    const BASE = process.env.NEXT_PUBLIC_API_URL;
+    // demo-mode Fase 5 (tasks.md 5.5): sin cookie de demo, comportamiento actual sin cambios.
+    const BASE = getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL;
     if (!id || !BASE) return;
 
     let aborted = false;

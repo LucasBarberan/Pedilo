@@ -1,3 +1,5 @@
+import { getClientApiBase } from "@/lib/apiBase.client";
+
 export type ProductOption = {
   id: string | number;
   precio_extra?: number | string | null;
@@ -248,7 +250,9 @@ export async function fetchProductsByCategory(
   categoryId: string | number,
   { baseUrl, signal, page = 1, limit = 20 }: FetchProductsOptions = {}
 ): Promise<Product[]> {
-  const base = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  // demo-mode Fase 5 (tasks.md 5.5): baseUrl explícito (server) > cookie de demo (client) >
+  // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
+  const base = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
   if (!base) return [];
 
   try {
@@ -281,7 +285,9 @@ export async function fetchProductsBySubcategory(
   subcategoryId: string | number,
   { baseUrl, signal, includeInactive = false }: FetchProductsOptions = {}
 ): Promise<Product[]> {
-  const base = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  // demo-mode Fase 5 (tasks.md 5.5): baseUrl explícito (server) > cookie de demo (client) >
+  // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
+  const base = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
   if (!base) return [];
 
   try {
@@ -316,7 +322,9 @@ export async function fetchProductById(
   productId: string | number,
   { baseUrl, signal, comboId }: FetchProductByIdOptions = {}
 ): Promise<Product | null> {
-  const base = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  // demo-mode Fase 5 (tasks.md 5.5): baseUrl explícito (server) > cookie de demo (client) >
+  // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
+  const base = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
   if (!base) return null;
 
   try {

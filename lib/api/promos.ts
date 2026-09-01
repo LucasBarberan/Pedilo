@@ -1,3 +1,5 @@
+import { getClientApiBase } from "@/lib/apiBase.client";
+
 export type ActivePromo = {
   id: number;
   priceListId: number;
@@ -44,7 +46,9 @@ export async function fetchActivePromos(
   signal?: AbortSignal,
   channel: "WEB" | "POS" = "WEB",
 ): Promise<ActivePromo[]> {
-  const base = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  // demo-mode Fase 5 (tasks.md 5.5): baseUrl explícito (server) > cookie de demo (client) >
+  // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
+  const base = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
   if (!base) return [];
   try {
     const res = await fetch(`${base}/price-lists/active-promos?channel=${channel}`, { signal });

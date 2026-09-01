@@ -1,4 +1,5 @@
 import { isAllowedForDelivery } from "@/lib/channel";
+import { getClientApiBase } from "@/lib/apiBase.client";
 import type { Product } from "@/lib/api/products";
 import { normalizeProduct, fetchProductById } from "@/lib/api/products";
 
@@ -367,7 +368,9 @@ export async function fetchCombos({
   onlyDeliveryAllowed = false,
   onlyComboCategory = false,
 }: FetchCombosOptions = {}): Promise<Combo[]> {
-  const base = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  // demo-mode Fase 5 (tasks.md 5.5): baseUrl explícito (server) > cookie de demo (client) >
+  // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
+  const base = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
   if (!base) return [];
 
   const url = `${base}/catalog/combos?channel=WEB`;
@@ -404,7 +407,9 @@ export async function fetchComboById(
     withEffectivePrice = true,
   }: FetchComboByIdOptions = {}
 ): Promise<Combo | null> {
-  const base = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  // demo-mode Fase 5 (tasks.md 5.5): baseUrl explícito (server) > cookie de demo (client) >
+  // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
+  const base = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
   if (!base) return null;
 
   const search = new URLSearchParams();
@@ -444,7 +449,9 @@ export async function fetchComboDetail(
   mainProduct: Product | null;
   inclusionProducts: Record<string, Product[]>;
 }> {
-  const base = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  // demo-mode Fase 5 (tasks.md 5.5): baseUrl explícito (server) > cookie de demo (client) >
+  // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
+  const base = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
   if (!base) return { combo: null, mainProduct: null, inclusionProducts: {} };
 
   try {

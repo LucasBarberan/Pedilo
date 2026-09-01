@@ -1,4 +1,6 @@
 // lib/api/business.ts
+import { getClientApiBase } from "@/lib/apiBase.client";
+
 export type Channel = "POS" | "WEB";
 
 export type ChannelStatus = {
@@ -18,7 +20,9 @@ export type CombinedStatus = {
   web: ChannelStatus;
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL; // ej: http://localhost:3000/api
+// demo-mode Fase 5 (tasks.md 5.5): sin cookie de demo, comportamiento actual sin cambios
+// (getClientApiBase() cae a NEXT_PUBLIC_API_URL).
+const API = getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL; // ej: http://localhost:3000/api
 
 export async function fetchBusinessStatus(): Promise<CombinedStatus> {
   if (!API) throw new Error("Falta NEXT_PUBLIC_API_URL");
