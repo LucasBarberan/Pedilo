@@ -338,11 +338,11 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const paymentMethodAdjustmentBase = Math.max(0, total - loyaltyDescuentoAplicado);
   // El Backend anula el descuento por medio de pago si el pedido ya tiene descuento de
   // promoción O de lista de precios (evita doble descuento — ver applyPaymentDiscount en
-  // cart-calculation.service.ts). Esta preview tiene que espejar esa misma regla: sin
-  // esto, se mostraba el descuento del medio de pago SUMADO al de la promo aunque el
-  // Backend fuera a anularlo al confirmar, mostrando un total más bajo del que después
-  // se cobraba.
-  const paymentMethodDiscountPreview = selectedPaymentMethod && !(cartSummary && cartSummary.savings > 0)
+  // cart-calculation.service.ts). `promoAlreadyApplied` espeja esa misma regla, tanto
+  // para no acumular la preview del descuento como para avisarle al cliente (banner +
+  // badge tachado en el selector de medio de pago) que ese "-X%" no se va a sumar.
+  const promoAlreadyApplied = !!(cartSummary && cartSummary.savings > 0);
+  const paymentMethodDiscountPreview = selectedPaymentMethod && !promoAlreadyApplied
     ? Math.round((paymentMethodAdjustmentBase * selectedPaymentMethod.discountPercent) / 100)
     : 0;
   const paymentMethodSurchargePreview = selectedPaymentMethod
@@ -1626,6 +1626,15 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         {!isTableMode && (
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-3">Pago</div>
+          {/* El descuento por medio de pago NO se acumula con una promo/lista de precios
+              ya aplicada (mismo criterio que el Backend — ver applyPaymentDiscount). Sin
+              este aviso, el botón seguía mostrando "-X%" aunque ese descuento no fuera a
+              aplicarse, generando reclamos de clientes que esperaban ver ambos descuentos. */}
+          {promoAlreadyApplied && paymentMethods.some((m) => m.discountPercent > 0) && (
+            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Ya tenés un descuento aplicado por promoción — el descuento por medio de pago no se suma al de la promo.
+            </div>
+          )}
           {paymentMethods.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {paymentMethods.map((m) => (
@@ -1639,7 +1648,12 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                 >
                   {m.name}
                   {m.discountPercent > 0 && (
-                    <span className="ml-1.5 text-xs font-semibold text-emerald-600">
+                    <span
+                      className={`ml-1.5 text-xs font-semibold ${
+                        promoAlreadyApplied ? "text-muted-foreground line-through" : "text-emerald-600"
+                      }`}
+                      title={promoAlreadyApplied ? "No se acumula con la promo ya aplicada" : undefined}
+                    >
                       -{m.discountPercent}%
                     </span>
                   )}
