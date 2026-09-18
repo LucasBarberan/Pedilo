@@ -336,7 +336,13 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   // openspec/changes/pedilo-medios-pago-config/design.md.
   const selectedPaymentMethod = paymentMethods.find((m) => m.id === selectedPaymentMethodId) ?? null;
   const paymentMethodAdjustmentBase = Math.max(0, total - loyaltyDescuentoAplicado);
-  const paymentMethodDiscountPreview = selectedPaymentMethod
+  // El Backend anula el descuento por medio de pago si el pedido ya tiene descuento de
+  // promoción O de lista de precios (evita doble descuento — ver applyPaymentDiscount en
+  // cart-calculation.service.ts). Esta preview tiene que espejar esa misma regla: sin
+  // esto, se mostraba el descuento del medio de pago SUMADO al de la promo aunque el
+  // Backend fuera a anularlo al confirmar, mostrando un total más bajo del que después
+  // se cobraba.
+  const paymentMethodDiscountPreview = selectedPaymentMethod && !(cartSummary && cartSummary.savings > 0)
     ? Math.round((paymentMethodAdjustmentBase * selectedPaymentMethod.discountPercent) / 100)
     : 0;
   const paymentMethodSurchargePreview = selectedPaymentMethod
