@@ -386,11 +386,17 @@ export async function quoteCart(
       l.type === "PRODUCT" ? (itemsArr[itemIdx++] ?? null) : (combosArr[comboIdx++] ?? null)
     );
 
-    const priceListSavings = Number(json?.priceListSavings) || 0;
     const promotionSavings = Number(json?.promotionSavings) || 0;
-    const totalSavings = priceListSavings + promotionSavings;
     const total    = Number(json?.total);
     const subtotal = Number(json?.subtotal);
+    // El total final se redondea al múltiplo de `priceRoundingStep` más cercano
+    // (ver roundToStep en el Backend) — sumar priceListSavings+promotionSavings "a
+    // mano" ignoraba ese ajuste y mostraba un descuento que no cerraba contra
+    // subtotal-total (ej. "$10500 - $1050" mostrando un total de "$9500" en vez de
+    // "$9450", bug real reportado). subtotal-total SIEMPRE coincide con lo que el
+    // cliente ve en pantalla, sea cual sea el origen del ajuste.
+    const totalSavings =
+      Number.isFinite(subtotal) && Number.isFinite(total) ? subtotal - total : 0;
     const summary: QuoteCartSummary | null =
       totalSavings > 0
         ? {
