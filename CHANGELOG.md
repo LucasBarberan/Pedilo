@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.2.0](https://github.com/LucasBarberan/Pedilo/compare/v2.1.0...v2.2.0) (2026-09-30)
+
+
+### Added
+
+* **checkout:** avisar cuando el descuento por medio de pago no se acumula ([073c1fb](https://github.com/LucasBarberan/Pedilo/commit/073c1fb96573d86588825284b0d50164d64595c9))
+
+
+### Fixed
+
+* **carrito:** re-cotizar el carrito al eliminar un item ([e2d3c20](https://github.com/LucasBarberan/Pedilo/commit/e2d3c204e0994ada00c2e6425ef8f18e4e740160))
+* **checkout:** mostrar el total del medio de pago tal como lo cobra el backend ([904c6ee](https://github.com/LucasBarberan/Pedilo/commit/904c6ee7b6998b69ee02bce5ef0543f10e9a37ca))
+* **checkout:** no acumular preview de descuento por medio de pago con promo ([4c0f477](https://github.com/LucasBarberan/Pedilo/commit/4c0f4774f4ddbb3164aa32fe73e8842f66138ff3))
+* **pricing:** mostrar el descuento real (subtotal-total), no el crudo ([39a01fe](https://github.com/LucasBarberan/Pedilo/commit/39a01fe0f611ee00413152297cf3f990f4459c39))
+
 ## [2.1.0](https://github.com/LucasBarberan/Pedilo/compare/v2.0.0...v2.1.0) (2026-08-31)
 
 
