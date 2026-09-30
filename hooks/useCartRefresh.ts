@@ -2,16 +2,104 @@
 
 import { useState, useCallback } from "react";
 import { useCart, type CartItem } from "@/components/cart-context";
-import { quoteCart, type CartLine, type QuoteComboItem, type QuoteCartSummary, type QuoteItemProductView, type QuoteItemComboView } from "@/lib/pricing";
+import { quoteCart, type QuotePaymentAdjustment, type CartLine, type QuoteComboItem, type QuoteCartSummary, type QuoteItemProductView, type QuoteItemComboView } from "@/lib/pricing";
+
+function buildQuoteLines(toQuote: CartItem[]): CartLine[] {
+  return toQuote.map((item) => {
+    if (item.kind === "combo") {
+      const comboItems = item.comboItems ?? [];
+
+      // Si los comboItems tienen comboItemId vienen del stepper nuevo → usar slots[]
+      const hasSlotData = comboItems.some((c: any) => c.comboItemId != null);
+      if (hasSlotData) {
+        const slots = comboItems
+          .filter((c: any) => !c.isInclusion)
+          .map((c: any) => ({
+            combo_item_id: Number(c.comboItemId),
+            slot_index: Number(c.slotIndex ?? 0),
+            option_ids: Array.isArray(c.optionIds) ? c.optionIds.map(Number) : [],
+            options: Array.isArray(c.options) ? c.options : undefined,
+          }));
+        return { type: "COMBO" as const, comboId: Number(item.id), qty: Number(item.quantity), slots };
+      }
+
+      // Formato legacy: items[]
+      const quoteItems: QuoteComboItem[] = [];
+      const mainCI = comboItems.find((c) => c.isMain);
+      if (mainCI?.productId) {
+        const mainOptions = (item.selectedOptions ?? [])
+          .map((o) => ({ id: Number(o.productOptionId), qty: Number(o.qty ?? 1) }))
+          .filter((o) => Number.isFinite(o.id) && o.id > 0);
+        quoteItems.push({
+          productId: Number(mainCI.productId),
+          quantity:  Number(mainCI.qty ?? 1),
+          optionIds: mainOptions.map((o) => o.id),
+          options: mainOptions,
+        });
+      }
+      for (const ci of comboItems.filter((c) => !c.isMain && !c.isInclusion)) {
+        if (ci.productId) quoteItems.push({ productId: Number(ci.productId), quantity: Number(ci.qty ?? 1), optionIds: [] });
+      }
+      for (const ci of comboItems.filter((c) => !!c.isInclusion)) {
+        if (ci.productId) quoteItems.push({ productId: Number(ci.productId), quantity: Number(ci.qty ?? 1), optionIds: [] });
+      }
+
+      return { type: "COMBO" as const, comboId: Number(item.id), qty: Number(item.quantity), items: quoteItems };
+    } else {
+      const options = (item.selectedOptions ?? []).map((o) => ({
+        id: Number(o.productOptionId),
+        qty: Number(o.qty ?? 1),
+      }));
+      return {
+        type: "PRODUCT" as const,
+        productId: item.id,
+        qty: item.quantity,
+        optionIds: options.map((o) => o.id),
+        options,
+        comment: item.observations,
+      };
+    }
+      });
+}
 
 export function useCartRefresh(): {
   refreshCartPrices: (overrideItems?: CartItem[]) => Promise<void>;
   isRefreshing: boolean;
   cartSummary: QuoteCartSummary | null;
+  /** Descuento/recargo del medio de pago según el Backend (fuente de verdad, ya redondeado); null hasta cotizarlo. */
+  paymentQuote: (QuotePaymentAdjustment & { paymentMethodId: number }) | null;
+  refreshPaymentQuote: (opts: {
+    paymentMethodId: number | null;
+    loyaltyCustomerId?: number | null;
+    loyaltyPointsToRedeem?: number | null;
+  }) => Promise<void>;
 } {
   const { items, updateItemPrice } = useCart();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [cartSummary, setCartSummary] = useState<QuoteCartSummary | null>(null);
+  const [paymentQuote, setPaymentQuote] = useState<(QuotePaymentAdjustment & { paymentMethodId: number }) | null>(null);
+
+  // Cotiza el carrito ACTUAL con el medio de pago elegido: el Backend devuelve el descuento/recargo ya redondeado
+  // (priceRoundingStep), así que el checkout muestra exactamente lo que se va a cobrar.
+  const refreshPaymentQuote = useCallback(
+    async ({
+      paymentMethodId,
+      loyaltyCustomerId,
+      loyaltyPointsToRedeem,
+    }: {
+      paymentMethodId: number | null;
+      loyaltyCustomerId?: number | null;
+      loyaltyPointsToRedeem?: number | null;
+    }) => {
+      if (paymentMethodId == null || !items.length) {
+        setPaymentQuote(null);
+        return;
+      }
+      const { payment } = await quoteCart(buildQuoteLines(items), { paymentMethodId, loyaltyCustomerId, loyaltyPointsToRedeem });
+      setPaymentQuote(payment ? { ...payment, paymentMethodId } : null);
+    },
+    [items]
+  );
 
   const refreshCartPrices = useCallback(async (overrideItems?: CartItem[]) => {
     const toQuote = overrideItems ?? items;
@@ -22,61 +110,7 @@ export function useCartRefresh(): {
 
     setIsRefreshing(true);
     try {
-      const lines: CartLine[] = toQuote.map((item) => {
-        if (item.kind === "combo") {
-          const comboItems = item.comboItems ?? [];
-
-          // Si los comboItems tienen comboItemId vienen del stepper nuevo → usar slots[]
-          const hasSlotData = comboItems.some((c: any) => c.comboItemId != null);
-          if (hasSlotData) {
-            const slots = comboItems
-              .filter((c: any) => !c.isInclusion)
-              .map((c: any) => ({
-                combo_item_id: Number(c.comboItemId),
-                slot_index: Number(c.slotIndex ?? 0),
-                option_ids: Array.isArray(c.optionIds) ? c.optionIds.map(Number) : [],
-                options: Array.isArray(c.options) ? c.options : undefined,
-              }));
-            return { type: "COMBO" as const, comboId: Number(item.id), qty: Number(item.quantity), slots };
-          }
-
-          // Formato legacy: items[]
-          const quoteItems: QuoteComboItem[] = [];
-          const mainCI = comboItems.find((c) => c.isMain);
-          if (mainCI?.productId) {
-            const mainOptions = (item.selectedOptions ?? [])
-              .map((o) => ({ id: Number(o.productOptionId), qty: Number(o.qty ?? 1) }))
-              .filter((o) => Number.isFinite(o.id) && o.id > 0);
-            quoteItems.push({
-              productId: Number(mainCI.productId),
-              quantity:  Number(mainCI.qty ?? 1),
-              optionIds: mainOptions.map((o) => o.id),
-              options: mainOptions,
-            });
-          }
-          for (const ci of comboItems.filter((c) => !c.isMain && !c.isInclusion)) {
-            if (ci.productId) quoteItems.push({ productId: Number(ci.productId), quantity: Number(ci.qty ?? 1), optionIds: [] });
-          }
-          for (const ci of comboItems.filter((c) => !!c.isInclusion)) {
-            if (ci.productId) quoteItems.push({ productId: Number(ci.productId), quantity: Number(ci.qty ?? 1), optionIds: [] });
-          }
-
-          return { type: "COMBO" as const, comboId: Number(item.id), qty: Number(item.quantity), items: quoteItems };
-        } else {
-          const options = (item.selectedOptions ?? []).map((o) => ({
-            id: Number(o.productOptionId),
-            qty: Number(o.qty ?? 1),
-          }));
-          return {
-            type: "PRODUCT" as const,
-            productId: item.id,
-            qty: item.quantity,
-            optionIds: options.map((o) => o.id),
-            options,
-            comment: item.observations,
-          };
-        }
-      });
+      const lines = buildQuoteLines(toQuote);
 
       const { items: results, summary } = await quoteCart(lines);
       setCartSummary(summary);
@@ -100,5 +134,5 @@ export function useCartRefresh(): {
     }
   }, [items, updateItemPrice]);
 
-  return { refreshCartPrices, isRefreshing, cartSummary };
+  return { refreshCartPrices, isRefreshing, cartSummary, paymentQuote, refreshPaymentQuote };
 }

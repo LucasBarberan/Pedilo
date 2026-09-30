@@ -26,6 +26,9 @@ const nextConfig = {
   // permití acceder al dev server desde el backend configurado en NEXT_PUBLIC_API_URL
   allowedDevOrigins: [apiOrigin],
   output: 'standalone',
+  // Carpeta de build configurable: la suite E2E de pricing (TestSuite) usa NEXT_DIST_DIR=.next-pricing-test para no
+  // compartir caché con el `npm run dev` de desarrollo. Sin la variable, el comportamiento no cambia (.next).
+  distDir: process.env.NEXT_DIST_DIR || '.next',
 }
 
 export default nextConfig
