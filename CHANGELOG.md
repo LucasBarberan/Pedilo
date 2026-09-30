@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.1.0](https://github.com/LucasBarberan/Pedilo/compare/v2.0.0...v2.1.0) (2026-08-31)
+
+
+### Added
+
+* **checkout:** medios de pago reales desde el admin, con preview de descuento/recargo ([3225d04](https://github.com/LucasBarberan/Pedilo/commit/3225d04f2e58f114e8cf632babc6106d8a3300a8))
+
+
+### Fixed
+
+* **checkout:** desglosar subtotal/descuento/total en el mensaje de WhatsApp ([5b0965f](https://github.com/LucasBarberan/Pedilo/commit/5b0965fd61dac0add3f139889478ea29fa8e439a))
+
 ## 2.0.0 (2026-08-25)
 
 

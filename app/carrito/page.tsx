@@ -62,6 +62,8 @@ export default function CartPage() {
     const q = Number(it.quantity) || 0;
     if (q <= 1) {
       removeFromCart(it.uniqueId);
+      const updatedItems = items.filter((item: any) => item.uniqueId !== it.uniqueId);
+      await refreshCartPrices(updatedItems as any);
       return;
     }
     const newQty = q - 1;
