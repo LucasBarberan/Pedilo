@@ -1961,15 +1961,15 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
                   return (
                     <>
                       {showPromo && listTotal !== null && (
-                        <div className="text-sm text-muted-foreground line-through">
+                        <div data-testid="pdp-price-original" className="text-sm text-muted-foreground line-through">
                           {fmt(listTotal)}
                         </div>
                       )}
-                      <div className="text-xl font-extrabold text-[var(--brand-color)]">
+                      <div data-testid="pdp-price-final" className="text-xl font-extrabold text-[var(--brand-color)]">
                         {fmt(effectiveTotal)}
                       </div>
                       {showPromo && (
-                        <div className="text-[11px] text-green-700 font-medium">
+                        <div data-testid="pdp-discount-note" className="text-[11px] text-green-700 font-medium">
                           {quoteIsFromPriceList ? "Precio con descuento aplicado" : "Precio promo aplicado"}
                         </div>
                       )}
@@ -1980,6 +1980,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
             </div>
 
             <Button
+              data-testid="pdp-add"
               className={`w-full text-white transition-colors
                           bg-[var(--brand-color)]
                           hover:bg-[color-mix(in_srgb,var(--brand-color),#000_12%)]

@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { formatMoney } from "@/lib/money";
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -33,7 +34,7 @@ type SubcategoryDTO = { id: number; name: string; description?: string | null; c
 const fmtPrice = (n?: number | string | null) => {
   if (n === null || n === undefined) return "-";
   const v = typeof n === "string" ? Number(n) : n;
-  return Number.isFinite(v) ? `$${(v as number).toLocaleString("es-AR")}` : "-";
+  return Number.isFinite(v) ? formatMoney(v as number) : "-";
 };
 
 export default function CategoryPageClient({
@@ -234,6 +235,7 @@ export default function CategoryPageClient({
                   return (
                     <div
                       key={String(p.id)}
+                      data-testid="product-card"
                       onClick={() => router.push(targetUrl)}
                       onMouseEnter={() => router.prefetch(targetUrl)}
                       onTouchStart={() => router.prefetch(targetUrl)}
@@ -256,7 +258,7 @@ export default function CategoryPageClient({
                           className="object-cover"
                         />
                         {p.promoLabel && (
-                          <span className="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-green-500 text-white rounded-full px-2 py-0.5 leading-none shadow">
+                          <span data-testid="promo-badge" className="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-green-500 text-white rounded-full px-2 py-0.5 leading-none shadow">
                             {p.promoLabel}
                           </span>
                         )}
@@ -272,11 +274,11 @@ export default function CategoryPageClient({
 
                         <div className="mt-2 flex items-baseline gap-2">
                           {showPromo && (
-                            <span className="text-sm text-muted-foreground line-through">
+                            <span data-testid="price-original" className="text-sm text-muted-foreground line-through">
                               {fmtPrice(p.basePrice)}
                             </span>
                           )}
-                          <span className="text-lg font-extrabold text-[var(--brand-color)]">
+                          <span data-testid="price-final" className="text-lg font-extrabold text-[var(--brand-color)]">
                             {fmtPrice(unit)}
                           </span>
                         </div>

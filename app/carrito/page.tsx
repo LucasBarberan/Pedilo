@@ -1,6 +1,7 @@
 // app/carrito/page.tsx
 "use client";
 
+import { formatMoney } from "@/lib/money";
 import { useCart } from "@/components/cart-context";
 import SiteHeader from "@/components/site-header";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,7 @@ import { fixImageUrl } from "@/lib/img";
 import { useBusinessStatusSmart } from "@/lib/hooks/useBusinessStatus";
 import { useTableOrder } from "@/components/table-order-context";
 
-const fmt = (n: number) => `$${n.toLocaleString("es-AR")}`;
+const fmt = (n: number) => formatMoney(n);
 
 // ranking de tamaños: triple -> doble -> simple
 const SIZE_RANK: Record<string, number> = { triple: 0, doble: 1, simple: 2 };
@@ -156,6 +157,8 @@ export default function CartPage() {
                 return (
                   <div
                     key={it.uniqueId}
+                    data-testid="cart-line"
+                    data-line-kind={isCombo ? "combo" : "product"}
                     className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-3 flex items-start gap-3"
                   >
                     {/* Imagen */}
@@ -289,7 +292,7 @@ export default function CartPage() {
                           −
                         </Button>
 
-                        <div className="w-7 sm:w-8 text-center font-semibold text-sm sm:text-base">
+                        <div data-testid="cart-line-qty" className="w-7 sm:w-8 text-center font-semibold text-sm sm:text-base">
                           {it.quantity}
                         </div>
 
@@ -306,6 +309,7 @@ export default function CartPage() {
 
                       {/* Precio */}
                       <div
+                        data-testid="cart-line-final"
                         className="
                           text-right font-semibold
                           w-full md:w-auto md:min-w-[6rem]
@@ -341,17 +345,17 @@ export default function CartPage() {
                       <>
                         <div className="flex items-center justify-between text-sm text-muted-foreground">
                           <span>Subtotal</span>
-                          <span>{fmt(cartSummary.originalSubtotal)}</span>
+                          <span data-testid="cart-subtotal">{fmt(cartSummary.originalSubtotal)}</span>
                         </div>
                         <div className="flex items-center justify-between text-sm" style={{ color: "var(--brand-color)" }}>
-                          <span className="font-medium truncate pr-2">{cartSummary.promoName ?? "Descuento promo"}</span>
-                          <span className="font-semibold shrink-0">−{fmt(cartSummary.savings)}</span>
+                          <span data-testid="cart-savings-label" className="font-medium truncate pr-2">{cartSummary.promoName ?? "Descuento promo"}</span>
+                          <span data-testid="cart-savings" className="font-semibold shrink-0">−{fmt(cartSummary.savings)}</span>
                         </div>
                       </>
                     )}
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-semibold">Total:</span>
-                      <span className="text-xl font-extrabold text-[var(--brand-color)]">{fmt(cartSummary?.total ?? getTotalPrice())}</span>
+                      <span data-testid="cart-total" className="text-xl font-extrabold text-[var(--brand-color)]">{fmt(cartSummary?.total ?? getTotalPrice())}</span>
                     </div>
                   </div>
                 )}
@@ -359,6 +363,7 @@ export default function CartPage() {
 
               <div className="flex items-center gap-3 flex-nowrap pb-1">
                 <Button
+                  data-testid="cart-checkout"
                   className="flex-1 text-white transition-colors
                              bg-[var(--brand-color)]
                              hover:bg-[color-mix(in_srgb,var(--brand-color),#000_12%)]

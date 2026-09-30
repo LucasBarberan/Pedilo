@@ -29,6 +29,10 @@ type QuoteOptions = {
   channel?: "WEB" | "POS" | "DELIVERY";
   baseUrl?: string | null;
   signal?: AbortSignal;
+  /** Medio de pago elegido: el Backend devuelve su descuento/recargo ya redondeado (fuente de verdad del checkout). */
+  paymentMethodId?: number | null;
+  loyaltyCustomerId?: number | null;
+  loyaltyPointsToRedeem?: number | null;
 };
 
 export async function quoteProduct({
@@ -328,14 +332,23 @@ export type QuoteCartSummary = {
   originalSubtotal: number;
 };
 
+/** Ajuste del medio de pago calculado por el Backend (solo si se cotizó con `paymentMethodId`). */
+export type QuotePaymentAdjustment = {
+  discount: number;
+  surcharge: number;
+  /** Total del carrito ya con descuento/recargo del medio, canje de puntos y redondeo (sin envío). */
+  total: number;
+};
+
 export type QuoteCartResponse = {
   items: (QuoteItemProductView | QuoteItemComboView | null)[];
   summary: QuoteCartSummary | null;
+  payment?: QuotePaymentAdjustment | null;
 };
 
 export async function quoteCart(
   lines: CartLine[],
-  { channel = "WEB", baseUrl, signal }: QuoteOptions = {}
+  { channel = "WEB", baseUrl, signal, paymentMethodId, loyaltyCustomerId, loyaltyPointsToRedeem }: QuoteOptions = {}
 ): Promise<QuoteCartResponse> {
   const empty: QuoteCartResponse = { items: lines.map(() => null), summary: null };
   if (!lines.length) return { items: [], summary: null };
@@ -344,6 +357,9 @@ export async function quoteCart(
 
   const body = {
     channel,
+    ...(paymentMethodId != null ? { paymentMethodId } : {}),
+    ...(loyaltyCustomerId != null ? { loyaltyCustomerId } : {}),
+    ...(loyaltyPointsToRedeem != null && loyaltyPointsToRedeem > 0 ? { loyaltyPointsToRedeem } : {}),
     lines: lines.map((l) => {
       if (l.type === "PRODUCT") {
         return l.options && l.options.length > 0
@@ -407,7 +423,16 @@ export async function quoteCart(
           }
         : null;
 
-    return { items, summary };
+    const payment: QuotePaymentAdjustment | null =
+      paymentMethodId != null && Number.isFinite(total)
+        ? {
+            discount: Number(json?.paymentDiscount) || 0,
+            surcharge: Number(json?.paymentSurcharge) || 0,
+            total,
+          }
+        : null;
+
+    return { items, summary, payment };
   } catch {
     return empty;
   }
