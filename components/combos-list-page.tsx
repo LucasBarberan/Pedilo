@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { formatMoney } from "@/lib/money";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -21,7 +22,7 @@ const toNum = (v: unknown): number | null => {
 
 const fmtPrice = (n?: number | string | null) => {
   const v = toNum(n);
-  return v === null ? "-" : `$${v.toLocaleString("es-AR")}`;
+  return v === null ? "-" : formatMoney(v);
 };
 
 type CombosListScreenProps = {
@@ -168,6 +169,7 @@ export default function CombosListScreen({ initialCombos, categoryName, category
               return (
                 <div
                   key={String(combo.id)}
+                  data-testid="combo-card"
                   role="button"
                   tabIndex={0}
                   onClick={() => navigateToCombo(combo)}
@@ -179,7 +181,7 @@ export default function CombosListScreen({ initialCombos, categoryName, category
                   <div className="relative h-20 w-24 rounded-lg overflow-hidden flex-shrink-0 bg-neutral-100">
                     <Image src={imgSrc} alt={combo.name} fill className="object-cover" unoptimized />
                     {combo.promoLabel && (
-                      <span className="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-green-500 text-white rounded-full px-2 py-0.5 leading-none shadow">
+                      <span data-testid="promo-badge" className="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-green-500 text-white rounded-full px-2 py-0.5 leading-none shadow">
                         {combo.promoLabel}
                       </span>
                     )}
@@ -198,11 +200,11 @@ export default function CombosListScreen({ initialCombos, categoryName, category
 
                     <div className="mt-2 flex items-baseline gap-2">
                       {showDiscount && (
-                        <span className="text-sm text-muted-foreground line-through">
+                        <span data-testid="price-original" className="text-sm text-muted-foreground line-through">
                           {fmtPrice(base)}
                         </span>
                       )}
-                      <span className="text-lg font-extrabold text-[var(--brand-color)]">
+                      <span data-testid="price-final" className="text-lg font-extrabold text-[var(--brand-color)]">
                         {fmtPrice(showDiscount ? eff : (eff ?? base))}
                       </span>
                     </div>

@@ -1,6 +1,7 @@
 // app/producto/[id]/page.tsx
 "use client";
 
+import { formatMoney } from "@/lib/money";
 import SiteHeader from "@/components/site-header";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
@@ -24,7 +25,7 @@ const MAX_NOTES = 50;
 const fmt = (n?: number | string) => {
   const v = typeof n === "string" ? Number(n) : n;
   return typeof v === "number" && Number.isFinite(v)
-    ? `$${v.toLocaleString("es-AR")}`
+    ? formatMoney(v)
     : "-";
 };
 const toNum = (v: unknown) =>
@@ -712,14 +713,16 @@ export default function ProductDetailPage() {
               </div>
               <div className="flex items-center gap-3">
                 <Button
+                  data-testid="pdp-qty-dec"
                   variant="outline"
                   onClick={() => setQty((q) => Math.max(1, q - 1))}
                   disabled={loading && !prod}
                 >
                   −
                 </Button>
-                <div className="w-8 text-center font-semibold">{qty}</div>
+                <div data-testid="pdp-qty" className="w-8 text-center font-semibold">{qty}</div>
                 <Button
+                  data-testid="pdp-qty-inc"
                   variant="outline"
                   onClick={() =>
                     setQty((q) =>
@@ -765,22 +768,23 @@ export default function ProductDetailPage() {
                 <div className="text-right">
                   {/* Precio de lista tachado: aparece cuando hay descuento (lista PRICING o promo PROMOTION) */}
                   {listUnit != null && listUnit !== quotedUnit && (
-                    <div className="text-sm text-muted-foreground line-through">
+                    <div data-testid="pdp-price-original" className="text-sm text-muted-foreground line-through">
                       {fmt(listUnit * qty)}
                     </div>
                   )}
-                  <div className="text-xl font-extrabold text-[var(--brand-color)]">
+                  <div data-testid="pdp-price-final" className="text-xl font-extrabold text-[var(--brand-color)]">
                     {fmt(quotedTotal ?? localTotal)}
                   </div>
                   {/* Aclaración de descuento aplicado */}
                   {(hasPromo || (listUnit != null && listUnit !== quotedUnit)) && (
-                    <div className="text-[11px] text-green-700 font-medium">
+                    <div data-testid="pdp-discount-note" className="text-[11px] text-green-700 font-medium">
                       {quoteIsFromPriceList ? "Precio con descuento aplicado" : "Precio promo aplicado"}
                     </div>
                   )}
                 </div>
               </div>
               <Button
+                data-testid="pdp-add"
                 className={`w-full text-white transition-colors
                   bg-[var(--brand-color)]
                   hover:bg-[color-mix(in_srgb,var(--brand-color),#000_12%)]

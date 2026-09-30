@@ -1,3 +1,4 @@
+import { formatMoney } from "@/lib/money";
 export type ActivePromo = {
   id: number;
   priceListId: number;
@@ -18,7 +19,7 @@ export type ActivePromo = {
 
 export function buildActivePromoLabel(promo: ActivePromo): string {
   if (promo.label) return promo.label;
-  const fmt = (n: number) => `$${n.toLocaleString("es-AR")}`;
+  const fmt = (n: number) => formatMoney(n);
   const target = promo.targetName ? ` ${promo.targetName}` : "";
   switch (promo.priceType) {
     case "QUANTITY_BUNDLE": {
