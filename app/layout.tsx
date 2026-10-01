@@ -8,6 +8,8 @@ import { Suspense } from "react"
 import LayoutShell from "@/components/layout-shell"
 import { TestModeBanner } from "@/components/test-mode-banner"
 import { TableOrderProvider } from "@/components/table-order-context"
+import { WelcomeSplash } from "@/components/welcome-splash"
+import { fetchOnlineConfigFresh } from "@/lib/api/onlineConfig"
 import { cookies } from "next/headers"
 import "./globals.css"
 import type { Viewport } from "next";
@@ -44,6 +46,11 @@ export default async function RootLayout({
   const cookieStore = await cookies();
   const testModeActive = !!cookieStore.get("pedilo_test_token")?.value;
   const tableModeActive = !!cookieStore.get("pedilo_table_token")?.value;
+  // Cookie de 60 s que setea /mesa/[token] solo si el splash está activo.
+  const welcomeConfig = cookieStore.get("pedilo_welcome")?.value
+    ? await fetchOnlineConfigFresh()
+    : null;
+  const showWelcome = !!welcomeConfig?.welcomeSplashActive;
 
   return (
     <html lang="es" className="h-full" style={{ "--brand-color": BRAND_COLOR } as React.CSSProperties}>
@@ -55,6 +62,12 @@ export default async function RootLayout({
               <LayoutShell>
                 {children}
               </LayoutShell>
+              {showWelcome && (
+                <WelcomeSplash
+                  title={welcomeConfig!.welcomeSplashTitle}
+                  message={welcomeConfig!.welcomeSplashMessage}
+                />
+              )}
             </TableOrderProvider>
           </CartProvider>
         </Suspense>

@@ -12,6 +12,10 @@ export type OnlineConfigResponse = {
   infoBannerEnabled: boolean;
   infoBannerMsg: string;
   infoBannerLevel: "info" | "warning" | "success";
+  /** Valor efectivo calculado por el Backend (activo ∧ módulo de mesas ∧ hay texto). */
+  welcomeSplashActive: boolean;
+  welcomeSplashTitle: string;
+  welcomeSplashMessage: string;
 };
 
 export const ONLINE_CONFIG_DEFAULTS: OnlineConfigResponse = {
@@ -26,6 +30,9 @@ export const ONLINE_CONFIG_DEFAULTS: OnlineConfigResponse = {
   infoBannerEnabled: false,
   infoBannerMsg: "",
   infoBannerLevel: "info",
+  welcomeSplashActive: false,
+  welcomeSplashTitle: "",
+  welcomeSplashMessage: "",
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -55,4 +62,24 @@ export async function fetchOnlineConfig(): Promise<OnlineConfigResponse> {
   })();
 
   return _promise;
+}
+
+/**
+ * Lectura de la config SIN la caché de módulo de `fetchOnlineConfig()`.
+ * Pensada para el servidor (layout / route handlers): esa caché vive para
+ * siempre dentro del proceso Node y serviría config vieja entre requests.
+ * Devuelve `null` ante cualquier fallo o demora (nunca lanza).
+ */
+export async function fetchOnlineConfigFresh(timeoutMs = 1500): Promise<OnlineConfigResponse | null> {
+  if (!API_URL) return null;
+  try {
+    const res = await fetch(`${API_URL}/business/online-config`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as OnlineConfigResponse;
+  } catch {
+    return null;
+  }
 }
