@@ -12,7 +12,11 @@ export type OnlineConfigResponse = {
   infoBannerEnabled: boolean;
   infoBannerMsg: string;
   infoBannerLevel: "info" | "warning" | "success";
-  /** Valor efectivo calculado por el Backend (activo ∧ módulo de mesas ∧ hay texto). */
+  /** Efectivo (mesa), calculado por el Backend: activo ∧ hay texto ∧ disparador de mesa ∧ módulo de mesas. */
+  welcomeSplashOnTableActive?: boolean;
+  /** Efectivo (apertura de la app), calculado por el Backend: activo ∧ hay texto ∧ disparador de apertura. */
+  welcomeSplashOnAppOpenActive?: boolean;
+  /** @deprecated Alias de `welcomeSplashOnTableActive`; usar ese. */
   welcomeSplashActive: boolean;
   welcomeSplashTitle: string;
   welcomeSplashMessage: string;
@@ -30,6 +34,8 @@ export const ONLINE_CONFIG_DEFAULTS: OnlineConfigResponse = {
   infoBannerEnabled: false,
   infoBannerMsg: "",
   infoBannerLevel: "info",
+  welcomeSplashOnTableActive: false,
+  welcomeSplashOnAppOpenActive: false,
   welcomeSplashActive: false,
   welcomeSplashTitle: "",
   welcomeSplashMessage: "",

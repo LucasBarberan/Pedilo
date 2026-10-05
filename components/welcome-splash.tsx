@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { markWelcomeSeen } from "@/lib/welcome-session";
 
 /** Cookie corta que setea /mesa/[token] para indicar "acaba de escanear el QR". */
 const WELCOME_COOKIE = "pedilo_welcome";
@@ -18,8 +19,9 @@ type Props = {
 /**
  * Modal de bienvenida breve sobre el menú. Se cierra solo a los 5 s, o al
  * instante con un toque/clic o Escape. No bloquea la carga del menú: se
- * renderiza encima de contenido ya presente. Ver
- * openspec/changes/welcome-splash-table-qr.
+ * renderiza encima de contenido ya presente. Lo disparan el QR de mesa (SSR en
+ * el layout) y la apertura de la app (WelcomeSplashGate). Ver
+ * openspec/changes/welcome-splash-table-qr y welcome-splash-always.
  */
 export function WelcomeSplash({ title, message }: Props) {
   const [phase, setPhase] = useState<Phase>("open");
@@ -35,9 +37,11 @@ export function WelcomeSplash({ title, message }: Props) {
     setPhase((p) => (p === "open" ? "closing" : p));
   }, []);
 
-  // Una sola vez por escaneo: consumir la cookie, foco, timer y Escape.
+  // Una sola vez por entrada: consumir la cookie, marcar la sesión como saludada
+  // (evita que el splash de apertura se sume al de mesa), foco, timer y Escape.
   useEffect(() => {
     document.cookie = `${WELCOME_COOKIE}=; Max-Age=0; path=/`;
+    markWelcomeSeen();
     dialogRef.current?.focus();
 
     // El <img> viene en el HTML del servidor: si fallo antes de hidratar, React
