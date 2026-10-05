@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.4.0](///compare/v2.3.0...v2.4.0) (2026-10-05)
+
+
+### Added
+
+* **welcome-splash:** splash de bienvenida también al abrir la app (una vez por sesión) aee8fd4
+
 ## [2.3.0](https://github.com/LucasBarberan/Pedilo/compare/v2.2.0...v2.3.0) (2026-10-01)
 
 
