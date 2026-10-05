@@ -9,6 +9,7 @@ import LayoutShell from "@/components/layout-shell"
 import { TestModeBanner } from "@/components/test-mode-banner"
 import { TableOrderProvider } from "@/components/table-order-context"
 import { WelcomeSplash } from "@/components/welcome-splash"
+import { WelcomeSplashGate } from "@/components/welcome-splash-gate"
 import { fetchOnlineConfigFresh } from "@/lib/api/onlineConfig"
 import { cookies } from "next/headers"
 import "./globals.css"
@@ -50,7 +51,7 @@ export default async function RootLayout({
   const welcomeConfig = cookieStore.get("pedilo_welcome")?.value
     ? await fetchOnlineConfigFresh()
     : null;
-  const showWelcome = !!welcomeConfig?.welcomeSplashActive;
+  const showWelcome = !!welcomeConfig?.welcomeSplashOnTableActive;
 
   return (
     <html lang="es" className="h-full" style={{ "--brand-color": BRAND_COLOR } as React.CSSProperties}>
@@ -68,6 +69,7 @@ export default async function RootLayout({
                   message={welcomeConfig!.welcomeSplashMessage}
                 />
               )}
+              <WelcomeSplashGate tableSplashShown={showWelcome} />
             </TableOrderProvider>
           </CartProvider>
         </Suspense>
