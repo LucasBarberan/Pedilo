@@ -816,21 +816,20 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     if (mainItem?.productId) {
       out.push({
         productId: Number(mainItem.productId),
-        quantity: Number(mainItem.quantity ?? 1),
         options: allSelectedWithQty.filter((o) => Number.isFinite(o.id) && o.id > 0),
       });
     }
 
     for (const ci of combo?.items ?? []) {
       if (!ci.isMain && ci.productId) {
-        out.push({ productId: Number(ci.productId), quantity: Number(ci.quantity ?? 1), optionIds: [] });
+        out.push({ productId: Number(ci.productId), optionIds: [] });
       }
     }
 
     for (const inc of combo?.categoryInclusions ?? []) {
       const key = String(inc.id);
       for (const pid of inclusionSelections[key] ?? []) {
-        out.push({ productId: Number(pid), quantity: 1, optionIds: [] });
+        out.push({ productId: Number(pid), quantity: 1, isInclusion: true, optionIds: [] });
       }
     }
 
