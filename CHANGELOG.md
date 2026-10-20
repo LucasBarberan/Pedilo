@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [2.4.1](https://github.com/LucasBarberan/Pedilo/compare/v2.4.0...v2.4.1) (2026-10-20)
+
+
+### Fixed
+
+* **orders:** el cliente no manda precios ni cantidades de los ítems de un combo ([477b366](https://github.com/LucasBarberan/Pedilo/commit/477b366c16a25e647016c0ddc240101a8424edd0))
+
 ## [2.4.0](///compare/v2.3.0...v2.4.0) (2026-10-05)
 
 
