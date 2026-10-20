@@ -32,16 +32,15 @@ function buildQuoteLines(toQuote: CartItem[]): CartLine[] {
           .filter((o) => Number.isFinite(o.id) && o.id > 0);
         quoteItems.push({
           productId: Number(mainCI.productId),
-          quantity:  Number(mainCI.qty ?? 1),
           optionIds: mainOptions.map((o) => o.id),
           options: mainOptions,
         });
       }
       for (const ci of comboItems.filter((c) => !c.isMain && !c.isInclusion)) {
-        if (ci.productId) quoteItems.push({ productId: Number(ci.productId), quantity: Number(ci.qty ?? 1), optionIds: [] });
+        if (ci.productId) quoteItems.push({ productId: Number(ci.productId), optionIds: [] });
       }
       for (const ci of comboItems.filter((c) => !!c.isInclusion)) {
-        if (ci.productId) quoteItems.push({ productId: Number(ci.productId), quantity: Number(ci.qty ?? 1), optionIds: [] });
+        if (ci.productId) quoteItems.push({ productId: Number(ci.productId), quantity: Number(ci.qty ?? 1), isInclusion: true, optionIds: [] });
       }
 
       return { type: "COMBO" as const, comboId: Number(item.id), qty: Number(item.quantity), items: quoteItems };
