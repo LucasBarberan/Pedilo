@@ -822,17 +822,14 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
       for (const it of items) {
         if (it.kind === "combo") {
-          // precio unitario del combo (el back prorratea internamente)
-          const unitCombo = Math.round(Number(it.price));
-
           // Detectar si el combo usa el nuevo stepper de slots (tiene comboItemId)
           const hasSlotData = (it.comboItems || []).some((ci: any) => ci.comboItemId != null);
 
+          // El cliente solo indica qué combo y cuántos pide (+ elecciones y comentarios). Precios y contenido del
+          // combo (cantidad de cada ítem) los decide el backend.
           const comboPayload: any = {
             product_template_id: Number(it.id),
-            name: it.comboName || it.name,
             quantity: Number(it.quantity),
-            unit_price: unitCombo,
             comment: it.observations?.trim() || null,
           };
 
@@ -868,10 +865,10 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           } else {
             // Formato legacy con items[]
             comboPayload.items = (it.comboItems || []).map((ci: any) => {
-              const itemQty = Number(ci.qty) || 1;
               const itemPayload: any = {
                 product_id: Number(ci.productId),
-                quantity: itemQty,
+                // La cantidad de un ítem fijo la define el combo en el backend; solo una inclusión elegida la lleva.
+                ...(ci.isInclusion ? { quantity: Number(ci.qty) || 1 } : {}),
               };
               if (ci.isMain && it.selectedOptions && it.selectedOptions.length > 0) {
                 itemPayload.options = it.selectedOptions.map((opt: any) => ({
@@ -891,14 +888,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
           combosForApi.push(comboPayload);
         } else {
           // producto normal
-          const unit = Math.round(
-            (Number(it.finalPrice) || Number(it.price) * Number(it.quantity)) /
-            Number(it.quantity)
-          );
           const payload: any = {
             product_id: Number(it.id),
             quantity: Number(it.quantity),
-            unit_price: unit,
           };
           if (it.observations?.trim()) payload.comment = it.observations.trim();
 

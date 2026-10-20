@@ -124,7 +124,9 @@ export function buildPromoLabel(promo: PromoInfo): string {
 
 export type QuoteComboItem = {
   productId: number;
-  quantity: number;
+  /** Solo para inclusiones elegidas (repetir una bebida). La cantidad de un ítem fijo la define el backend. */
+  quantity?: number;
+  isInclusion?: boolean;
   /** @deprecated usar options con qty */
   optionIds?: number[];
   options?: { id: number; qty: number }[];
@@ -196,7 +198,7 @@ export async function quoteCombo({
           combo_quantity: qty,
           items: items.map((it) => ({
             product_id: it.productId,
-            quantity_per_combo: it.quantity,
+            ...(it.isInclusion ? { quantity_per_combo: it.quantity } : {}),
             options: it.options && it.options.length > 0 ? it.options : undefined,
             option_ids: !it.options && it.optionIds && it.optionIds.length > 0 ? it.optionIds : undefined,
           })),
@@ -375,7 +377,7 @@ export async function quoteCart(
         combo_quantity: l.qty,
         items: (l.items ?? []).map((it) => ({
           product_id: it.productId,
-          quantity_per_combo: it.quantity,
+          ...(it.isInclusion ? { quantity_per_combo: it.quantity } : {}),
           ...(it.options && it.options.length > 0
             ? { options: it.options }
             : { option_ids: it.optionIds ?? [] }),
