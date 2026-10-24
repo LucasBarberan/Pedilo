@@ -89,7 +89,7 @@ function parseNumber(input: unknown): number | undefined {
 }
 
 // Normaliza un TemplateModifierOption del nuevo backend al shape ProductOption de Pedilo.
-// El id resultante es ModifierOption.id, que es el valor correcto para option_ids en /pricing/quote.
+// El id resultante es ModifierOption.id, que es el valor correcto para options[].id en /pricing/quote.
 function normalizeProductOptionFromTMO(tmo: any): ProductOption | null {
   if (!tmo) return null;
   if (tmo.isActive === false) return null;

@@ -7,7 +7,9 @@
     "dev": "next dev -p 3001",
     "lint": "next lint",
     "start": "next start",
-    "release": "standard-version"
+    "release": "standard-version",
+    "sync:contract": "node scripts/sync-contract-fixtures.mjs",
+    "test:contract": "node --experimental-strip-types --no-warnings --test tests/contract/orderLines.test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

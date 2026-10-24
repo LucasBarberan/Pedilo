@@ -1,0 +1,27 @@
+{
+  "id": "13-edicion",
+  "description": "Edicion de una orden no completada: lines_add (mismas lineas), borrados por id persistido y el pago nuevo en payments[] por el total recalculado.",
+  "endpoint": "PATCH /api/orders/:id",
+  "expectedTotal": null,
+  "request": {
+    "lines_add": [
+      {
+        "type": "PRODUCT",
+        "product_id": "$product:GAS",
+        "quantity": 1
+      }
+    ],
+    "items_remove": [
+      101
+    ],
+    "combos_remove": [
+      7
+    ],
+    "payments": [
+      {
+        "paymentMethodId": "$payment:DEBIT",
+        "amount": 12500
+      }
+    ]
+  }
+}

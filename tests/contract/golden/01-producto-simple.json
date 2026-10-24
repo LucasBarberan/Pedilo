@@ -1,0 +1,23 @@
+{
+  "id": "01-producto-simple",
+  "description": "Una hamburguesa, pago unico con debito (sin descuento ni recargo).",
+  "endpoint": "POST /api/orders",
+  "expectedTotal": 10000,
+  "request": {
+    "lines": [
+      {
+        "type": "PRODUCT",
+        "product_id": "$product:HAM-CLA",
+        "quantity": 1
+      }
+    ],
+    "channel": "POS",
+    "status": "COMPLETED",
+    "payments": [
+      {
+        "paymentMethodId": "$payment:DEBIT",
+        "amount": 10000
+      }
+    ]
+  }
+}

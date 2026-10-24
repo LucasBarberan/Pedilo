@@ -1,6 +1,8 @@
 // components/checkout-form.tsx
 "use client";
 
+import { buildOrderLines, buildOrderRequest, buildTableCommandRequest } from "@/lib/orderLines";
+import { quoteCart } from "@/lib/pricing";
 import { formatMoney } from "@/lib/money";
 import { useRouter } from "next/navigation";
 import { useCart, CartComboItem } from "@/components/cart-context";
@@ -817,97 +819,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
       if (!BASE) throw new Error("Falta NEXT_PUBLIC_API_URL");
 
-      const itemsForApi: any[] = [];
-      const combosForApi: any[] = [];
-
-      for (const it of items) {
-        if (it.kind === "combo") {
-          // Detectar si el combo usa el nuevo stepper de slots (tiene comboItemId)
-          const hasSlotData = (it.comboItems || []).some((ci: any) => ci.comboItemId != null);
-
-          // El cliente solo indica qué combo y cuántos pide (+ elecciones y comentarios). Precios y contenido del
-          // combo (cantidad de cada ítem) los decide el backend.
-          const comboPayload: any = {
-            product_template_id: Number(it.id),
-            quantity: Number(it.quantity),
-            comment: it.observations?.trim() || null,
-          };
-
-          if (hasSlotData) {
-            // Nuevo formato con slots[] — separar los slots reales (con comboItemId) de las
-            // inclusiones por categoría (isInclusion: true, sin comboItemId): van en dos campos
-            // distintos del payload, mezclarlos manda combo_item_id null y el backend lo rechaza.
-            comboPayload.slots = (it.comboItems || [])
-              .filter((ci: any) => !ci.isInclusion && ci.comboItemId != null)
-              .map((ci: any) => ({
-                combo_item_id: Number(ci.comboItemId),
-                slot_index: Number(ci.slotIndex ?? 0),
-                option_ids: Array.isArray(ci.optionIds) ? ci.optionIds.map(Number) : [],
-                ...(Array.isArray(ci.options) && ci.options.length > 0 ? { options: ci.options } : {}),
-                ...(ci.comment?.trim() ? { comment: ci.comment.trim() } : {}),
-              }));
-
-            const inclusionGroups = new Map<string, number[]>();
-            for (const ci of (it.comboItems || [])) {
-              if (!ci.isInclusion || ci.inclusionId == null) continue;
-              const list = inclusionGroups.get(String(ci.inclusionId)) ?? [];
-              list.push(Number(ci.productId));
-              inclusionGroups.set(String(ci.inclusionId), list);
-            }
-            if (inclusionGroups.size > 0) {
-              comboPayload.inclusion_selections = Array.from(inclusionGroups.entries()).map(
-                ([inclusionId, productIds]) => ({
-                  inclusion_id: Number(inclusionId),
-                  product_ids: productIds,
-                })
-              );
-            }
-          } else {
-            // Formato legacy con items[]
-            comboPayload.items = (it.comboItems || []).map((ci: any) => {
-              const itemPayload: any = {
-                product_id: Number(ci.productId),
-                // La cantidad de un ítem fijo la define el combo en el backend; solo una inclusión elegida la lleva.
-                ...(ci.isInclusion ? { quantity: Number(ci.qty) || 1 } : {}),
-              };
-              if (ci.isMain && it.selectedOptions && it.selectedOptions.length > 0) {
-                itemPayload.options = it.selectedOptions.map((opt: any) => ({
-                  id: Number(opt.productOptionId),
-                  qty: Number(opt.qty ?? 1),
-                }));
-              } else if (ci.option?.id) {
-                itemPayload.options = [{ id: Number(ci.option.id), qty: 1 }];
-              }
-              if (ci.isMain && it.observations?.trim()) {
-                itemPayload.comment = it.observations.trim();
-              }
-              return itemPayload;
-            });
-          }
-
-          combosForApi.push(comboPayload);
-        } else {
-          // producto normal
-          const payload: any = {
-            product_id: Number(it.id),
-            quantity: Number(it.quantity),
-          };
-          if (it.observations?.trim()) payload.comment = it.observations.trim();
-
-          // Enviar opciones seleccionadas (con cantidad — necesario para grupos allowsQuantity)
-          if (it.selectedOptions && it.selectedOptions.length > 0) {
-            payload.options = it.selectedOptions.map(opt => ({
-              id: Number(opt.productOptionId),
-              qty: Number((opt as any).qty ?? 1),
-            }));
-          } else if (it.productOptionId) {
-            // Fallback para compatibilidad
-            payload.options = [{ id: Number(it.productOptionId), qty: 1 }];
-          }
-
-          itemsForApi.push(payload);
-        }
-      }
+      // Contrato único de órdenes: las MISMAS lines[] que la cotización (serializador único, lib/orderLines.ts). Los precios y el contenido del combo los
+      // decide el servidor; un combo viaja con un slot por unidad de cada ítem.
+      const orderLines = buildOrderLines(items);
 
       if (isTableMode) {
         const clientRequestId = tableRequestIdRef.current ?? createClientRequestId();
@@ -915,14 +829,15 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         const response = await fetch("/api/table-orders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            clientRequestId,
-            guestName: customer.name.trim(),
-            notes: notes.trim() || null,
-            items: itemsForApi,
-            combos: combosForApi,
-            ...(willAutoOpenTable ? { guestCount: tableGuestCount } : {}),
-          }),
+          body: JSON.stringify(
+            buildTableCommandRequest({
+              clientRequestId,
+              guestName: customer.name.trim(),
+              notes: notes.trim() || null,
+              lines: orderLines,
+              ...(willAutoOpenTable ? { guestCount: tableGuestCount } : {}),
+            })
+          ),
         });
         const responseText = await response.text();
         const parsed = (() => {
@@ -1027,24 +942,29 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         }
       }
 
-      const apiBodyRaw: any = {
-        items: itemsForApi,
-        combos: combosForApi,
-        // Id real del medio de pago configurado en el admin — ya no se manda
-        // un paymentMethodCode inventado (ver openspec/changes/pedilo-medios-pago-config/).
+      // El pago va por el total que cotiza el servidor con ESTE medio (descuento/recargo del medio y canje de puntos incluidos, sin envío): se vuelve
+      // a cotizar justo antes de pedir para no mandar un total viejo (el servidor rechaza una suma distinta con 422).
+      const freshQuote = await quoteCart(orderLines, {
         paymentMethodId: selectedPaymentMethodId,
-        amount_paid: Math.round(Number(total)),
-        delivery_info,
-        channel,                  // "WEB"
-        fulfillment,              // "DELIVERY" | "TAKEAWAY"
-        ...(resolvedCustomerId != null ? { customerId: resolvedCustomerId } : {}),
-        // Fidelización — deliberadamente separado de customerId de arriba (ver
-        // Order.loyaltyCustomerId en schema.prisma del Backend): aunque salgan
-        // del mismo campo customer.dni acá, facturación/mayorista y
+        loyaltyCustomerId: loyaltyStatus?.customerId ?? null,
+        loyaltyPointsToRedeem: puntosACanjear,
+      });
+      if (!freshQuote.payment) {
+        throw new Error("No pudimos calcular el total del pedido. Revisá tu conexión e intentá de nuevo.");
+      }
+
+      const apiBodyRaw: any = buildOrderRequest({
+        lines: orderLines,
+        paymentMethodId: selectedPaymentMethodId!,
+        total: freshQuote.payment.total,
+        fulfillment,
+        deliveryInfo: delivery_info,
+        customerId: resolvedCustomerId ?? null,
+        // Fidelización — deliberadamente separado de customerId (ver Order.loyaltyCustomerId en schema.prisma del Backend): facturación/mayorista y
         // fidelización son selecciones independientes en la orden.
-        ...(loyaltyStatus?.customerId != null ? { loyaltyCustomerId: loyaltyStatus.customerId } : {}),
-        ...(puntosACanjear > 0 ? { loyaltyPointsToRedeem: puntosACanjear } : {}),
-      };
+        loyaltyCustomerId: loyaltyStatus?.customerId ?? null,
+        loyaltyPointsToRedeem: puntosACanjear,
+      });
 
       // limpieza defensiva (sin undefined). OJO: "options" ({id,qty}[]) es un campo
       // válido que el backend espera (necesario para grupos allowsQuantity / cantidad

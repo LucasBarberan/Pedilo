@@ -1,0 +1,32 @@
+{
+  "id": "08-pago-dividido",
+  "description": "Pago dividido entre dos medios (6000 debito + 8000 QR): la suma debe dar el total del servidor.",
+  "endpoint": "POST /api/orders",
+  "expectedTotal": 14000,
+  "request": {
+    "lines": [
+      {
+        "type": "PRODUCT",
+        "product_id": "$product:HAM-CLA",
+        "quantity": 1
+      },
+      {
+        "type": "PRODUCT",
+        "product_id": "$product:PAP",
+        "quantity": 1
+      }
+    ],
+    "channel": "POS",
+    "status": "COMPLETED",
+    "payments": [
+      {
+        "paymentMethodId": "$payment:DEBIT",
+        "amount": 6000
+      },
+      {
+        "paymentMethodId": "$payment:QR_POS",
+        "amount": 8000
+      }
+    ]
+  }
+}
