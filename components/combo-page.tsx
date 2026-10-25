@@ -969,6 +969,8 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       name: s.name,
       qty: 1,
       isInclusion: true as any,
+      // Sin `inclusionId` la elección por categoría no viaja en `inclusion_selections` y el servidor la pierde.
+      inclusionId: s.inclusionId,
       inclusionTitle: s.inclusionTitle,
       unitPrice: s.unitPrice,
       basePrice: s.basePrice,
