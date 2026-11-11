@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.5.0](https://github.com/LucasBarberan/Pedilo/compare/v2.4.1...v2.5.0) (2026-11-11)
+
+
+### Added
+
+* pedidos, cotización y comanda de mesa sobre el contrato único de órdenes (lines[] + payments[]) ([bbe9aa0](https://github.com/LucasBarberan/Pedilo/commit/bbe9aa0df078eaf72f61291f431d7c7683178086))
+
+
+### Fixed
+
+* **catalog:** el listado por subcategoria respeta el canal WEB ([1638793](https://github.com/LucasBarberan/Pedilo/commit/16387932911d4026dedef39ec532939ed3965424))
+* **checkout:** mostrar el motivo cuando un producto ya no esta disponible ([c915395](https://github.com/LucasBarberan/Pedilo/commit/c9153956d43ccfc6ff6c8aa2bbd667fa50e6c2fe))
+* la ficha simple del combo manda inclusionId para que la elección por categoría viaje en inclusion_selections ([c45db5e](https://github.com/LucasBarberan/Pedilo/commit/c45db5e62110e6230c0e577b40f923063e01ffa7))
+
 ### [2.4.1](https://github.com/LucasBarberan/Pedilo/compare/v2.4.0...v2.4.1) (2026-10-20)
 
 
