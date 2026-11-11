@@ -89,7 +89,7 @@ function parseNumber(input: unknown): number | undefined {
 }
 
 // Normaliza un TemplateModifierOption del nuevo backend al shape ProductOption de Pedilo.
-// El id resultante es ModifierOption.id, que es el valor correcto para option_ids en /pricing/quote.
+// El id resultante es ModifierOption.id, que es el valor correcto para options[].id en /pricing/quote.
 function normalizeProductOptionFromTMO(tmo: any): ProductOption | null {
   if (!tmo) return null;
   if (tmo.isActive === false) return null;
@@ -285,7 +285,8 @@ export async function fetchProductsBySubcategory(
   if (!base) return [];
 
   try {
-    const search = new URLSearchParams({ isActive: "true", limit: "200" });
+    // channel=WEB: este endpoint es el del admin (sin filtro de canal por defecto); acá solo se pueden mostrar productos de la tienda online.
+    const search = new URLSearchParams({ isActive: "true", limit: "200", channel: "WEB" });
     const res = await fetch(`${base}/product-skus?${search}`, {
       cache: "no-store",
       signal,

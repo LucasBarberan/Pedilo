@@ -1,0 +1,24 @@
+{
+  "id": "07-pago-efectivo-con-vuelto",
+  "description": "Efectivo (10% de descuento): total 9000, el cliente entrega 10000 (tendered). El vuelto es siempre pagado menos total (1000).",
+  "endpoint": "POST /api/orders",
+  "expectedTotal": 9000,
+  "request": {
+    "lines": [
+      {
+        "type": "PRODUCT",
+        "product_id": "$product:HAM-CLA",
+        "quantity": 1
+      }
+    ],
+    "channel": "POS",
+    "status": "COMPLETED",
+    "payments": [
+      {
+        "paymentMethodId": "$payment:CASH",
+        "amount": 9000,
+        "tendered": 10000
+      }
+    ]
+  }
+}

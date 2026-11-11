@@ -1,0 +1,29 @@
+{
+  "id": "02-producto-modificadores-cantidad",
+  "description": "Hamburguesa Doble x2 con comentario: los modificadores viajan en options y el precio lo calcula el servidor (2 x 13000).",
+  "endpoint": "POST /api/orders",
+  "expectedTotal": 26000,
+  "request": {
+    "lines": [
+      {
+        "type": "PRODUCT",
+        "product_id": "$product:HAM-CLA",
+        "quantity": 2,
+        "options": [
+          {
+            "id": "$option:DOBLE"
+          }
+        ],
+        "comment": "sin cebolla"
+      }
+    ],
+    "channel": "POS",
+    "status": "COMPLETED",
+    "payments": [
+      {
+        "paymentMethodId": "$payment:DEBIT",
+        "amount": 26000
+      }
+    ]
+  }
+}

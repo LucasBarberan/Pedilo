@@ -1,0 +1,41 @@
+{
+  "id": "06-combo-eleccion-por-categoria",
+  "description": "Combo con bebida a eleccion incluida: la eleccion viaja en inclusion_selections (el combo cuesta lo mismo con cualquier bebida de la categoria).",
+  "endpoint": "POST /api/orders",
+  "expectedTotal": 12000,
+  "request": {
+    "lines": [
+      {
+        "type": "COMBO",
+        "product_template_id": "$combo:COMBO-SLOT",
+        "combo_quantity": 1,
+        "slots": [
+          {
+            "combo_item_id": "$comboItem:COMBO-SLOT:0",
+            "slot_index": 0
+          },
+          {
+            "combo_item_id": "$comboItem:COMBO-SLOT:1",
+            "slot_index": 0
+          }
+        ],
+        "inclusion_selections": [
+          {
+            "inclusion_id": "$inclusion:COMBO-SLOT",
+            "product_ids": [
+              "$product:GAS"
+            ]
+          }
+        ]
+      }
+    ],
+    "channel": "POS",
+    "status": "COMPLETED",
+    "payments": [
+      {
+        "paymentMethodId": "$payment:DEBIT",
+        "amount": 12000
+      }
+    ]
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "id": "05-combo-cantidad-2-modificadores-distintos",
+  "description": "Combo de 2 hamburguesas + papas (ComboItem de cantidad 2) con modificadores distintos por unidad: slot 0 Simple, slot 1 Doble (20000 + 3000). Es el caso de la orden 2747.",
+  "endpoint": "POST /api/orders",
+  "expectedTotal": 23000,
+  "requiresCombos": [
+    "AC-MAIN2"
+  ],
+  "request": {
+    "lines": [
+      {
+        "type": "COMBO",
+        "product_template_id": "$combo:AC-MAIN2",
+        "combo_quantity": 1,
+        "slots": [
+          {
+            "combo_item_id": "$comboItem:AC-MAIN2:0",
+            "slot_index": 0,
+            "options": [
+              {
+                "id": "$option:SIMPLE"
+              }
+            ],
+            "comment": "sin mayonesa"
+          },
+          {
+            "combo_item_id": "$comboItem:AC-MAIN2:0",
+            "slot_index": 1,
+            "options": [
+              {
+                "id": "$option:DOBLE"
+              }
+            ]
+          },
+          {
+            "combo_item_id": "$comboItem:AC-MAIN2:1",
+            "slot_index": 0
+          }
+        ]
+      }
+    ],
+    "channel": "POS",
+    "status": "COMPLETED",
+    "payments": [
+      {
+        "paymentMethodId": "$payment:DEBIT",
+        "amount": 23000
+      }
+    ]
+  }
+}

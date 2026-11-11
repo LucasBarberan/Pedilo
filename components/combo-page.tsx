@@ -17,7 +17,8 @@ import BlockingLoader from "@/components/blocking-loader";
 import { isAllowedForDelivery } from "@/lib/channel";
 import type { Combo as ApiCombo, ComboCategoryInclusion as CategoryInclusion, ComboSlotExpanded, SlotSelection } from "@/lib/api/combos";
 import type { Product as ApiProduct, ModifierGroup, ModifierGroupOption } from "@/lib/api/products";
-import { quoteCombo, quoteComboSlots, buildPromoLabel, type QuoteComboItem, type QuoteComboSlotInput, type QuoteComboInclusionInput } from "@/lib/pricing";
+import { quoteComboSlots, buildPromoLabel, type QuoteComboSlotInput, type QuoteComboInclusionInput } from "@/lib/pricing";
+import { completeComboSlots } from "@/lib/orderLines";
 import { useHideLayoutFooter } from "@/components/layout-shell";
 import { useTableOrder } from "@/components/table-order-context";
 
@@ -266,6 +267,18 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       .map(([incId, pids]) => ({ inclusion_id: Number(incId), product_ids: pids.map(Number) }));
   }, [inclusionSelections]);
 
+  // Slots del contrato único para lo elegido en el stepper: UNO POR UNIDAD de cada ítem del combo (los ítems fijos van sin opciones).
+  const allSlotInputs = (selections: SlotSelection[]): QuoteComboSlotInput[] =>
+    completeComboSlots(
+      (combo?.slots ?? []).map((s) => ({ comboItemId: s.comboItemId, slotIndex: s.slotIndex })),
+      selections.map((sel) => ({
+        comboItemId: sel.comboItemId,
+        slotIndex: sel.slotIndex,
+        options: slotSelectedByGroupToOptions(sel.selectedByGroup),
+        comment: sel.comment,
+      }))
+    ).map((s) => ({ combo_item_id: s.combo_item_id, slot_index: s.slot_index, options: s.options, comment: s.comment }));
+
   // 💰 subtotal en tiempo real del stepper (quote del servidor)
   const [slotSubtotal, setSlotSubtotal] = useState<number | null>(null);
 
@@ -328,15 +341,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   useEffect(() => {
     if (!hasSlotModifiers || !combo?.id) return;
     const ctrl = new AbortController();
-    const slotInputs: QuoteComboSlotInput[] = slotSelections.map((sel) => {
-      const options = slotSelectedByGroupToOptions(sel.selectedByGroup);
-      return {
-        combo_item_id: sel.comboItemId,
-        slot_index: sel.slotIndex,
-        option_ids: options.map((o) => o.id),
-        options,
-      };
-    });
+    const slotInputs: QuoteComboSlotInput[] = allSlotInputs(slotSelections);
     quoteComboSlots({
       comboId: Number(combo.id),
       qty: 1,
@@ -471,16 +476,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       if (errors.length > 0) { setSlotGroupErrors(new Set(errors)); return; }
     }
 
-    const slotInputs: QuoteComboSlotInput[] = slotSelections.map((sel) => {
-      const options = slotSelectedByGroupToOptions(sel.selectedByGroup);
-      return {
-        combo_item_id: sel.comboItemId,
-        slot_index: sel.slotIndex,
-        option_ids: options.map((o) => o.id),
-        options,
-        comment: sel.comment || undefined,
-      };
-    });
+    const slotInputs: QuoteComboSlotInput[] = allSlotInputs(slotSelections);
 
     setSubmitting(true);
     try {
@@ -496,7 +492,8 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
 
       const img = fixImageUrl(combo.imageUrl ?? "") || "/placeholder.svg";
 
-      const comboItems = slotSelections.map((sel, i) => {
+      // Contrato único: el combo viaja con UN SLOT POR UNIDAD de cada ítem (también los fijos, sin modificadores, que el stepper no muestra).
+      const selectedSlots = slotSelections.map((sel, i) => {
         const slot = slots[i];
         const options = slotSelectedByGroupToOptions(sel.selectedByGroup);
         const optNames = options.map(({ id, qty: optQty }) => {
@@ -520,6 +517,20 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
           comment: sel.comment || undefined,
         };
       });
+      const selectedKeys = new Set(selectedSlots.map((c) => `${c.comboItemId}:${c.slotIndex}`));
+      const fixedSlots = (combo?.slots ?? [])
+        .filter((s) => !selectedKeys.has(`${s.comboItemId}:${s.slotIndex}`))
+        .map((s) => ({
+          productId: s.product.id,
+          name: s.product.name,
+          qty: 1,
+          isMain: false,
+          comboItemId: s.comboItemId,
+          slotIndex: s.slotIndex,
+          optionIds: [] as number[],
+          options: [] as { id: number; qty: number }[],
+        }));
+      const comboItems = [...selectedSlots, ...fixedSlots];
 
       const inclusionAsItems = selectedInclusionItems.map((s) => ({
         productId: s.productId,
@@ -809,32 +820,19 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
   const mainItem = useMemo(() => combo?.items?.find((i) => i.isMain), [combo]);
   const extras = useMemo(() => (combo?.items ?? []).filter((i) => !i.isMain), [combo]);
 
-  // Arma el array de items para /pricing/quote COMBO
-  const quoteItems = useMemo((): QuoteComboItem[] => {
-    const out: QuoteComboItem[] = [];
-
-    if (mainItem?.productId) {
-      out.push({
-        productId: Number(mainItem.productId),
-        options: allSelectedWithQty.filter((o) => Number.isFinite(o.id) && o.id > 0),
-      });
-    }
-
-    for (const ci of combo?.items ?? []) {
-      if (!ci.isMain && ci.productId) {
-        out.push({ productId: Number(ci.productId), optionIds: [] });
-      }
-    }
-
-    for (const inc of combo?.categoryInclusions ?? []) {
-      const key = String(inc.id);
-      for (const pid of inclusionSelections[key] ?? []) {
-        out.push({ productId: Number(pid), quantity: 1, isInclusion: true, optionIds: [] });
-      }
-    }
-
-    return out;
-  }, [mainItem, allSelectedWithQty, combo, inclusionSelections]);
+  // Slots del contrato único para la forma simple: UNO POR UNIDAD de cada ítem del combo (`combo.slots`). Las opciones elegidas son las del ítem
+  // principal y van en todos sus slots; los demás ítems van sin opciones.
+  const simpleSlots = useMemo((): QuoteComboSlotInput[] => {
+    const mainItemId = mainItem?.id != null ? Number(mainItem.id) : null;
+    const mainOptions = allSelectedWithQty.filter((o) => Number.isFinite(o.id) && o.id > 0);
+    const all = (combo?.slots ?? []).map((s) => ({ comboItemId: s.comboItemId, slotIndex: s.slotIndex }));
+    return completeComboSlots(
+      all,
+      all
+        .filter((s) => mainItemId != null && Number(s.comboItemId) === mainItemId)
+        .map((s) => ({ ...s, options: mainOptions }))
+    ).map((s) => ({ combo_item_id: s.combo_item_id, slot_index: s.slot_index, options: s.options, comment: s.comment }));
+  }, [mainItem, allSelectedWithQty, combo?.slots]);
 
   // Cotizar en el back cada vez que cambian qty / opciones / inclusiones
   useEffect(() => {
@@ -843,10 +841,11 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     const ctrl = new AbortController();
 
     (async () => {
-      const result = await quoteCombo({
+      const result = await quoteComboSlots({
         comboId: Number(combo.id),
         qty: Math.max(1, qty),
-        items: quoteItems,
+        slots: simpleSlots,
+        inclusionSelections: inclusionSelectionsForQuote,
         signal: ctrl.signal,
       });
 
@@ -873,7 +872,7 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
 
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [combo?.id, qty, quoteItems]);
+  }, [combo?.id, qty, simpleSlots, inclusionSelectionsForQuote]);
 
   // Imagen principal
   const heroImg =
@@ -944,29 +943,34 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       return;
     }
 
-    const legacyItems = combo.items ?? [];
-    const comboItems = legacyItems.length > 0
-      ? legacyItems
-          .slice()
-          .sort((a, b) => (a.isMain === b.isMain ? 0 : a.isMain ? -1 : 1))
-          .map((i) => ({
-            productId: Number(i.productId),
-            name: i.product?.name ?? "Ítem",
-            qty: Number(i.quantity ?? 1),
-            isMain: !!i.isMain,
-          }))
-      : slots.map((slot, i) => ({
-          productId: slot.product.id,
-          name: slot.product.name,
-          qty: 1,
-          isMain: i === 0,
-        }));
+    // Un ítem del carrito por slot (contrato único de órdenes): lleva comboItemId + slotIndex + opciones para armar `slots[]` al cotizar y al pedir.
+    if (simpleSlots.length === 0) {
+      setFormError("Este combo no se puede pedir ahora. Probá de nuevo en unos minutos.");
+      return;
+    }
+    const mainComboItemId = mainItem?.id != null ? Number(mainItem.id) : null;
+    const slotMeta = new Map((combo.slots ?? []).map((s) => [`${s.comboItemId}:${s.slotIndex}`, s]));
+    const comboItems = simpleSlots.map((sl) => {
+      const meta = slotMeta.get(`${sl.combo_item_id}:${sl.slot_index}`);
+      return {
+        productId: Number(meta?.product.id ?? 0),
+        name: meta?.product.name ?? "Ítem",
+        qty: 1,
+        isMain: mainComboItemId != null && sl.combo_item_id === mainComboItemId,
+        comboItemId: sl.combo_item_id,
+        slotIndex: sl.slot_index,
+        optionIds: (sl.options ?? []).map((o) => o.id),
+        options: (sl.options ?? []).map((o) => ({ id: o.id, qty: o.qty ?? 1 })),
+      };
+    }).sort((a, b) => (a.isMain === b.isMain ? 0 : a.isMain ? -1 : 1));
 
     const inclusionAsItems = selectedInclusionItems.map((s) => ({
       productId: s.productId,
       name: s.name,
       qty: 1,
       isInclusion: true as any,
+      // Sin `inclusionId` la elección por categoría no viaja en `inclusion_selections` y el servidor la pierde.
+      inclusionId: s.inclusionId,
       inclusionTitle: s.inclusionTitle,
       unitPrice: s.unitPrice,
       basePrice: s.basePrice,
