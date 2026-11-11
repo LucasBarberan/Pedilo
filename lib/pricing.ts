@@ -2,6 +2,7 @@
 //
 // Toda cotización sale del serializador único (`lib/orderLines.ts`, contrato único de órdenes): las MISMAS `lines[]` que el pedido.
 import { buildQuoteRequest, normalizeOptions, type ContractLine, type ContractSlot, type QuoteChannel } from "@/lib/orderLines";
+import { businessErrorMessage } from "@/lib/user-facing-error";
 export type QuoteItemProductView = {
   kind: "PRODUCT";
   productId: number;
@@ -259,6 +260,9 @@ export type QuoteCartResponse = {
   items: (QuoteItemProductView | QuoteItemComboView | null)[];
   summary: QuoteCartSummary | null;
   payment?: QuotePaymentAdjustment | null;
+  /** Motivo (en español, apto para el cliente) cuando el backend rechazó el carrito por una regla de negocio (HTTP 422),
+   *  ej. un producto que ya no se vende por la tienda online. Ausente en cualquier otro fallo. */
+  error?: string;
 };
 
 export async function quoteCart(
@@ -280,7 +284,10 @@ export async function quoteCart(
       body: JSON.stringify(body),
       signal,
     });
-    if (!res.ok) return empty;
+    if (!res.ok) {
+      const error = businessErrorMessage(res.status, await res.text().catch(() => ""));
+      return error ? { ...empty, error } : empty;
+    }
 
     const json = await res.json();
     const itemsArr = Array.isArray(json?.items) ? json.items : [];

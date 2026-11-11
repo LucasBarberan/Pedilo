@@ -3,6 +3,7 @@
 
 import { buildOrderLines, buildOrderRequest, buildTableCommandRequest } from "@/lib/orderLines";
 import { quoteCart } from "@/lib/pricing";
+import { UserFacingError, businessErrorMessage } from "@/lib/user-facing-error";
 import { formatMoney } from "@/lib/money";
 import { useRouter } from "next/navigation";
 import { useCart, CartComboItem } from "@/components/cart-context";
@@ -950,7 +951,10 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         loyaltyPointsToRedeem: puntosACanjear,
       });
       if (!freshQuote.payment) {
-        throw new Error("No pudimos calcular el total del pedido. Revisá tu conexión e intentá de nuevo.");
+        // Si el backend rechazó el carrito por una regla de negocio (ej. un producto ya no disponible), se le dice al cliente cuál.
+        throw new UserFacingError(
+          freshQuote.error ?? "No pudimos calcular el total del pedido. Revisá tu conexión e intentá de nuevo."
+        );
       }
 
       const apiBodyRaw: any = buildOrderRequest({
@@ -984,7 +988,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       const text = await res.text();
       if (!res.ok) {
         console.error("❌ POST /orders failed", res.status, text);
-        alert(`No se pudo guardar el pedido (HTTP ${res.status}).\n${text}`);
+        const businessMsg = businessErrorMessage(res.status, text);
+        alert(businessMsg ?? `No se pudo guardar el pedido (HTTP ${res.status}).\n${text}`);
         return;
       }
       console.log("✅ Orden creada:", text);
@@ -1115,6 +1120,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       console.error("❌ Error en submitOrder:", e);
       if (isTableMode) {
         setFormError(e instanceof Error ? e.message : "No se pudo enviar la comanda.");
+      } else if (e instanceof UserFacingError) {
+        alert(e.message);
       } else {
         alert("Ocurrió un error al procesar el pedido. Revisá consola.");
       }
