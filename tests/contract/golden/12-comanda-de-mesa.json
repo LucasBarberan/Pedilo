@@ -1,0 +1,34 @@
+{
+  "id": "12-comanda-de-mesa",
+  "description": "Comanda de mesa (mozo): las mismas lines[], sin payments (pago diferido hasta cerrar la cuenta).",
+  "endpoint": "POST /api/tables/sessions/:id/commands",
+  "expectedTotal": 24000,
+  "request": {
+    "lines": [
+      {
+        "type": "PRODUCT",
+        "product_id": "$product:HAM-CLA",
+        "quantity": 1
+      },
+      {
+        "type": "COMBO",
+        "product_template_id": "$combo:COMBO-CLA",
+        "combo_quantity": 1,
+        "slots": [
+          {
+            "combo_item_id": "$comboItem:COMBO-CLA:0",
+            "slot_index": 0
+          },
+          {
+            "combo_item_id": "$comboItem:COMBO-CLA:1",
+            "slot_index": 0
+          },
+          {
+            "combo_item_id": "$comboItem:COMBO-CLA:2",
+            "slot_index": 0
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "id": "04-combo-slots-cantidad-1",
+  "description": "Combo Clasico (hamburguesa + papas + gaseosa): un slot por unidad de cada item del combo.",
+  "endpoint": "POST /api/orders",
+  "expectedTotal": 14000,
+  "request": {
+    "lines": [
+      {
+        "type": "COMBO",
+        "product_template_id": "$combo:COMBO-CLA",
+        "combo_quantity": 1,
+        "slots": [
+          {
+            "combo_item_id": "$comboItem:COMBO-CLA:0",
+            "slot_index": 0
+          },
+          {
+            "combo_item_id": "$comboItem:COMBO-CLA:1",
+            "slot_index": 0
+          },
+          {
+            "combo_item_id": "$comboItem:COMBO-CLA:2",
+            "slot_index": 0
+          }
+        ]
+      }
+    ],
+    "channel": "POS",
+    "status": "COMPLETED",
+    "payments": [
+      {
+        "paymentMethodId": "$payment:DEBIT",
+        "amount": 14000
+      }
+    ]
+  }
+}
