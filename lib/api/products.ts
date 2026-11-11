@@ -285,7 +285,8 @@ export async function fetchProductsBySubcategory(
   if (!base) return [];
 
   try {
-    const search = new URLSearchParams({ isActive: "true", limit: "200" });
+    // channel=WEB: este endpoint es el del admin (sin filtro de canal por defecto); acá solo se pueden mostrar productos de la tienda online.
+    const search = new URLSearchParams({ isActive: "true", limit: "200", channel: "WEB" });
     const res = await fetch(`${base}/product-skus?${search}`, {
       cache: "no-store",
       signal,
