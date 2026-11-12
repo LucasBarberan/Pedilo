@@ -1,0 +1,21 @@
+{
+  "id": "10-cotizacion",
+  "description": "La cotizacion recibe las MISMAS lines[] que la orden y el medio de pago en payments[] (sin monto: el total aun se calcula).",
+  "endpoint": "POST /api/pricing/quote",
+  "expectedTotal": 9000,
+  "request": {
+    "lines": [
+      {
+        "type": "PRODUCT",
+        "product_id": "$product:HAM-CLA",
+        "quantity": 1
+      }
+    ],
+    "channel": "POS",
+    "payments": [
+      {
+        "paymentMethodId": "$payment:CASH"
+      }
+    ]
+  }
+}

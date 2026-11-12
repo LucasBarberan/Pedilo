@@ -1,0 +1,29 @@
+{
+  "id": "11-orden-con-entrega",
+  "description": "Pedido a domicilio: channel POS + fulfillment DELIVERY + delivery_info (sin precios ni distancias: el servidor los calcula).",
+  "endpoint": "POST /api/orders",
+  "expectedTotal": null,
+  "request": {
+    "lines": [
+      {
+        "type": "PRODUCT",
+        "product_id": "$product:HAM-CLA",
+        "quantity": 1
+      }
+    ],
+    "channel": "POS",
+    "status": "CONFIRMED",
+    "fulfillment": "DELIVERY",
+    "delivery_info": {
+      "customerName": "Ana",
+      "customerPhone": "3515550000",
+      "addressText": "Colon 123"
+    },
+    "payments": [
+      {
+        "paymentMethodId": "$payment:DEBIT",
+        "amount": 10000
+      }
+    ]
+  }
+}

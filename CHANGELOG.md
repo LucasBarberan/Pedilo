@@ -2,6 +2,68 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.5.0](https://github.com/LucasBarberan/Pedilo/compare/v2.4.1...v2.5.0) (2026-11-11)
+
+
+### Added
+
+* pedidos, cotización y comanda de mesa sobre el contrato único de órdenes (lines[] + payments[]) ([bbe9aa0](https://github.com/LucasBarberan/Pedilo/commit/bbe9aa0df078eaf72f61291f431d7c7683178086))
+
+
+### Fixed
+
+* **catalog:** el listado por subcategoria respeta el canal WEB ([1638793](https://github.com/LucasBarberan/Pedilo/commit/16387932911d4026dedef39ec532939ed3965424))
+* **checkout:** mostrar el motivo cuando un producto ya no esta disponible ([c915395](https://github.com/LucasBarberan/Pedilo/commit/c9153956d43ccfc6ff6c8aa2bbd667fa50e6c2fe))
+* la ficha simple del combo manda inclusionId para que la elección por categoría viaje en inclusion_selections ([c45db5e](https://github.com/LucasBarberan/Pedilo/commit/c45db5e62110e6230c0e577b40f923063e01ffa7))
+
+### [2.4.1](https://github.com/LucasBarberan/Pedilo/compare/v2.4.0...v2.4.1) (2026-10-20)
+
+
+### Fixed
+
+* **orders:** el cliente no manda precios ni cantidades de los ítems de un combo ([477b366](https://github.com/LucasBarberan/Pedilo/commit/477b366c16a25e647016c0ddc240101a8424edd0))
+
+## [2.4.0](///compare/v2.3.0...v2.4.0) (2026-10-05)
+
+
+### Added
+
+* **welcome-splash:** splash de bienvenida también al abrir la app (una vez por sesión) aee8fd4
+
+## [2.3.0](https://github.com/LucasBarberan/Pedilo/compare/v2.2.0...v2.3.0) (2026-10-01)
+
+
+### Added
+
+* **mesa:** splash de bienvenida al escanear el QR de la mesa ([815fecf](https://github.com/LucasBarberan/Pedilo/commit/815fecf0014f6cd0dceec319bad620713e6c1696))
+
+## [2.2.0](https://github.com/LucasBarberan/Pedilo/compare/v2.1.0...v2.2.0) (2026-09-30)
+
+
+### Added
+
+* **checkout:** avisar cuando el descuento por medio de pago no se acumula ([073c1fb](https://github.com/LucasBarberan/Pedilo/commit/073c1fb96573d86588825284b0d50164d64595c9))
+
+
+### Fixed
+
+* **carrito:** re-cotizar el carrito al eliminar un item ([e2d3c20](https://github.com/LucasBarberan/Pedilo/commit/e2d3c204e0994ada00c2e6425ef8f18e4e740160))
+* **checkout:** mostrar el total del medio de pago tal como lo cobra el backend ([904c6ee](https://github.com/LucasBarberan/Pedilo/commit/904c6ee7b6998b69ee02bce5ef0543f10e9a37ca))
+* **checkout:** no acumular preview de descuento por medio de pago con promo ([4c0f477](https://github.com/LucasBarberan/Pedilo/commit/4c0f4774f4ddbb3164aa32fe73e8842f66138ff3))
+* **pricing:** mostrar el descuento real (subtotal-total), no el crudo ([39a01fe](https://github.com/LucasBarberan/Pedilo/commit/39a01fe0f611ee00413152297cf3f990f4459c39))
+
+## [2.1.0](https://github.com/LucasBarberan/Pedilo/compare/v2.0.0...v2.1.0) (2026-08-31)
+
+
+### Added
+
+* **checkout:** medios de pago reales desde el admin, con preview de descuento/recargo ([3225d04](https://github.com/LucasBarberan/Pedilo/commit/3225d04f2e58f114e8cf632babc6106d8a3300a8))
+
+
+### Fixed
+
+* **checkout:** desglosar subtotal/descuento/total en el mensaje de WhatsApp ([5b0965f](https://github.com/LucasBarberan/Pedilo/commit/5b0965fd61dac0add3f139889478ea29fa8e439a))
+
 ## 2.0.0 (2026-08-25)
 
 

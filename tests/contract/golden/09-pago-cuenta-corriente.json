@@ -1,0 +1,33 @@
+{
+  "id": "09-pago-cuenta-corriente",
+  "description": "Parte con debito y el resto a cuenta corriente (una linea CUENTA_CORRIENTE, con cliente).",
+  "endpoint": "POST /api/orders",
+  "expectedTotal": 14000,
+  "request": {
+    "lines": [
+      {
+        "type": "PRODUCT",
+        "product_id": "$product:HAM-CLA",
+        "quantity": 1
+      },
+      {
+        "type": "PRODUCT",
+        "product_id": "$product:PAP",
+        "quantity": 1
+      }
+    ],
+    "channel": "POS",
+    "status": "COMPLETED",
+    "customerId": "$customer:cc",
+    "payments": [
+      {
+        "paymentMethodId": "$payment:DEBIT",
+        "amount": 4000
+      },
+      {
+        "paymentMethodId": "$payment:CUENTA_CORRIENTE",
+        "amount": 10000
+      }
+    ]
+  }
+}

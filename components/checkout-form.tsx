@@ -1,6 +1,10 @@
 // components/checkout-form.tsx
 "use client";
 
+import { buildOrderLines, buildOrderRequest, buildTableCommandRequest } from "@/lib/orderLines";
+import { quoteCart } from "@/lib/pricing";
+import { UserFacingError, businessErrorMessage } from "@/lib/user-facing-error";
+import { formatMoney } from "@/lib/money";
 import { useRouter } from "next/navigation";
 import { useCart, CartComboItem } from "@/components/cart-context";
 import { Button } from "@/components/ui/button";
@@ -31,7 +35,7 @@ type Props = {
   onSuccess?: () => void;
 };
 
-const fmt = (n: number) => `$${n.toLocaleString("es-AR")}`;
+const fmt = (n: number) => formatMoney(n);
 
 const createClientRequestId = () => {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -235,7 +239,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     return d.toISOString();
   };
   const [submitting, setSubmitting] = useState(false);
-  const { refreshCartPrices, isRefreshing, cartSummary } = useCartRefresh();
+  const { refreshCartPrices, isRefreshing, cartSummary, paymentQuote, refreshPaymentQuote } = useCartRefresh();
 
   useEffect(() => {
     refreshCartPrices();
@@ -328,20 +332,49 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   // Backend jamás lo va a descontar así al confirmar el pedido.
   const loyaltyDescuentoAplicado = Math.min(loyaltyDescuentoPreview, total);
 
-  // Descuento/recargo del medio de pago elegido — preview local (nunca
-  // re-cotiza en vivo, mismo criterio que loyaltyDescuentoAplicado arriba):
+  // Descuento/recargo del medio de pago elegido — el Backend lo cotiza (ver paymentQuote más abajo); antes era solo una
+  // preview local, sin el redondeo que aplica el Backend (mismo criterio que loyaltyDescuentoAplicado arriba):
   // se calcula sobre el subtotal ya neto de promo/puntos, sin envío (el
   // Backend tampoco lo aplica sobre el envío). El monto final autoritativo
   // lo recalcula el Backend al confirmar el pedido — ver
   // openspec/changes/pedilo-medios-pago-config/design.md.
   const selectedPaymentMethod = paymentMethods.find((m) => m.id === selectedPaymentMethodId) ?? null;
   const paymentMethodAdjustmentBase = Math.max(0, total - loyaltyDescuentoAplicado);
-  const paymentMethodDiscountPreview = selectedPaymentMethod
-    ? Math.round((paymentMethodAdjustmentBase * selectedPaymentMethod.discountPercent) / 100)
-    : 0;
-  const paymentMethodSurchargePreview = selectedPaymentMethod
-    ? Math.round((paymentMethodAdjustmentBase * selectedPaymentMethod.surchargePercent) / 100)
-    : 0;
+  // El Backend anula el descuento por medio de pago si el pedido ya tiene descuento de
+  // promoción O de lista de precios (evita doble descuento — ver applyPaymentDiscount en
+  // cart-calculation.service.ts). `promoAlreadyApplied` espeja esa misma regla, tanto
+  // para no acumular la preview del descuento como para avisarle al cliente (banner +
+  // badge tachado en el selector de medio de pago) que ese "-X%" no se va a sumar.
+  const promoAlreadyApplied = !!(cartSummary && cartSummary.savings > 0);
+  // El Backend es la fuente de verdad del descuento/recargo del medio de pago (redondeo por priceRoundingStep incluido):
+  // se cotiza el carrito con el medio elegido (`paymentQuote`). Mientras no responde (o si falla) queda la estimación local.
+  const serverPayment =
+    paymentQuote && selectedPaymentMethodId != null && paymentQuote.paymentMethodId === selectedPaymentMethodId
+      ? paymentQuote
+      : null;
+  const paymentMethodDiscountPreview = serverPayment
+    ? serverPayment.discount
+    : selectedPaymentMethod && !promoAlreadyApplied
+      ? Math.round((paymentMethodAdjustmentBase * selectedPaymentMethod.discountPercent) / 100)
+      : 0;
+  const paymentMethodSurchargePreview = serverPayment
+    ? serverPayment.surcharge
+    : selectedPaymentMethod
+      ? Math.round((paymentMethodAdjustmentBase * selectedPaymentMethod.surchargePercent) / 100)
+      : 0;
+  // Total de los productos (sin envío) tal como lo cobra el Backend; estimación local si todavía no se cotizó.
+  const totalBeforeDelivery = serverPayment
+    ? serverPayment.total
+    : paymentMethodAdjustmentBase - paymentMethodDiscountPreview + paymentMethodSurchargePreview;
+
+  useEffect(() => {
+    refreshPaymentQuote({
+      paymentMethodId: selectedPaymentMethodId,
+      loyaltyCustomerId: loyaltyStatus?.customerId ?? null,
+      loyaltyPointsToRedeem: puntosACanjear,
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPaymentMethodId, total, puntosACanjear, loyaltyStatus?.customerId, refreshPaymentQuote]);
 
   // Preview de "vas a sumar X puntos" con esta compra. Usa el subtotal YA
   // NETO del descuento por puntos, sin envío — es exactamente lo que el
@@ -682,7 +715,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
     // crear la orden (autoritativo, ya incluye promo+puntos+medio de pago)
     // > cálculo local (mismo que el panel en pantalla), por si todavía no
     // llegó la confirmación. El Backend nunca incluye el envío en Order.total.
-    const netBeforeDelivery = confirmedTotal ?? (paymentMethodAdjustmentBase - paymentMethodDiscountPreview + paymentMethodSurchargePreview);
+    const netBeforeDelivery = confirmedTotal ?? totalBeforeDelivery;
     const finalTotal = Math.round(deliveryMethod === "delivery" ? netBeforeDelivery + resolvedDeliveryPrice : netBeforeDelivery);
     lines.push(`*Total:* ${fmt(finalTotal)}`);
 
@@ -787,105 +820,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
       if (!BASE) throw new Error("Falta NEXT_PUBLIC_API_URL");
 
-      const itemsForApi: any[] = [];
-      const combosForApi: any[] = [];
-
-      for (const it of items) {
-        if (it.kind === "combo") {
-          // precio unitario del combo (el back prorratea internamente)
-          const unitCombo = Math.round(Number(it.price));
-
-          // Detectar si el combo usa el nuevo stepper de slots (tiene comboItemId)
-          const hasSlotData = (it.comboItems || []).some((ci: any) => ci.comboItemId != null);
-
-          const comboPayload: any = {
-            product_template_id: Number(it.id),
-            name: it.comboName || it.name,
-            quantity: Number(it.quantity),
-            unit_price: unitCombo,
-            comment: it.observations?.trim() || null,
-          };
-
-          if (hasSlotData) {
-            // Nuevo formato con slots[] — separar los slots reales (con comboItemId) de las
-            // inclusiones por categoría (isInclusion: true, sin comboItemId): van en dos campos
-            // distintos del payload, mezclarlos manda combo_item_id null y el backend lo rechaza.
-            comboPayload.slots = (it.comboItems || [])
-              .filter((ci: any) => !ci.isInclusion && ci.comboItemId != null)
-              .map((ci: any) => ({
-                combo_item_id: Number(ci.comboItemId),
-                slot_index: Number(ci.slotIndex ?? 0),
-                option_ids: Array.isArray(ci.optionIds) ? ci.optionIds.map(Number) : [],
-                ...(Array.isArray(ci.options) && ci.options.length > 0 ? { options: ci.options } : {}),
-                ...(ci.comment?.trim() ? { comment: ci.comment.trim() } : {}),
-              }));
-
-            const inclusionGroups = new Map<string, number[]>();
-            for (const ci of (it.comboItems || [])) {
-              if (!ci.isInclusion || ci.inclusionId == null) continue;
-              const list = inclusionGroups.get(String(ci.inclusionId)) ?? [];
-              list.push(Number(ci.productId));
-              inclusionGroups.set(String(ci.inclusionId), list);
-            }
-            if (inclusionGroups.size > 0) {
-              comboPayload.inclusion_selections = Array.from(inclusionGroups.entries()).map(
-                ([inclusionId, productIds]) => ({
-                  inclusion_id: Number(inclusionId),
-                  product_ids: productIds,
-                })
-              );
-            }
-          } else {
-            // Formato legacy con items[]
-            comboPayload.items = (it.comboItems || []).map((ci: any) => {
-              const itemQty = Number(ci.qty) || 1;
-              const itemPayload: any = {
-                product_id: Number(ci.productId),
-                quantity: itemQty,
-              };
-              if (ci.isMain && it.selectedOptions && it.selectedOptions.length > 0) {
-                itemPayload.options = it.selectedOptions.map((opt: any) => ({
-                  id: Number(opt.productOptionId),
-                  qty: Number(opt.qty ?? 1),
-                }));
-              } else if (ci.option?.id) {
-                itemPayload.options = [{ id: Number(ci.option.id), qty: 1 }];
-              }
-              if (ci.isMain && it.observations?.trim()) {
-                itemPayload.comment = it.observations.trim();
-              }
-              return itemPayload;
-            });
-          }
-
-          combosForApi.push(comboPayload);
-        } else {
-          // producto normal
-          const unit = Math.round(
-            (Number(it.finalPrice) || Number(it.price) * Number(it.quantity)) /
-            Number(it.quantity)
-          );
-          const payload: any = {
-            product_id: Number(it.id),
-            quantity: Number(it.quantity),
-            unit_price: unit,
-          };
-          if (it.observations?.trim()) payload.comment = it.observations.trim();
-
-          // Enviar opciones seleccionadas (con cantidad — necesario para grupos allowsQuantity)
-          if (it.selectedOptions && it.selectedOptions.length > 0) {
-            payload.options = it.selectedOptions.map(opt => ({
-              id: Number(opt.productOptionId),
-              qty: Number((opt as any).qty ?? 1),
-            }));
-          } else if (it.productOptionId) {
-            // Fallback para compatibilidad
-            payload.options = [{ id: Number(it.productOptionId), qty: 1 }];
-          }
-
-          itemsForApi.push(payload);
-        }
-      }
+      // Contrato único de órdenes: las MISMAS lines[] que la cotización (serializador único, lib/orderLines.ts). Los precios y el contenido del combo los
+      // decide el servidor; un combo viaja con un slot por unidad de cada ítem.
+      const orderLines = buildOrderLines(items);
 
       if (isTableMode) {
         const clientRequestId = tableRequestIdRef.current ?? createClientRequestId();
@@ -893,14 +830,15 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         const response = await fetch("/api/table-orders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            clientRequestId,
-            guestName: customer.name.trim(),
-            notes: notes.trim() || null,
-            items: itemsForApi,
-            combos: combosForApi,
-            ...(willAutoOpenTable ? { guestCount: tableGuestCount } : {}),
-          }),
+          body: JSON.stringify(
+            buildTableCommandRequest({
+              clientRequestId,
+              guestName: customer.name.trim(),
+              notes: notes.trim() || null,
+              lines: orderLines,
+              ...(willAutoOpenTable ? { guestCount: tableGuestCount } : {}),
+            })
+          ),
         });
         const responseText = await response.text();
         const parsed = (() => {
@@ -1005,24 +943,32 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         }
       }
 
-      const apiBodyRaw: any = {
-        items: itemsForApi,
-        combos: combosForApi,
-        // Id real del medio de pago configurado en el admin — ya no se manda
-        // un paymentMethodCode inventado (ver openspec/changes/pedilo-medios-pago-config/).
+      // El pago va por el total que cotiza el servidor con ESTE medio (descuento/recargo del medio y canje de puntos incluidos, sin envío): se vuelve
+      // a cotizar justo antes de pedir para no mandar un total viejo (el servidor rechaza una suma distinta con 422).
+      const freshQuote = await quoteCart(orderLines, {
         paymentMethodId: selectedPaymentMethodId,
-        amount_paid: Math.round(Number(total)),
-        delivery_info,
-        channel,                  // "WEB"
-        fulfillment,              // "DELIVERY" | "TAKEAWAY"
-        ...(resolvedCustomerId != null ? { customerId: resolvedCustomerId } : {}),
-        // Fidelización — deliberadamente separado de customerId de arriba (ver
-        // Order.loyaltyCustomerId en schema.prisma del Backend): aunque salgan
-        // del mismo campo customer.dni acá, facturación/mayorista y
+        loyaltyCustomerId: loyaltyStatus?.customerId ?? null,
+        loyaltyPointsToRedeem: puntosACanjear,
+      });
+      if (!freshQuote.payment) {
+        // Si el backend rechazó el carrito por una regla de negocio (ej. un producto ya no disponible), se le dice al cliente cuál.
+        throw new UserFacingError(
+          freshQuote.error ?? "No pudimos calcular el total del pedido. Revisá tu conexión e intentá de nuevo."
+        );
+      }
+
+      const apiBodyRaw: any = buildOrderRequest({
+        lines: orderLines,
+        paymentMethodId: selectedPaymentMethodId!,
+        total: freshQuote.payment.total,
+        fulfillment,
+        deliveryInfo: delivery_info,
+        customerId: resolvedCustomerId ?? null,
+        // Fidelización — deliberadamente separado de customerId (ver Order.loyaltyCustomerId en schema.prisma del Backend): facturación/mayorista y
         // fidelización son selecciones independientes en la orden.
-        ...(loyaltyStatus?.customerId != null ? { loyaltyCustomerId: loyaltyStatus.customerId } : {}),
-        ...(puntosACanjear > 0 ? { loyaltyPointsToRedeem: puntosACanjear } : {}),
-      };
+        loyaltyCustomerId: loyaltyStatus?.customerId ?? null,
+        loyaltyPointsToRedeem: puntosACanjear,
+      });
 
       // limpieza defensiva (sin undefined). OJO: "options" ({id,qty}[]) es un campo
       // válido que el backend espera (necesario para grupos allowsQuantity / cantidad
@@ -1042,7 +988,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       const text = await res.text();
       if (!res.ok) {
         console.error("❌ POST /orders failed", res.status, text);
-        alert(`No se pudo guardar el pedido (HTTP ${res.status}).\n${text}`);
+        const businessMsg = businessErrorMessage(res.status, text);
+        alert(businessMsg ?? `No se pudo guardar el pedido (HTTP ${res.status}).\n${text}`);
         return;
       }
       console.log("✅ Orden creada:", text);
@@ -1173,6 +1120,8 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       console.error("❌ Error en submitOrder:", e);
       if (isTableMode) {
         setFormError(e instanceof Error ? e.message : "No se pudo enviar la comanda.");
+      } else if (e instanceof UserFacingError) {
+        alert(e.message);
       } else {
         alert("Ocurrió un error al procesar el pedido. Revisá consola.");
       }
@@ -1620,11 +1569,21 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         {!isTableMode && (
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4">
           <div className="text-sm font-semibold mb-3">Pago</div>
+          {/* El descuento por medio de pago NO se acumula con una promo/lista de precios
+              ya aplicada (mismo criterio que el Backend — ver applyPaymentDiscount). Sin
+              este aviso, el botón seguía mostrando "-X%" aunque ese descuento no fuera a
+              aplicarse, generando reclamos de clientes que esperaban ver ambos descuentos. */}
+          {promoAlreadyApplied && paymentMethods.some((m) => m.discountPercent > 0) && (
+            <div data-testid="checkout-promo-banner" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Ya tenés un descuento aplicado por promoción — el descuento por medio de pago no se suma al de la promo.
+            </div>
+          )}
           {paymentMethods.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {paymentMethods.map((m) => (
                 <button
                   key={m.id}
+                  data-testid={`checkout-method-${m.code}`}
                   onClick={() => setSelectedPaymentMethodId(m.id)}
                   className={`px-3 py-2 rounded-lg border ${selectedPaymentMethodId === m.id
                     ? "border-[var(--brand-color)] bg-[#fff5f2]"
@@ -1633,12 +1592,18 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                 >
                   {m.name}
                   {m.discountPercent > 0 && (
-                    <span className="ml-1.5 text-xs font-semibold text-emerald-600">
+                    <span
+                      data-testid="checkout-method-discount-badge"
+                      className={`ml-1.5 text-xs font-semibold ${
+                        promoAlreadyApplied ? "text-muted-foreground line-through" : "text-emerald-600"
+                      }`}
+                      title={promoAlreadyApplied ? "No se acumula con la promo ya aplicada" : undefined}
+                    >
                       -{m.discountPercent}%
                     </span>
                   )}
                   {m.surchargePercent > 0 && (
-                    <span className="ml-1.5 text-xs font-semibold text-amber-600">
+                    <span data-testid="checkout-method-surcharge-badge" className="ml-1.5 text-xs font-semibold text-amber-600">
                       +{m.surchargePercent}%
                     </span>
                   )}
@@ -1702,7 +1667,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
               if (!isCombo) {
                 return (
-                  <div key={it.uniqueId} className="flex items-stretch justify-between gap-3 py-1">
+                  <div key={it.uniqueId} data-testid="checkout-line" data-line-kind="product" className="flex items-stretch justify-between gap-3 py-1">
                     <div className="flex-1 min-w-0 space-y-0.5">
                       <p className="text-sm font-semibold text-gray-900 leading-snug">
                         {it.name}
@@ -1719,7 +1684,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                       )}
                     </div>
                     <div className="flex flex-col justify-between items-end shrink-0 pt-0.5">
-                      <p className="text-sm font-bold text-gray-900 tabular-nums">
+                      <p data-testid="checkout-line-final" className="text-sm font-bold text-gray-900 tabular-nums">
                         {fmt(it.finalPrice || it.price * it.quantity)}
                       </p>
                       {it.quantity > 1 && (
@@ -1734,7 +1699,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               const extras = comboData.comboItems?.filter((x) => !x.isMain) || [];
 
               return (
-                <div key={it.uniqueId} className="py-1">
+                <div key={it.uniqueId} data-testid="checkout-line" data-line-kind="combo" className="py-1">
                   <div className="flex items-stretch justify-between gap-3">
                     <div className="flex-1 min-w-0 space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -1782,7 +1747,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                       )}
                     </div>
                     <div className="flex flex-col justify-between items-end shrink-0 pt-0.5">
-                      <p className="text-sm font-bold text-gray-900 tabular-nums">
+                      <p data-testid="checkout-line-final" className="text-sm font-bold text-gray-900 tabular-nums">
                         {fmt(it.finalPrice || it.price * it.quantity)}
                       </p>
                       {it.quantity > 1 && (
@@ -1802,14 +1767,14 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               {(cartSummary || (deliveryMethod === "delivery" && resolvedDeliveryPrice > 0)) && (
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                   <span>Subtotal</span>
-                  <span>{fmt(cartSummary ? cartSummary.originalSubtotal : total)}</span>
+                  <span data-testid="checkout-subtotal">{fmt(cartSummary ? cartSummary.originalSubtotal : total)}</span>
                 </div>
               )}
               {/* Descuento promo */}
               {cartSummary && (
                 <div className="flex items-center justify-between text-sm" style={{ color: "var(--brand-color)" }}>
                   <span className="font-medium truncate pr-2">{cartSummary.promoName ?? "Descuento promo"}</span>
-                  <span className="font-semibold shrink-0">−{fmt(cartSummary.savings)}</span>
+                  <span data-testid="checkout-savings" className="font-semibold shrink-0">−{fmt(cartSummary.savings)}</span>
                 </div>
               )}
               {/* Puntos canjeados — se aplica SOLO sobre el subtotal, nunca sobre
@@ -1820,7 +1785,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               {puntosACanjear > 0 && (
                 <div className="flex items-center justify-between text-sm" style={{ color: "var(--brand-color)" }}>
                   <span className="font-medium truncate pr-2">Puntos canjeados</span>
-                  <span className="font-semibold shrink-0">−{fmt(loyaltyDescuentoAplicado)}</span>
+                  <span data-testid="checkout-loyalty" className="font-semibold shrink-0">−{fmt(loyaltyDescuentoAplicado)}</span>
                 </div>
               )}
               {/* Envío — siempre a precio real, nunca afectado por el descuento de puntos */}
@@ -1842,24 +1807,19 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               {paymentMethodDiscountPreview > 0 && (
                 <div className="flex items-center justify-between text-sm text-emerald-600">
                   <span className="font-medium truncate pr-2">Descuento ({selectedPaymentMethod?.name})</span>
-                  <span className="font-semibold shrink-0">−{fmt(paymentMethodDiscountPreview)}</span>
+                  <span data-testid="checkout-discount" className="font-semibold shrink-0">−{fmt(paymentMethodDiscountPreview)}</span>
                 </div>
               )}
               {paymentMethodSurchargePreview > 0 && (
                 <div className="flex items-center justify-between text-sm text-amber-600">
                   <span className="font-medium truncate pr-2">Recargo ({selectedPaymentMethod?.name})</span>
-                  <span className="font-semibold shrink-0">+{fmt(paymentMethodSurchargePreview)}</span>
+                  <span data-testid="checkout-surcharge" className="font-semibold shrink-0">+{fmt(paymentMethodSurchargePreview)}</span>
                 </div>
               )}
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold">Total:</span>
-                <span className="text-xl font-extrabold text-[var(--brand-color)]">
-                  {fmt(
-                    paymentMethodAdjustmentBase -
-                    paymentMethodDiscountPreview +
-                    paymentMethodSurchargePreview +
-                    (deliveryMethod === "delivery" ? resolvedDeliveryPrice : 0)
-                  )}
+                <span data-testid="checkout-total" className="text-xl font-extrabold text-[var(--brand-color)]">
+                  {fmt(totalBeforeDelivery + (deliveryMethod === "delivery" ? resolvedDeliveryPrice : 0))}
                 </span>
               </div>
               {/* Puntos a ganar — separado a propósito de la caja de "Tus puntos"
@@ -1921,7 +1881,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
         )}
 
         <div className="rounded-2xl ring-1 ring-black/5 bg-white/60 p-4 space-y-2">
-          <Button className={`w-full text-white transition-colors
+          <Button data-testid="checkout-submit" className={`w-full text-white transition-colors
                                     bg-[var(--brand-color)]
                                     hover:bg-[color-mix(in_srgb,var(--brand-color),#000_12%)]
                                     active:bg-[color-mix(in_srgb,var(--brand-color),#000_18%)]

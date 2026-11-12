@@ -1,0 +1,18 @@
+{
+  "note": "sha256 de cada golden payload (contenido con saltos LF). Regenerar con: npx tsx scripts/verify-contract-manifest.ts --write",
+  "files": {
+    "01-producto-simple.json": "e3866548ccd42ebc7c1f7c2ddefee3a40e7489a1f4ef8cd8afc73db0680a9ad5",
+    "02-producto-modificadores-cantidad.json": "39de0cfe3625f225883daeff55e761b6b3cfaff564944c1a6b5afc2a75325093",
+    "03-producto-descuento-manual.json": "629d8e464ef7d1996614d9fb7ea70e1b9755cbfa6fb974aa89c79c1958b7b8a1",
+    "04-combo-slots-cantidad-1.json": "67631513140479479ac63f2430dd4e8e40adb4ad123fdd36d9c63ffc63cba108",
+    "05-combo-cantidad-2-modificadores-distintos.json": "58d8543df6ed84f43506f8dacebf42759da5b74c0fb1b0be5f5b2d91bec20aa9",
+    "06-combo-eleccion-por-categoria.json": "73813bf9ec549f9c998671684856a0c2e1e7aa3d9ec5dd8c4b49f4ccf66460f9",
+    "07-pago-efectivo-con-vuelto.json": "4009e8a60bb0a5e9628354c51b2561fcf84cf530aa862834fcb9397d6adea942",
+    "08-pago-dividido.json": "269e873bd7614340cabf6da6612dbb1d6cdf703e9dc5586b123d882d0f22ac93",
+    "09-pago-cuenta-corriente.json": "d7afcc7f0e78bfe6402f61322ea823f822d62d541127085b910796996803d233",
+    "10-cotizacion.json": "c40e65eff556b7a58aa8873a7f94175a68ed12e43589f840ca7a9678f3a8cd10",
+    "11-orden-con-entrega.json": "4093bc1e52b5ae70ebffb808098c228c42bcdcf2141f8a1b1443d75f6a88446a",
+    "12-comanda-de-mesa.json": "0c6ff7f7469775455ee0578e3811ff617d12d9480142d2aa0852151148eb9027",
+    "13-edicion.json": "3694ab18418f4416c4e006f8d6b87cd2b8fc6b36c63a6ef3e964a4669d29cfb3"
+  }
+}

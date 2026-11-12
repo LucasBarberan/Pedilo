@@ -27,6 +27,8 @@ export type CartComboItem = {
   /** @deprecated usar options con qty — no soporta cantidad por opción (grupos allowsQuantity) */
   optionIds?: number[];
   options?: { id: number; qty: number }[];
+  /** Comentario del slot (va en `slots[].comment`). */
+  comment?: string;
 };
 
 export interface CartItem {

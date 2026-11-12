@@ -1,6 +1,9 @@
-﻿// lib/pricing.ts
+// lib/pricing.ts
+//
+// Toda cotización sale del serializador único (`lib/orderLines.ts`, contrato único de órdenes): las MISMAS `lines[]` que el pedido.
 import { getClientApiBase } from "@/lib/apiBase.client";
-
+import { buildQuoteRequest, normalizeOptions, type ContractLine, type ContractSlot, type QuoteChannel } from "@/lib/orderLines";
+import { businessErrorMessage } from "@/lib/user-facing-error";
 export type QuoteItemProductView = {
   kind: "PRODUCT";
   productId: number;
@@ -28,15 +31,19 @@ export type QuoteItemProductView = {
 };
 
 type QuoteOptions = {
-  channel?: "WEB" | "POS" | "DELIVERY";
+  channel?: QuoteChannel;
   baseUrl?: string | null;
   signal?: AbortSignal;
+  /** Medio de pago elegido: el Backend devuelve su descuento/recargo ya redondeado (fuente de verdad del checkout). */
+  paymentMethodId?: number | null;
+  loyaltyCustomerId?: number | null;
+  loyaltyPointsToRedeem?: number | null;
 };
 
 export async function quoteProduct({
   productId,
   qty,
-  optionIds,
+  options,
   channel = "WEB",
   comment,
   baseUrl,
@@ -44,8 +51,8 @@ export async function quoteProduct({
 }: {
   productId: number;
   qty: number;
-  optionIds?: number[];
-  channel?: "WEB" | "POS" | "DELIVERY";
+  options?: { id: number; qty?: number }[];
+  channel?: QuoteChannel;
   comment?: string;
   baseUrl?: string | null;
   signal?: AbortSignal;
@@ -56,18 +63,19 @@ export async function quoteProduct({
     const BASE = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
     if (!BASE) return null;
 
-    const body = {
+    const opts = normalizeOptions(options);
+    const body = buildQuoteRequest({
       channel,
       lines: [
         {
           type: "PRODUCT",
           product_id: productId,
           quantity: qty,
-          option_ids: optionIds ?? [],
-          comment: comment ?? null,
+          ...(opts ? { options: opts } : {}),
+          ...(comment?.trim() ? { comment: comment.trim() } : {}),
         },
       ],
-    };
+    });
 
     const res = await fetch(`${BASE}/pricing/quote`, {
       method: "POST",
@@ -122,14 +130,6 @@ export function buildPromoLabel(promo: PromoInfo): string {
 
 // ===== quoteCombo =====
 
-export type QuoteComboItem = {
-  productId: number;
-  quantity: number;
-  /** @deprecated usar options con qty */
-  optionIds?: number[];
-  options?: { id: number; qty: number }[];
-};
-
 export type QuoteItemComboView = {
   kind: "COMBO";
   productTemplateId: number;
@@ -168,68 +168,10 @@ export type QuoteItemComboView = {
   comment?: string | null;
 };
 
-export async function quoteCombo({
-  comboId,
-  qty,
-  items,
-  channel = "WEB",
-  baseUrl,
-  signal,
-}: {
-  comboId: number;
-  qty: number;
-  items: QuoteComboItem[];
-  channel?: "WEB" | "POS" | "DELIVERY";
-  baseUrl?: string | null;
-  signal?: AbortSignal;
-}): Promise<QuoteItemComboView | null> {
-  try {
-    // demo-mode Fase 5 (tasks.md 5.6): baseUrl explícito > cookie de demo (client-side) >
-    // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
-    const BASE = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
-    if (!BASE) return null;
-
-    const body = {
-      channel,
-      lines: [
-        {
-          type: "COMBO",
-          product_template_id: comboId,
-          combo_quantity: qty,
-          items: items.map((it) => ({
-            product_id: it.productId,
-            quantity_per_combo: it.quantity,
-            options: it.options && it.options.length > 0 ? it.options : undefined,
-            option_ids: !it.options && it.optionIds && it.optionIds.length > 0 ? it.optionIds : undefined,
-          })),
-        },
-      ],
-    };
-
-    const res = await fetch(`${BASE}/pricing/quote`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify(body),
-      signal,
-    });
-    if (!res.ok) return null;
-
-    const json = await res.json();
-    const item = Array.isArray(json?.combos) ? json.combos[0] : null;
-    if (!item || item.kind !== "COMBO") return null;
-    return item as QuoteItemComboView;
-  } catch {
-    return null;
-  }
-}
-
 export type QuoteComboSlotInput = {
   combo_item_id: number;
   slot_index: number;
-  /** @deprecated usar options con qty */
-  option_ids: number[];
-  options?: { id: number; qty: number }[];
+  options?: { id: number; qty?: number }[];
   comment?: string;
 };
 
@@ -261,25 +203,28 @@ export async function quoteComboSlots({
     const BASE = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
     if (!BASE) return null;
 
-    const body = {
+    const contractSlots: ContractSlot[] = slots.map((s) => {
+      const options = normalizeOptions(s.options);
+      const comment = s.comment?.trim();
+      return {
+        combo_item_id: s.combo_item_id,
+        slot_index: s.slot_index,
+        ...(options ? { options } : {}),
+        ...(comment ? { comment } : {}),
+      };
+    });
+    const body = buildQuoteRequest({
       channel,
       lines: [
         {
           type: "COMBO",
           product_template_id: comboId,
           combo_quantity: qty,
-          slots: slots.map((s) => ({
-            combo_item_id: s.combo_item_id,
-            slot_index: s.slot_index,
-            ...(s.options && s.options.length > 0
-              ? { options: s.options }
-              : { option_ids: s.option_ids }),
-            comment: s.comment ?? null,
-          })),
+          slots: contractSlots,
           ...(inclusionSelections?.length ? { inclusion_selections: inclusionSelections } : {}),
         },
       ],
-    };
+    });
 
     const res = await fetch(`${BASE}/pricing/quote`, {
       method: "POST",
@@ -301,34 +246,6 @@ export async function quoteComboSlots({
 
 // ===== quoteCart: envía todo el carrito en un solo request =====
 
-export type CartProductLine = {
-  type: "PRODUCT";
-  productId: number;
-  qty: number;
-  /** @deprecated usar options — no soporta cantidad por opción (grupos allowsQuantity) */
-  optionIds: number[];
-  options?: { id: number; qty: number }[];
-  comment?: string | null;
-};
-
-export type CartComboSlot = {
-  combo_item_id: number;
-  slot_index: number;
-  /** @deprecated usar options — no soporta cantidad por opción (grupos allowsQuantity) */
-  option_ids: number[];
-  options?: { id: number; qty: number }[];
-};
-
-export type CartComboLine = {
-  type: "COMBO";
-  comboId: number;
-  qty: number;
-  items?: QuoteComboItem[];
-  slots?: CartComboSlot[];
-};
-
-export type CartLine = CartProductLine | CartComboLine;
-
 export type QuoteCartSummary = {
   savings: number;
   promoName: string | null;
@@ -336,45 +253,35 @@ export type QuoteCartSummary = {
   originalSubtotal: number;
 };
 
+/** Ajuste del medio de pago calculado por el Backend (solo si se cotizó con `paymentMethodId`). */
+export type QuotePaymentAdjustment = {
+  discount: number;
+  surcharge: number;
+  /** Total del carrito ya con descuento/recargo del medio, canje de puntos y redondeo (sin envío). */
+  total: number;
+};
+
 export type QuoteCartResponse = {
   items: (QuoteItemProductView | QuoteItemComboView | null)[];
   summary: QuoteCartSummary | null;
+  payment?: QuotePaymentAdjustment | null;
+  /** Motivo (en español, apto para el cliente) cuando el backend rechazó el carrito por una regla de negocio (HTTP 422),
+   *  ej. un producto que ya no se vende por la tienda online. Ausente en cualquier otro fallo. */
+  error?: string;
 };
 
 export async function quoteCart(
-  lines: CartLine[],
-  { channel = "WEB", baseUrl, signal }: QuoteOptions = {}
+  lines: ContractLine[],
+  { channel = "WEB", baseUrl, signal, paymentMethodId, loyaltyCustomerId, loyaltyPointsToRedeem }: QuoteOptions = {}
 ): Promise<QuoteCartResponse> {
   const empty: QuoteCartResponse = { items: lines.map(() => null), summary: null };
   if (!lines.length) return { items: [], summary: null };
-  const BASE = (baseUrl ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  // demo-mode Fase 5 (tasks.md 5.6): baseUrl explícito > cookie de demo (client-side) >
+  // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
+  const BASE = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
   if (!BASE) return empty;
 
-  const body = {
-    channel,
-    lines: lines.map((l) => {
-      if (l.type === "PRODUCT") {
-        return l.options && l.options.length > 0
-          ? { type: "PRODUCT", product_id: l.productId, quantity: l.qty, options: l.options, comment: l.comment ?? null }
-          : { type: "PRODUCT", product_id: l.productId, quantity: l.qty, option_ids: l.optionIds, comment: l.comment ?? null };
-      }
-      if (l.slots && l.slots.length > 0) {
-        return { type: "COMBO", product_template_id: l.comboId, combo_quantity: l.qty, slots: l.slots };
-      }
-      return {
-        type: "COMBO",
-        product_template_id: l.comboId,
-        combo_quantity: l.qty,
-        items: (l.items ?? []).map((it) => ({
-          product_id: it.productId,
-          quantity_per_combo: it.quantity,
-          ...(it.options && it.options.length > 0
-            ? { options: it.options }
-            : { option_ids: it.optionIds ?? [] }),
-        })),
-      };
-    }),
-  };
+  const body = buildQuoteRequest({ channel, lines, paymentMethodId, loyaltyCustomerId, loyaltyPointsToRedeem });
 
   try {
     const res = await fetch(`${BASE}/pricing/quote`, {
@@ -384,7 +291,10 @@ export async function quoteCart(
       body: JSON.stringify(body),
       signal,
     });
-    if (!res.ok) return empty;
+    if (!res.ok) {
+      const error = businessErrorMessage(res.status, await res.text().catch(() => ""));
+      return error ? { ...empty, error } : empty;
+    }
 
     const json = await res.json();
     const itemsArr = Array.isArray(json?.items) ? json.items : [];
@@ -394,11 +304,17 @@ export async function quoteCart(
       l.type === "PRODUCT" ? (itemsArr[itemIdx++] ?? null) : (combosArr[comboIdx++] ?? null)
     );
 
-    const priceListSavings = Number(json?.priceListSavings) || 0;
     const promotionSavings = Number(json?.promotionSavings) || 0;
-    const totalSavings = priceListSavings + promotionSavings;
     const total    = Number(json?.total);
     const subtotal = Number(json?.subtotal);
+    // El total final se redondea al múltiplo de `priceRoundingStep` más cercano
+    // (ver roundToStep en el Backend) — sumar priceListSavings+promotionSavings "a
+    // mano" ignoraba ese ajuste y mostraba un descuento que no cerraba contra
+    // subtotal-total (ej. "$10500 - $1050" mostrando un total de "$9500" en vez de
+    // "$9450", bug real reportado). subtotal-total SIEMPRE coincide con lo que el
+    // cliente ve en pantalla, sea cual sea el origen del ajuste.
+    const totalSavings =
+      Number.isFinite(subtotal) && Number.isFinite(total) ? subtotal - total : 0;
     const summary: QuoteCartSummary | null =
       totalSavings > 0
         ? {
@@ -409,7 +325,16 @@ export async function quoteCart(
           }
         : null;
 
-    return { items, summary };
+    const payment: QuotePaymentAdjustment | null =
+      paymentMethodId != null && Number.isFinite(total)
+        ? {
+            discount: Number(json?.paymentDiscount) || 0,
+            surcharge: Number(json?.paymentSurcharge) || 0,
+            total,
+          }
+        : null;
+
+    return { items, summary, payment };
   } catch {
     return empty;
   }

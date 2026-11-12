@@ -1,7 +1,9 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { fetchOnlineConfigFresh } from "@/lib/api/onlineConfig";
 
 const TABLE_COOKIE = "pedilo_table_token";
+const WELCOME_COOKIE = "pedilo_welcome";
 const TEST_COOKIE = "pedilo_test_token";
 
 export async function GET(
@@ -37,7 +39,21 @@ export async function GET(
     return NextResponse.redirect(new URL("/mesa-no-disponible?conexion=1", origin));
   }
 
+  // Splash de bienvenida por QR: solo si el disparador de mesa está activo. Un fallo
+  // al consultar la config nunca debe afectar al escaneo (fetchOnlineConfigFresh
+  // devuelve null). Si solo está activo el de apertura, lo muestra el gate cliente.
+  const onlineConfig = await fetchOnlineConfigFresh();
+
   const response = NextResponse.redirect(new URL("/", origin));
+  if (onlineConfig?.welcomeSplashOnTableActive) {
+    response.cookies.set(WELCOME_COOKIE, "1", {
+      httpOnly: false, // el cliente la consume (borra) al mostrar el splash
+      sameSite: "lax",
+      secure: process.env.COOKIE_SECURE === "true",
+      path: "/",
+      maxAge: 60,
+    });
+  }
   response.cookies.set(TABLE_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",

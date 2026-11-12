@@ -31,3 +31,6 @@ dockerfile
 
 # cualquier carpeta que empiece con "." (en cualquier nivel del árbol)
 .*/
+
+# Build de la suite E2E de pricing (NEXT_DIST_DIR)
+/.next-pricing-test/
