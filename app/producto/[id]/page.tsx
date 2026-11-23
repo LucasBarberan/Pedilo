@@ -553,6 +553,7 @@ export default function ProductDetailPage() {
                   fill
                   className="object-cover"
                   priority
+                  unoptimized
                 />
               </div>
             </div>

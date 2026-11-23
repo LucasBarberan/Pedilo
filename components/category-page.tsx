@@ -258,6 +258,7 @@ export default function CategoryPageClient({
                           alt={String((p as any).name)}
                           fill
                           className="object-cover"
+                          unoptimized
                         />
                         {p.promoLabel && (
                           <span data-testid="promo-badge" className="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-green-500 text-white rounded-full px-2 py-0.5 leading-none shadow">

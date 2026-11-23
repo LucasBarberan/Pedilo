@@ -168,6 +168,7 @@ export default function CartPage() {
                         alt={it.name}
                         fill
                         className="object-cover"
+                        unoptimized
                       />
                     </div>
 
