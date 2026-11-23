@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { markWelcomeSeen } from "@/lib/welcome-session";
+import { useRuntime } from "@/components/runtime-provider";
 
 /** Cookie corta que setea /mesa/[token] para indicar "acaba de escanear el QR". */
 const WELCOME_COOKIE = "pedilo_welcome";
@@ -25,6 +26,7 @@ type Props = {
  */
 export function WelcomeSplash({ title, message }: Props) {
   const [phase, setPhase] = useState<Phase>("open");
+  const runtime = useRuntime();
   const [logoVisible, setLogoVisible] = useState(true);
   const dialogRef = useRef<HTMLDivElement>(null);
   const logoRef = useRef<HTMLImageElement>(null);
@@ -94,12 +96,12 @@ export function WelcomeSplash({ title, message }: Props) {
         tabIndex={-1}
         className="welcome-card w-full max-w-sm rounded-3xl bg-white px-6 pb-[22px] pt-8 text-center shadow-2xl outline-none"
       >
-        {logoVisible && (
+        {logoVisible && runtime.logoUrl && (
           <div className="mx-auto mb-[22px] flex h-20 w-20 items-center justify-center overflow-hidden rounded-[22px] bg-[#FDF8F4] ring-1 ring-black/5">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               ref={logoRef}
-              src="/brand/logo.png"
+              src={runtime.logoUrl}
               alt=""
               className="h-full w-full object-contain p-2"
               onError={() => setLogoVisible(false)}

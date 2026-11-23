@@ -15,6 +15,7 @@ import type { Product } from "@/lib/api/products";
 import { fetchProductsByCategory, fetchProductsBySubcategory } from "@/lib/api/products";
 import { isWholesaleMode } from "@/lib/storeMode";
 import PromoBanner from "./promo-banner";
+import { useRuntime } from "@/components/runtime-provider";
 
 type CategoryPageProps = {
   slug: string;
@@ -44,6 +45,7 @@ export default function CategoryPageClient({
   apiBase,
 }: CategoryPageProps) {
   const router = useRouter();
+  const runtime = useRuntime();
 
   const [products, setProducts] = useState<ProductWithMaybeSub[]>(initialProducts as ProductWithMaybeSub[]);
   const [loading, setLoading] = useState(initialProducts.length === 0 && !!category && !!apiBase);
@@ -149,7 +151,7 @@ export default function CategoryPageClient({
     // Backend solo empieza a trackear stock por producto para negocios que
     // realmente lo usan, así que este filtro queda gateado por modo (fuera
     // de wholesale, stock:0 suele significar "no trackeado", no "agotado").
-    const list = isWholesaleMode() ? products.filter((p) => (p.stock ?? 1) > 0) : products;
+    const list = isWholesaleMode(runtime) ? products.filter((p) => (p.stock ?? 1) > 0) : products;
 
     const anySub = list.some((p) => p?.subcategory?.id != null || p?.subcategoryId != null);
     if (!anySub) {
@@ -283,7 +285,7 @@ export default function CategoryPageClient({
                           </span>
                         </div>
 
-                        {isWholesaleMode() && p.stock !== undefined && (
+                        {isWholesaleMode(runtime) && p.stock !== undefined && (
                           <div className="mt-1 text-xs font-medium text-muted-foreground">
                             Stock: {p.stock}
                           </div>

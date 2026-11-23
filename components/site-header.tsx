@@ -8,6 +8,7 @@ import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
 import { fetchPublicPaymentMethods } from "@/lib/api/paymentMethods";
 import { useEffect, useState } from "react";
 import { TableOrderBanner } from "@/components/table-order-banner";
+import { useRuntime } from "@/components/runtime-provider";
 
 type Props = {
   showBack?: boolean;
@@ -24,8 +25,10 @@ export default function SiteHeader({
 }: Props) {
   const { getTotalItems } = useCart();
   const { config } = useOnlineConfig();
+  const runtime = useRuntime();
   const [logoError, setLogoError] = useState(false);
-  const STORE_NAME = config.storeName || "SRA. BURGA";
+  // Respaldo NEUTRO: el nombre del cliente de esta visita (nunca el de otro cliente).
+  const STORE_NAME = config.storeName || runtime.name;
 
   // Precarga (caché singleton) de los medios de pago de Pedilo — SiteHeader
   // está montado en todas las pantallas previas al checkout, así que para
@@ -72,9 +75,10 @@ export default function SiteHeader({
             focus-visible:outline-2 focus-visible:outline-white/70 focus-visible:outline-offset-2
           "
         >
-          {!logoError ? (
+          {!logoError && (runtime.wordmarkUrl ?? runtime.logoUrl) ? (
             <Image
-              src="/brand/logo-letras.png"
+              src={(runtime.wordmarkUrl ?? runtime.logoUrl) as string}
+              unoptimized
               alt={STORE_NAME}
               width={240}
               height={64}

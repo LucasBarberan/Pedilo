@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   // demo-mode Fase 5 (tasks.md 5.8, gap detectado): sin esto, un pedido hecho desde una demo
   // se creaba en `public` en vez de `demo_N` — Route Handler server-side, `apiBase()` (server,
   // next/headers) es seguro acá, a diferencia de los fetchers client-side de lib/api/*.
-  const base = (await apiBase()) ?? process.env.NEXT_PUBLIC_API_URL;
+  const base = await apiBase();
 
   const r = await fetch(`${base}/orders`, {
     method: "POST",

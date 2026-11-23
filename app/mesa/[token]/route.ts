@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { fetchOnlineConfigFresh } from "@/lib/api/onlineConfig";
+import { rawApiBase, requireApiBase } from "@/lib/apiBase";
+import { getRuntimeConfig } from "@/lib/runtimeConfig";
 
 const TABLE_COOKIE = "pedilo_table_token";
 const WELCOME_COOKIE = "pedilo_welcome";
@@ -15,7 +17,7 @@ export async function GET(
   // hostname interno del contenedor Docker en vez del dominio público, lo que
   // termina mandando al cliente a algo como https://<container-id>:3000/.
   // NEXT_PUBLIC_APP_URL ya viene seteado al dominio público real en cada build.
-  const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
+  const origin = (await getRuntimeConfig()).appUrl || new URL(request.url).origin;
 
   const token = params.token?.trim();
   if (!token || token.length > 100) {
@@ -29,7 +31,7 @@ export async function GET(
 
   try {
     const validation = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/tables/public/${encodeURIComponent(token)}/context`,
+      `${await requireApiBase()}/tables/public/${encodeURIComponent(token)}/context`,
       { headers, cache: "no-store" }
     );
     if (!validation.ok) {
@@ -42,7 +44,7 @@ export async function GET(
   // Splash de bienvenida por QR: solo si el disparador de mesa está activo. Un fallo
   // al consultar la config nunca debe afectar al escaneo (fetchOnlineConfigFresh
   // devuelve null). Si solo está activo el de apertura, lo muestra el gate cliente.
-  const onlineConfig = await fetchOnlineConfigFresh();
+  const onlineConfig = await fetchOnlineConfigFresh(undefined, await rawApiBase());
 
   const response = NextResponse.redirect(new URL("/", origin));
   if (onlineConfig?.welcomeSplashOnTableActive) {

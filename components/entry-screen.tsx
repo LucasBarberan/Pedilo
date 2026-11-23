@@ -8,6 +8,7 @@ import SiteHeader from "@/components/site-header";
 import HomeScreen from "@/components/home-screen";
 import { getTableReservationsMode } from "@/lib/tableReservations";
 import type { Category } from "@/lib/categories";
+import { useRuntime } from "@/components/runtime-provider";
 
 type EntryScreenProps = {
   initialCategories: Category[];
@@ -23,7 +24,8 @@ type EntryScreenProps = {
 export default function EntryScreen({ initialCategories, apiBase }: EntryScreenProps) {
   const router = useRouter();
   const [entered, setEntered] = useState(false);
-  const reservationsMode = getTableReservationsMode();
+  const runtime = useRuntime();
+  const reservationsMode = getTableReservationsMode(runtime);
 
   if (entered) {
     return <HomeScreen initialCategories={initialCategories} apiBase={apiBase} />;

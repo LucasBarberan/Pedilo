@@ -10,7 +10,8 @@
     "release": "standard-version",
     "sync:contract": "node scripts/sync-contract-fixtures.mjs",
     "test:contract": "node --experimental-strip-types --no-warnings --test tests/contract/orderLines.test.mjs",
-    "test:unit": "node --experimental-strip-types --no-warnings --test tests/user-facing-error.test.mjs"
+    "test:unit": "node --experimental-strip-types --no-warnings --test tests/user-facing-error.test.mjs tests/runtimeConfig.test.mjs",
+    "check:api-env": "node scripts/check-no-direct-api-env.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

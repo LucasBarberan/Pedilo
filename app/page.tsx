@@ -3,6 +3,7 @@ import EntryScreen from "@/components/entry-screen";
 import { fetchCategories } from "@/lib/categories";
 import { getTableReservationsMode } from "@/lib/tableReservations";
 import { apiBase as resolveApiBase } from "@/lib/apiBase";
+import { getRuntimeConfig } from "@/lib/runtimeConfig";
 
 export default async function HomePage() {
   // demo-mode Fase 5 (tasks.md 5.4/5.5): con token de demo devuelve el prefijo
@@ -13,7 +14,7 @@ export default async function HomePage() {
   // el catálogo real de `public`, no el del schema demo_N).
   const categories = await fetchCategories({ baseUrl: apiBase });
 
-  if (getTableReservationsMode() !== "off") {
+  if (getTableReservationsMode(await getRuntimeConfig()) !== "off") {
     return <EntryScreen initialCategories={categories} apiBase={apiBase} />;
   }
 

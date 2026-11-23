@@ -1,5 +1,5 @@
 // lib/api/paymentMethods.ts
-import { getClientApiBase } from "@/lib/apiBase.client";
+import { getClientApiBase, runtimeApiBase } from "@/lib/apiBase.client";
 
 export type PublicPaymentMethod = {
   id: number;
@@ -16,7 +16,7 @@ export type PublicPaymentMethod = {
 };
 
 // demo-mode Fase 5 (tasks.md 5.5): sin cookie de demo, comportamiento actual sin cambios.
-const API = getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL; // ej: http://localhost:5000/api
+const api = () => getClientApiBase() ?? runtimeApiBase(); // ej: http://localhost:5000/api
 
 let _cache: PublicPaymentMethod[] | null = null;
 let _promise: Promise<PublicPaymentMethod[]> | null = null;
@@ -45,8 +45,8 @@ export async function fetchPublicPaymentMethods(): Promise<PublicPaymentMethod[]
 
   _promise = (async () => {
     try {
-      if (!API) return [];
-      const res = await fetch(`${API}/public/payment-methods`, { cache: "no-store" });
+      if (!api()) return [];
+      const res = await fetch(`${api()}/public/payment-methods`, { cache: "no-store" });
       if (!res.ok) return [];
       const body = await res.json();
       const data = Array.isArray(body?.data) ? body.data : [];

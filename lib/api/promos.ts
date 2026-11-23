@@ -1,4 +1,4 @@
-import { getClientApiBase } from "@/lib/apiBase.client";
+import { getClientApiBase, runtimeApiBase } from "@/lib/apiBase.client";
 import { formatMoney } from "@/lib/money";
 export type ActivePromo = {
   id: number;
@@ -48,7 +48,7 @@ export async function fetchActivePromos(
 ): Promise<ActivePromo[]> {
   // demo-mode Fase 5 (tasks.md 5.5): baseUrl explícito (server) > cookie de demo (client) >
   // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
-  const base = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  const base = (baseUrl ?? getClientApiBase() ?? runtimeApiBase())?.replace(/\/$/, "");
   if (!base) return [];
   try {
     const res = await fetch(`${base}/price-lists/active-promos?channel=${channel}`, { signal });

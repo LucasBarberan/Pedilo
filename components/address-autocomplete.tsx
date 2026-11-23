@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { useRuntime } from "@/components/runtime-provider";
 
 // Sin h-9/shadow-xs/focus-visible:ring-ring/border-input fijos a propósito:
 // el consumidor controla altura, sombra, color de foco y color de borde vía
@@ -40,7 +41,6 @@ interface AddressAutocompleteProps {
   locationBias?: LocationBias | null;
 }
 
-const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_PLACES_API_KEY;
 
 /**
  * Autocomplete de direcciones — llama directo a Places API (New) vía REST
@@ -61,6 +61,8 @@ export function AddressAutocomplete({
   onInputElement,
   locationBias,
 }: AddressAutocompleteProps) {
+  // Clave PÚBLICA de Maps del cliente de esta visita (no del build): una imagen para todos los clientes.
+  const API_KEY = useRuntime().mapsPublicKey ?? undefined;
   const internalRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);

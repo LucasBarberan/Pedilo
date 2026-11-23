@@ -4,8 +4,8 @@
 import { useEffect, useState } from "react";
 import { APIProvider, Map, AdvancedMarker, Pin } from "@vis.gl/react-google-maps";
 import type { LatLng } from "@/lib/api/delivery";
+import { useRuntime } from "@/components/runtime-provider";
 
-const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_PLACES_API_KEY;
 // Sin mapId propio, Advanced Markers igual funciona con el ID demo público de
 // Google (mapa sin estilo custom) — mejor que no poder mostrar el mapa.
 const MAP_ID = process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID || "DEMO_MAP_ID";
@@ -30,6 +30,8 @@ interface DeliveryMapProps {
  * implementación manual.
  */
 export function DeliveryMap({ destinationLocation, onLocationChange }: DeliveryMapProps) {
+  // Clave PÚBLICA de Maps del cliente de esta visita (no del build): una imagen para todos los clientes.
+  const API_KEY = useRuntime().mapsPublicKey ?? undefined;
   // Posición local del pin — se actualiza al instante al soltar el drag
   // (optimista), sin esperar la respuesta del Backend. Si no hiciéramos
   // esto, position quedaría atada directo a destinationLocation (prop del

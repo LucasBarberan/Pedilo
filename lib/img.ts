@@ -1,10 +1,12 @@
 ﻿// lib/img.ts
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
-const API = new URL(API_URL);
-const API_ORIGIN = `${API.protocol}//${API.hostname}${API.port ? `:${API.port}` : ""}`;
+import { runtimeApiBase } from "@/lib/apiBase.client";
 
 export function fixImageUrl(input?: string | null) {
   if (!input) return "";
+
+  // La base de la API se resuelve en cada llamada (en una imagen compartida depende del cliente de la visita, no del build).
+  const API = new URL(runtimeApiBase() ?? "http://localhost:5000/api");
+  const API_ORIGIN = `${API.protocol}//${API.hostname}${API.port ? `:${API.port}` : ""}`;
 
   // Siempre resolvemos contra la base (sirve si viene relativa)
   const u = new URL(input, API_ORIGIN);

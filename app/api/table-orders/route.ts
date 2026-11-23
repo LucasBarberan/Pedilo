@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { requireApiBase } from "@/lib/apiBase";
 
 const TABLE_COOKIE = "pedilo_table_token";
 const TEST_COOKIE = "pedilo_test_token";
@@ -21,7 +22,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.text();
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/tables/public/${encodeURIComponent(token)}/commands`,
+      `${await requireApiBase()}/tables/public/${encodeURIComponent(token)}/commands`,
       { method: "POST", headers, body, cache: "no-store" }
     );
     const text = await response.text();

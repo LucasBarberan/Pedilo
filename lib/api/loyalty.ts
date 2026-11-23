@@ -1,5 +1,5 @@
 // lib/api/loyalty.ts
-import { getClientApiBase } from "@/lib/apiBase.client";
+import { getClientApiBase, runtimeApiBase } from "@/lib/apiBase.client";
 
 export type LoyaltyCustomerStatus = {
   customerId: number;
@@ -19,7 +19,7 @@ export type LoyaltyCustomerStatus = {
 };
 
 // demo-mode Fase 5 (tasks.md 5.5): sin cookie de demo, comportamiento actual sin cambios.
-const API = getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL; // ej: http://localhost:5000/api
+const api = () => getClientApiBase() ?? runtimeApiBase(); // ej: http://localhost:5000/api
 
 let _enabledCache: boolean | null = null;
 let _enabledPromise: Promise<boolean> | null = null;
@@ -42,8 +42,8 @@ export async function fetchLoyaltyEnabled(): Promise<boolean> {
 
   _enabledPromise = (async () => {
     try {
-      if (!API) return false;
-      const res = await fetch(`${API}/loyalty/enabled`, { cache: "no-store" });
+      if (!api()) return false;
+      const res = await fetch(`${api()}/loyalty/enabled`, { cache: "no-store" });
       const enabled = res.ok;
       _enabledCache = enabled;
       return enabled;
@@ -65,7 +65,7 @@ export async function fetchLoyaltyStatus(
   dni: string,
   datosContacto?: { name?: string; phone?: string; addressLine1?: string }
 ): Promise<LoyaltyCustomerStatus> {
-  if (!API) throw new Error("Falta NEXT_PUBLIC_API_URL");
+  if (!api()) throw new Error("No se pudo determinar la dirección de la API");
 
   const params = new URLSearchParams();
   if (datosContacto?.name) params.append("name", datosContacto.name);
@@ -73,7 +73,7 @@ export async function fetchLoyaltyStatus(
   if (datosContacto?.addressLine1) params.append("addressLine1", datosContacto.addressLine1);
   const qs = params.toString();
 
-  const res = await fetch(`${API}/loyalty/customer/${encodeURIComponent(dni)}${qs ? `?${qs}` : ""}`, {
+  const res = await fetch(`${api()}/loyalty/customer/${encodeURIComponent(dni)}${qs ? `?${qs}` : ""}`, {
     cache: "no-store",
   });
 
@@ -87,9 +87,9 @@ export async function fetchLoyaltyStatus(
 
 /** Preview (sin persistir) de cuántos puntos se ganarían con un monto de compra. */
 export async function fetchLoyaltyEarnPreview(montoOrden: number): Promise<number> {
-  if (!API) throw new Error("Falta NEXT_PUBLIC_API_URL");
+  if (!api()) throw new Error("No se pudo determinar la dirección de la API");
 
-  const res = await fetch(`${API}/loyalty/earn-preview`, {
+  const res = await fetch(`${api()}/loyalty/earn-preview`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ montoOrden }),

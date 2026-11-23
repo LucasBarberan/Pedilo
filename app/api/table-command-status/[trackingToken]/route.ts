@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireApiBase } from "@/lib/apiBase";
 
 export async function GET(
   _request: Request,
@@ -6,7 +7,7 @@ export async function GET(
 ) {
   try {
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/tables/public/commands/${encodeURIComponent(params.trackingToken)}`,
+      `${await requireApiBase()}/tables/public/commands/${encodeURIComponent(params.trackingToken)}`,
       { cache: "no-store" }
     );
     const text = await response.text();

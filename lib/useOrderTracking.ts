@@ -1,3 +1,4 @@
+import { runtimeApiBase, runtimeSocketUrl } from "@/lib/apiBase.client";
 import { useEffect, useState } from "react";
 import io, { Socket } from "socket.io-client";
 
@@ -90,7 +91,7 @@ export function useOrderTracking(trackingToken: string) {
             setUsingFallback(true);
             const fetchStatus = async () => {
                 try {
-                    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+                    const apiUrl = runtimeApiBase() || "http://localhost:5000/api";
                     const res = await fetch(`${apiUrl}/orders/track/${trackingToken}?t=${Date.now()}`, {
                         cache: "no-store",
                     });
@@ -117,7 +118,7 @@ export function useOrderTracking(trackingToken: string) {
 
         // WebSocket connection
         try {
-            const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:5000";
+            const socketUrl = runtimeSocketUrl() || "http://localhost:5000";
 
             console.log("Connecting to Socket.IO at:", socketUrl);
 
@@ -142,7 +143,7 @@ export function useOrderTracking(trackingToken: string) {
                 console.log("Order status changed via WebSocket:", event);
 
                 // Fetch fresh data from API to get all fields
-                const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+                const apiUrl = runtimeApiBase() || "http://localhost:5000/api";
                 fetch(`${apiUrl}/orders/track/${trackingToken}?t=${Date.now()}`, {
                     cache: "no-store",
                 })
@@ -180,7 +181,7 @@ export function useOrderTracking(trackingToken: string) {
             // Initial fetch via HTTP while waiting for WebSocket
             (async () => {
                 try {
-                    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+                    const apiUrl = runtimeApiBase() || "http://localhost:5000/api";
                     const res = await fetch(`${apiUrl}/orders/track/${trackingToken}?t=${Date.now()}`, {
                         cache: "no-store",
                     });

@@ -1,4 +1,4 @@
-import { getClientApiBase } from "@/lib/apiBase.client";
+import { getClientApiBase, runtimeApiBase } from "@/lib/apiBase.client";
 
 export type ProductOption = {
   id: string | number;
@@ -252,7 +252,7 @@ export async function fetchProductsByCategory(
 ): Promise<Product[]> {
   // demo-mode Fase 5 (tasks.md 5.5): baseUrl explícito (server) > cookie de demo (client) >
   // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
-  const base = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  const base = (baseUrl ?? getClientApiBase() ?? runtimeApiBase())?.replace(/\/$/, "");
   if (!base) return [];
 
   try {
@@ -287,7 +287,7 @@ export async function fetchProductsBySubcategory(
 ): Promise<Product[]> {
   // demo-mode Fase 5 (tasks.md 5.5): baseUrl explícito (server) > cookie de demo (client) >
   // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
-  const base = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  const base = (baseUrl ?? getClientApiBase() ?? runtimeApiBase())?.replace(/\/$/, "");
   if (!base) return [];
 
   try {
@@ -325,7 +325,7 @@ export async function fetchProductById(
 ): Promise<Product | null> {
   // demo-mode Fase 5 (tasks.md 5.5): baseUrl explícito (server) > cookie de demo (client) >
   // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
-  const base = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  const base = (baseUrl ?? getClientApiBase() ?? runtimeApiBase())?.replace(/\/$/, "");
   if (!base) return null;
 
   try {

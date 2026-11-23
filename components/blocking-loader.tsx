@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useEffect } from "react";
+import { useRuntime } from "@/components/runtime-provider";
 
 type Props = {
   open: boolean;
@@ -16,7 +17,8 @@ export default function BlockingLoader({
   message = "Cargando…",
   zIndex = 9999,
 }: Props) {
-  const resolvedSrc = imageSrc ?? "/brand/logo.png";
+  const runtime = useRuntime();
+  const resolvedSrc = imageSrc ?? runtime.logoUrl;
   // Evitar scroll del body mientras está abierto
   useEffect(() => {
     if (!open) return;
@@ -41,7 +43,7 @@ export default function BlockingLoader({
       <div className="relative z-10 w-[320px] max-w-[86vw] rounded-2xl p-6
                       bg-white/85 ring-1 ring-black/10 shadow-xl text-center select-none">
         <div className="relative mx-auto h-28 w-28 overflow-hidden rounded-xl bg-neutral-100 animate-[float_2.4s_ease-in-out_infinite]">
-          <Image src={resolvedSrc} alt="Cargando" fill className="object-contain" priority />
+          {resolvedSrc && <Image src={resolvedSrc} alt="Cargando" fill className="object-contain" priority unoptimized />}
         </div>
 
         <div className="mt-4 text-sm font-medium text-neutral-700">{message}</div>

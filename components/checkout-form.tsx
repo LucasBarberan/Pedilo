@@ -1,6 +1,7 @@
 // components/checkout-form.tsx
 "use client";
 
+import { runtimeApiBase } from "@/lib/apiBase.client";
 import { buildOrderLines, buildOrderRequest, buildTableCommandRequest } from "@/lib/orderLines";
 import { quoteCart } from "@/lib/pricing";
 import { UserFacingError, businessErrorMessage } from "@/lib/user-facing-error";
@@ -20,6 +21,7 @@ import { fetchPublicPaymentMethods, type PublicPaymentMethod } from "@/lib/api/p
 import { isWholesaleMode } from "@/lib/storeMode";
 import { Sparkles, PartyPopper, Coins } from "lucide-react";
 import { useTableOrder } from "@/components/table-order-context";
+import { useRuntime } from "@/components/runtime-provider";
 
 type Customer = {
   name: string;
@@ -73,6 +75,7 @@ type MaybeCombo = {
 
 export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const router = useRouter();
+  const runtime = useRuntime();
   const { items, getTotalPrice, clearCart } = useCart();
   const { config, isLoading: configLoading } = useOnlineConfig();
   const { data: businessStatus } = useBusinessStatusSmart();
@@ -144,7 +147,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const [puntosAGanar, setPuntosAGanar] = useState(0);
 
   // Busca el estado de fidelización apenas el DNI es válido (7-8 dígitos).
-  // No depende de isWholesaleMode() — un cliente normal también puede sumar/
+  // No depende de isWholesaleMode(runtime) — un cliente normal también puede sumar/
   // canjear puntos sin necesitar cuenta de facturación mayorista.
   useEffect(() => {
     if (!loyaltyEnabled) {
@@ -601,9 +604,9 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   // debajo de isPhoneValid:
   const isNonEmpty = (s: string) => !!s.trim();
 
-  const BASE = process.env.NEXT_PUBLIC_API_URL;
-  const STORE_NAME = config.storeName || "SRA. BURGA";
-  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const BASE = runtimeApiBase();
+  const STORE_NAME = config.storeName || runtime.name;
+  const APP_URL = runtime.appUrl || "http://localhost:3000";
 
 
   /** 🔹 Arma el texto de WhatsApp (usa el mismo orden del resumen) */
@@ -752,7 +755,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       phoneRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
-    if (isWholesaleMode() && !isDniValid(customer.dni)) {
+    if (isWholesaleMode(runtime) && !isDniValid(customer.dni)) {
       setDniTouched(true);
       setFormError("Ingresá un DNI válido (8 dígitos, sin puntos).");
       dniRef.current?.focus();
@@ -818,7 +821,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       let createdTotal: number | undefined;
 
 
-      if (!BASE) throw new Error("Falta NEXT_PUBLIC_API_URL");
+      if (!BASE) throw new Error("No se pudo determinar la dirección de la API");
 
       // Contrato único de órdenes: las MISMAS lines[] que la cotización (serializador único, lib/orderLines.ts). Los precios y el contenido del combo los
       // decide el servidor; un combo viaja con un slot por unidad de cada ítem.
@@ -920,7 +923,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       // Si falla, no seguimos: sin customerId el pedido quedaría a nombre de
       // "Consumidor Final" en vez del cliente real.
       let resolvedCustomerId: number | undefined;
-      if (isWholesaleMode()) {
+      if (isWholesaleMode(runtime)) {
         try {
           const dniRes = await fetch(`${BASE}/customers/resolve-by-dni`, {
             method: "POST",
@@ -1342,10 +1345,10 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               (resolver/crear el Customer para facturación) y fidelización de
               puntos (siempre que el módulo LOYALTY esté activo, sin importar
               el modo). Se muestra si cualquiera de los dos aplica. */}
-          {(isWholesaleMode() || loyaltyEnabled) && (
+          {(isWholesaleMode(runtime) || loyaltyEnabled) && (
             <>
               <label className="block text-sm mb-1">
-                {isWholesaleMode()
+                {isWholesaleMode(runtime)
                   ? "DNI"
                   : (
                     <>
@@ -1385,7 +1388,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
               >
                 {dniTouched && !isDniValid(customer.dni)
                   ? "El DNI debe tener 8 dígitos, sin puntos ni letras."
-                  : isWholesaleMode()
+                  : isWholesaleMode(runtime)
                     ? "* Necesario para asociar tu pedido a tu cuenta de cliente."
                     : "Si no querés sumar puntos, podés dejarlo en blanco."}
               </p>

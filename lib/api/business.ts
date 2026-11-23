@@ -1,5 +1,5 @@
 // lib/api/business.ts
-import { getClientApiBase } from "@/lib/apiBase.client";
+import { getClientApiBase, runtimeApiBase } from "@/lib/apiBase.client";
 
 export type Channel = "POS" | "WEB";
 
@@ -22,11 +22,11 @@ export type CombinedStatus = {
 
 // demo-mode Fase 5 (tasks.md 5.5): sin cookie de demo, comportamiento actual sin cambios
 // (getClientApiBase() cae a NEXT_PUBLIC_API_URL).
-const API = getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL; // ej: http://localhost:3000/api
+const api = () => getClientApiBase() ?? runtimeApiBase(); // ej: http://localhost:3000/api
 
 export async function fetchBusinessStatus(): Promise<CombinedStatus> {
-  if (!API) throw new Error("Falta NEXT_PUBLIC_API_URL");
-  const res = await fetch(`${API}/business/status`, { cache: "no-store" });
+  if (!api()) throw new Error("No se pudo determinar la dirección de la API");
+  const res = await fetch(`${api()}/business/status`, { cache: "no-store" });
   if (!res.ok) throw new Error("No se pudo obtener el estado del negocio");
   return res.json();
 }

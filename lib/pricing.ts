@@ -1,7 +1,7 @@
 // lib/pricing.ts
 //
 // Toda cotización sale del serializador único (`lib/orderLines.ts`, contrato único de órdenes): las MISMAS `lines[]` que el pedido.
-import { getClientApiBase } from "@/lib/apiBase.client";
+import { getClientApiBase, runtimeApiBase } from "@/lib/apiBase.client";
 import { buildQuoteRequest, normalizeOptions, type ContractLine, type ContractSlot, type QuoteChannel } from "@/lib/orderLines";
 import { businessErrorMessage } from "@/lib/user-facing-error";
 export type QuoteItemProductView = {
@@ -60,7 +60,7 @@ export async function quoteProduct({
   try {
     // demo-mode Fase 5 (tasks.md 5.6): baseUrl explícito > cookie de demo (client-side) >
     // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
-    const BASE = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+    const BASE = (baseUrl ?? getClientApiBase() ?? runtimeApiBase())?.replace(/\/$/, "");
     if (!BASE) return null;
 
     const opts = normalizeOptions(options);
@@ -200,7 +200,7 @@ export async function quoteComboSlots({
   try {
     // demo-mode Fase 5 (tasks.md 5.6): baseUrl explícito > cookie de demo (client-side) >
     // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
-    const BASE = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+    const BASE = (baseUrl ?? getClientApiBase() ?? runtimeApiBase())?.replace(/\/$/, "");
     if (!BASE) return null;
 
     const contractSlots: ContractSlot[] = slots.map((s) => {
@@ -278,7 +278,7 @@ export async function quoteCart(
   if (!lines.length) return { items: [], summary: null };
   // demo-mode Fase 5 (tasks.md 5.6): baseUrl explícito > cookie de demo (client-side) >
   // NEXT_PUBLIC_API_URL — sin cookie de demo, comportamiento actual sin cambios.
-  const BASE = (baseUrl ?? getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
+  const BASE = (baseUrl ?? getClientApiBase() ?? runtimeApiBase())?.replace(/\/$/, "");
   if (!BASE) return empty;
 
   const body = buildQuoteRequest({ channel, lines, paymentMethodId, loyaltyCustomerId, loyaltyPointsToRedeem });

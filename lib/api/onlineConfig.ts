@@ -1,5 +1,5 @@
 // lib/api/onlineConfig.ts
-import { getClientApiBase } from "@/lib/apiBase.client";
+import { getClientApiBase, runtimeApiBase } from "@/lib/apiBase.client";
 
 export type OnlineConfigResponse = {
   storeName: string;
@@ -43,7 +43,7 @@ export const ONLINE_CONFIG_DEFAULTS: OnlineConfigResponse = {
 };
 
 // demo-mode Fase 5 (tasks.md 5.5): sin cookie de demo, comportamiento actual sin cambios.
-const API_URL = getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL;
+const apiUrl = () => getClientApiBase() ?? runtimeApiBase();
 
 let _cache: OnlineConfigResponse | null = null;
 let _promise: Promise<OnlineConfigResponse> | null = null;
@@ -54,8 +54,8 @@ export async function fetchOnlineConfig(): Promise<OnlineConfigResponse> {
 
   _promise = (async () => {
     try {
-      if (!API_URL) return ONLINE_CONFIG_DEFAULTS;
-      const res = await fetch(`${API_URL}/business/online-config`, {
+      if (!apiUrl()) return ONLINE_CONFIG_DEFAULTS;
+      const res = await fetch(`${apiUrl()}/business/online-config`, {
         cache: "no-store",
       });
       if (!res.ok) return ONLINE_CONFIG_DEFAULTS;
@@ -78,10 +78,12 @@ export async function fetchOnlineConfig(): Promise<OnlineConfigResponse> {
  * siempre dentro del proceso Node y serviría config vieja entre requests.
  * Devuelve `null` ante cualquier fallo o demora (nunca lanza).
  */
-export async function fetchOnlineConfigFresh(timeoutMs = 1500): Promise<OnlineConfigResponse | null> {
-  if (!API_URL) return null;
+export async function fetchOnlineConfigFresh(timeoutMs = 1500, baseUrl?: string | null): Promise<OnlineConfigResponse | null> {
+  // En el servidor la base depende del cliente de la visita: el llamador la pasa (`await rawApiBase()`).
+  const base = baseUrl ?? apiUrl();
+  if (!base) return null;
   try {
-    const res = await fetch(`${API_URL}/business/online-config`, {
+    const res = await fetch(`${base}/business/online-config`, {
       cache: "no-store",
       signal: AbortSignal.timeout(timeoutMs),
     });

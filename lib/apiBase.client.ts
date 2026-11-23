@@ -19,9 +19,45 @@ function readCookie(name: string): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-/** Mismo shape que `apiBase()` server-side, pero síncrono — sin token, `NEXT_PUBLIC_API_URL` sin cambios. */
+let warnedServerWithoutBase = false;
+
+/**
+ * ÚNICO lugar fuera de `lib/runtimeConfig.ts` que lee `NEXT_PUBLIC_API_URL` (change infra-multi-tenant, tarea 4.3; lo exige una regla de
+ * ESLint). Base de la API de ESTE cliente, sin barra final:
+ *   - navegador: `window.__RUNTIME__.apiBase` (lo inyecta `app/layout.tsx` por Host); si no está, la variable del build (single);
+ *   - servidor en single: la variable del build;
+ *   - servidor en multi: NO hay base global (depende del Host y `headers()` es asíncrono) → devuelve `null` y avisa UNA vez: el
+ *     llamador de servidor tiene que pasar `baseUrl` (`await apiBase()`). Es mejor un aviso en el log que una tienda vacía callada.
+ */
+export function runtimeApiBase(): string | null {
+  if (typeof window !== "undefined") {
+    const fromRuntime = (window as unknown as { __RUNTIME__?: { apiBase?: string | null } }).__RUNTIME__?.apiBase;
+    if (fromRuntime) return fromRuntime.replace(/\/$/, "");
+  } else if (process.env.TENANCY_MODE === "multi") {
+    if (!warnedServerWithoutBase) {
+      warnedServerWithoutBase = true;
+      console.error("[apiBase] llamada de servidor sin `baseUrl` en TENANCY_MODE=multi: pasá `await apiBase()` al fetcher.");
+    }
+    return null;
+  }
+  return process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? null;
+}
+
+/**
+ * Dirección del Socket.IO de ESTE cliente (navegador): `window.__RUNTIME__.socketUrl` y, sin ella, la variable del build (single).
+ * Solo se llama desde efectos del navegador (nunca durante el render del servidor).
+ */
+export function runtimeSocketUrl(): string | null {
+  if (typeof window !== "undefined") {
+    const fromRuntime = (window as unknown as { __RUNTIME__?: { socketUrl?: string | null } }).__RUNTIME__?.socketUrl;
+    if (fromRuntime) return fromRuntime.replace(/\/$/, "");
+  }
+  return process.env.NEXT_PUBLIC_SOCKET_URL?.replace(/\/$/, "") ?? null;
+}
+
+/** Mismo shape que `apiBase()` server-side, pero síncrono — sin token de demo, la base del cliente sin cambios. */
 export function getClientApiBase(): string | null {
-  const base = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? null;
+  const base = runtimeApiBase();
   if (!base) return null;
 
   const demoToken = readCookie(DEMO_TOKEN_COOKIE);

@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useCallback } from "react";
 import type { Category as CategoryModel } from "@/lib/categories";
 import { useOnlineConfig } from "@/lib/hooks/useOnlineConfig";
+import { useRuntime } from "@/components/runtime-provider";
 
 export type Category = CategoryModel;
 
@@ -22,7 +23,7 @@ function slugify(s: string) {
 
 export default function CategoryMenu({ categories, onCategorySelect }: CategoryMenuProps) {
   const router = useRouter();
-  const fallbackLogo = "/brand/logo.png";
+  const fallbackLogo = useRuntime().logoUrl;
 
   // URL destino para cada categoria
   const targetFor = useCallback((c: Category) => {
@@ -57,13 +58,13 @@ export default function CategoryMenu({ categories, onCategorySelect }: CategoryM
                       hover:shadow-md hover:bg-white/80 transition"
           >
             <div className="relative h-28 w-28">
-              <Image
+              {imgSrc && <Image
                 src={imgSrc}
                 alt={c.name}
                 fill
                 className="object-contain group-hover:scale-[1.03] transition drop-shadow"
                 unoptimized
-              />
+              />}
             </div>
             <span className="text-base sm:text-lg font-extrabold uppercase text-center line-clamp-2">
               {c.name}

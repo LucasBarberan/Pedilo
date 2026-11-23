@@ -1,5 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { requireApiBase } from "@/lib/apiBase";
+import { getRuntimeConfig } from "@/lib/runtimeConfig";
 
 // demo-mode Fase 5 (openspec/changes/demo-mode/tasks.md, tarea 5.3; design.md D5). Calco de
 // app/mesa/[token]/route.ts: token del path → valida contra el backend → cookie httpOnly →
@@ -13,7 +15,7 @@ export async function GET(
 ) {
   // Mismo motivo que mesa/[token]/route.ts: no usar request.url como base de los redirects
   // detrás del reverse proxy.
-  const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
+  const origin = (await getRuntimeConfig()).appUrl || new URL(request.url).origin;
 
   const token = params.token?.trim();
   if (!token || token.length > 100) {
@@ -24,7 +26,7 @@ export async function GET(
     // Endpoint público liviano (business/status), ya remontado bajo el prefijo demo en
     // Backend/src/server.ts (tarea 5.2) — 404 si el token no resuelve a un slot ASSIGNED.
     const validation = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/demo/${encodeURIComponent(token)}/business/status`,
+      `${await requireApiBase()}/demo/${encodeURIComponent(token)}/business/status`,
       { cache: "no-store" }
     );
     if (!validation.ok) {

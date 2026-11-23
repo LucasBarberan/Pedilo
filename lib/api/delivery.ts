@@ -1,5 +1,5 @@
 // lib/api/delivery.ts
-import { getClientApiBase } from "@/lib/apiBase.client";
+import { getClientApiBase, runtimeApiBase } from "@/lib/apiBase.client";
 
 export type DeliveryQuoteRequest = {
   address?: string;
@@ -22,7 +22,7 @@ export type DeliveryQuoteResponse = {
 };
 
 // demo-mode Fase 5 (tasks.md 5.5): sin cookie de demo, comportamiento actual sin cambios.
-const API = getClientApiBase() ?? process.env.NEXT_PUBLIC_API_URL; // ej: http://localhost:5000/api
+const api = () => getClientApiBase() ?? runtimeApiBase(); // ej: http://localhost:5000/api
 
 type DeliveryConfigSnapshot = {
   enabled: boolean;
@@ -42,8 +42,8 @@ async function loadDeliveryConfig(): Promise<DeliveryConfigSnapshot> {
 
   _configPromise = (async () => {
     try {
-      if (!API) return EMPTY_CONFIG;
-      const res = await fetch(`${API}/delivery/config`, { cache: "no-store" });
+      if (!api()) return EMPTY_CONFIG;
+      const res = await fetch(`${api()}/delivery/config`, { cache: "no-store" });
       if (!res.ok) return EMPTY_CONFIG;
       const body = await res.json();
       const snapshot: DeliveryConfigSnapshot = {
@@ -94,9 +94,9 @@ export async function fetchDeliveryLocationBias(): Promise<{ latitude: number; l
  * ver openspec/changes/delivery-pricing/design.md).
  */
 export async function fetchDeliveryQuote(input: DeliveryQuoteRequest): Promise<DeliveryQuoteResponse> {
-  if (!API) throw new Error("Falta NEXT_PUBLIC_API_URL");
+  if (!api()) throw new Error("No se pudo determinar la dirección de la API");
 
-  const res = await fetch(`${API}/delivery/quote`, {
+  const res = await fetch(`${api()}/delivery/quote`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),

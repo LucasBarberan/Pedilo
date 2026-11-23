@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { getRuntimeConfig } from "@/lib/runtimeConfig";
 
 // lib/apiBase.ts
 //
@@ -11,8 +12,23 @@ import { cookies } from "next/headers";
 // prop — los componentes cliente NUNCA llaman esto directo, reciben `apiBase` ya resuelto.
 export const DEMO_TOKEN_COOKIE = "pedilo_demo_token";
 
+/**
+ * Base de la API del cliente de ESTA visita, SIN el prefijo de demo (change infra-multi-tenant, tarea 4.3). single: la variable del
+ * build; multi: la que devuelve el Backend por Host. Para los route handlers, que nunca pasan por el modo demo.
+ */
+export async function rawApiBase(): Promise<string | null> {
+  return (await getRuntimeConfig()).apiBase;
+}
+
+/** Como `rawApiBase()` pero falla con un mensaje claro si no hay base (en vez de armar una URL "null/..."). */
+export async function requireApiBase(): Promise<string> {
+  const base = await rawApiBase();
+  if (!base) throw new Error("No se pudo determinar la dirección de la API de este cliente.");
+  return base;
+}
+
 export async function apiBase(): Promise<string | null> {
-  const base = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? null;
+  const base = await rawApiBase();
   if (!base) return null;
 
   const cookieStore = await cookies();
