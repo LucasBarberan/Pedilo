@@ -24,11 +24,12 @@ export default function SiteHeader({
   title,
 }: Props) {
   const { getTotalItems } = useCart();
-  const { config } = useOnlineConfig();
+  const { config, isLoading: configLoading } = useOnlineConfig();
   const runtime = useRuntime();
   const [logoError, setLogoError] = useState(false);
-  // Respaldo NEUTRO: el nombre del cliente de esta visita (nunca el de otro cliente).
-  const STORE_NAME = config.storeName || runtime.name;
+  // Mientras la config online carga, `config.storeName` es el valor por defecto ("Mi Tienda"): se mostraba un instante y después saltaba al nombre real.
+  // El nombre del cliente ya viene en el HTML inicial (`runtime.name`), así que se usa ese hasta que la config online esté cargada.
+  const STORE_NAME = (configLoading ? runtime.name : config.storeName) || runtime.name;
 
   // Precarga (caché singleton) de los medios de pago de Pedilo — SiteHeader
   // está montado en todas las pantallas previas al checkout, así que para

@@ -605,7 +605,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
   const isNonEmpty = (s: string) => !!s.trim();
 
   const BASE = runtimeApiBase();
-  const STORE_NAME = config.storeName || runtime.name;
+  const STORE_NAME = (configLoading ? runtime.name : config.storeName) || runtime.name;
   const APP_URL = runtime.appUrl || "http://localhost:3000";
 
 
