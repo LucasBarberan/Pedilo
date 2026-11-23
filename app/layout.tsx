@@ -18,6 +18,11 @@ import { cookies } from "next/headers"
 import "./globals.css"
 import type { Viewport } from "next";
 
+// La config del cliente depende del Host de CADA visita (change infra-multi-tenant, Fase 4): este layout NO puede prerenderizarse en el
+// build, que congelaría la configuración de `single` en el HTML de todos los clientes. Se declara explícito en vez de depender de que
+// algún `cookies()`/`headers()` del camino lo vuelva dinámico (en el POS, sin TENANCY_MODE al construir, no lo hace).
+export const dynamic = "force-dynamic";
+
 // Marca, título y descripción salen de la configuración del cliente de ESTA visita (change infra-multi-tenant, Fase 4): con una sola
 // imagen para todos los clientes ya no pueden ser constantes del build. En single (por defecto) siguen siendo las variables de siempre.
 export async function generateMetadata(): Promise<Metadata> {
