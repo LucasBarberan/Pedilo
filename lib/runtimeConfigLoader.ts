@@ -20,7 +20,7 @@ export type RuntimeConfig = {
   description: string | null;
   brandColor: string;
   logoUrl: string | null;
-  /** Logo apaisado (con letras) de la cabecera. El Backend no lo entrega: solo lo define `single` (archivo local del despliegue). */
+  /** Logo apaisado (con letras) de la cabecera (`headerLogoUrl` del Backend en `multi`; archivo local en `single`). */
   wordmarkUrl: string | null;
   faviconUrl: string | null;
   storeMode: StoreMode;
@@ -77,8 +77,10 @@ export function parseRuntimeConfig(raw: unknown): RuntimeConfig | null {
     name,
     description: str(r.description),
     brandColor: typeof r.brandColor === "string" && HEX.test(r.brandColor) ? r.brandColor.toUpperCase() : NEUTRAL_BRAND_COLOR,
-    logoUrl: str(r.logoUrl),
-    wordmarkUrl: null,
+    // Logo cuadrado (categorías, carga, bienvenida): el de categorías de App Online; si no hay, el logo general del negocio.
+    logoUrl: str(r.categoryLogoUrl) ?? str(r.logoUrl),
+    // Logo apaisado (con letras) del encabezado: el que sube el negocio en App Online. Sin él, el encabezado usa `logoUrl`.
+    wordmarkUrl: str(r.headerLogoUrl),
     faviconUrl: str(r.faviconUrl),
     storeMode,
     tableReservations,

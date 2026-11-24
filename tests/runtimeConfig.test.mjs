@@ -176,6 +176,16 @@ test("una respuesta inválida del Backend no llega al HTML: color y modos caen a
   assert.equal(parseRuntimeConfig(null), null);
 });
 
+test("los logos de App Online: encabezado -> wordmarkUrl; categorías -> logoUrl (con respaldo al logo general)", () => {
+  const both = parseRuntimeConfig({ name: "X", logoUrl: "https://a/general.png", headerLogoUrl: "https://a/h.webp", categoryLogoUrl: "https://a/c.webp" });
+  assert.equal(both.wordmarkUrl, "https://a/h.webp");
+  assert.equal(both.logoUrl, "https://a/c.webp");
+  const soloGeneral = parseRuntimeConfig({ name: "X", logoUrl: "https://a/general.png" });
+  assert.equal(soloGeneral.wordmarkUrl, null);
+  assert.equal(soloGeneral.logoUrl, "https://a/general.png", "sin logo de categorías se usa el general");
+  assert.equal(parseRuntimeConfig({ name: "X" }).logoUrl, null);
+});
+
 test("normaliza el color a mayúsculas y quita la barra final de las direcciones", () => {
   const c = parseRuntimeConfig(cfg("t01", "#aabbcc", { apiBase: "https://api.t01.example.test/api///" }));
   assert.equal(c.brandColor, "#AABBCC");
