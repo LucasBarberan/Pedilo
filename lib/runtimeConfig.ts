@@ -74,10 +74,19 @@ function getLoader(): RuntimeConfigLoader {
   return loader;
 }
 
-/** Host de la visita: el que reenvía el proxy (Caddy) o, si no hay, el propio. Sin puerto ni mayúsculas lo resuelve el Backend. */
+/**
+ * Host de la visita: el que reenvía el proxy (Caddy) o, si no hay, el propio. Sin puerto ni mayúsculas lo resuelve el Backend.
+ *
+ * Hallazgo 6.8 (alto): `X-Forwarded-Host` puede traer una cadena separada por comas si hay varios proxies
+ * en el camino; cada uno AGREGA su valor al final, nunca pisa el anterior. El visitante controla el request
+ * original, así que el primer valor de la cadena es SIEMPRE el que puso el cliente (potencialmente falso) —
+ * el único de confianza es el ÚLTIMO, agregado por el proxy más cercano a este servidor. Tomar el primero
+ * (como hacía antes) deja que cualquiera eligiera a qué cliente se le resuelve la configuración.
+ */
 export async function requestHost(): Promise<string> {
   const h = await headers();
-  const forwarded = h.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const chain = h.get("x-forwarded-host")?.split(",") ?? [];
+  const forwarded = chain.length ? chain[chain.length - 1]?.trim() : undefined;
   return (forwarded || h.get("host") || "").trim();
 }
 

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { fetchOnlineConfigFresh } from "@/lib/api/onlineConfig";
 import { rawApiBase, requireApiBase } from "@/lib/apiBase";
 import { getRuntimeConfig } from "@/lib/runtimeConfig";
+import { clientIp, isRateLimited } from "@/lib/rateLimit";
 
 const TABLE_COOKIE = "pedilo_table_token";
 const WELCOME_COOKIE = "pedilo_welcome";
@@ -21,6 +22,11 @@ export async function GET(
 
   const token = params.token?.trim();
   if (!token || token.length > 100) {
+    return NextResponse.redirect(new URL("/mesa-no-disponible", origin));
+  }
+
+  // Hallazgo 6.8: sin esto, un barrido de tokens de mesa no tenía ninguna fricción en esta capa.
+  if (isRateLimited(`mesa:${clientIp(request)}`, 60_000, 30)) {
     return NextResponse.redirect(new URL("/mesa-no-disponible", origin));
   }
 

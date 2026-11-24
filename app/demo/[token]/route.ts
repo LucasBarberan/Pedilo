@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { requireApiBase } from "@/lib/apiBase";
 import { getRuntimeConfig } from "@/lib/runtimeConfig";
+import { clientIp, isRateLimited } from "@/lib/rateLimit";
 
 // demo-mode Fase 5 (openspec/changes/demo-mode/tasks.md, tarea 5.3; design.md D5). Calco de
 // app/mesa/[token]/route.ts: token del path → valida contra el backend → cookie httpOnly →
@@ -19,6 +20,11 @@ export async function GET(
 
   const token = params.token?.trim();
   if (!token || token.length > 100) {
+    return NextResponse.redirect(new URL("/demo-no-disponible", origin));
+  }
+
+  // Hallazgo 6.8: sin esto, un barrido de tokens de demo no tenía ninguna fricción en esta capa.
+  if (isRateLimited(`demo:${clientIp(request)}`, 60_000, 10)) {
     return NextResponse.redirect(new URL("/demo-no-disponible", origin));
   }
 
