@@ -286,6 +286,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
   const total = useMemo(() => getTotalPrice(), [getTotalPrice]);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [noWhatsAppNotice, setNoWhatsAppNotice] = useState<{ copied: boolean; text: string; onClose: () => void } | null>(null);
   // Snapshot de fidelización al momento de confirmar — se congela acá (no se
   // sigue leyendo el estado en vivo) para que el cartel post-pedido muestre
   // siempre el número real de ESTE pedido, sin importar que después se
@@ -992,7 +993,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
       if (!res.ok) {
         console.error("❌ POST /orders failed", res.status, text);
         const businessMsg = businessErrorMessage(res.status, text);
-        alert(businessMsg ?? `No se pudo guardar el pedido (HTTP ${res.status}).\n${text}`);
+        setFormError(businessMsg ?? "No pudimos guardar tu pedido. Intentá de nuevo en unos minutos.");
         return;
       }
       console.log("✅ Orden creada:", text);
@@ -1112,21 +1113,28 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
         return;
       } else {
+        // El pedido ya quedó guardado, pero el local no tiene número de WhatsApp: el cartel muestra qué hacer y se cierra a mano.
+        const onClose = () => {
+          clearCart();
+          if (createdTrackingToken) window.location.href = `${APP_URL}/seguimiento/${createdTrackingToken}`;
+          else onSuccess?.();
+        };
         try {
           await navigator.clipboard.writeText(textRaw);
-          alert("Número de WhatsApp no configurado. El detalle del pedido fue copiado al portapapeles.");
+          setNoWhatsAppNotice({ copied: true, text: textRaw, onClose });
         } catch {
-          alert("Número de WhatsApp no configurado. Copiá y pegá este mensaje:\n\n" + textRaw);
+          setNoWhatsAppNotice({ copied: false, text: textRaw, onClose });
         }
       }
     } catch (e) {
       console.error("❌ Error en submitOrder:", e);
+      setShowWhatsAppModal(false); // el aviso de error se ve en el formulario, no debajo del cartel
       if (isTableMode) {
         setFormError(e instanceof Error ? e.message : "No se pudo enviar la comanda.");
       } else if (e instanceof UserFacingError) {
-        alert(e.message);
+        setFormError(e.message);
       } else {
-        alert("Ocurrió un error al procesar el pedido. Revisá consola.");
+        setFormError("Ocurrió un error al procesar el pedido. Intentá de nuevo.");
       }
     } finally {
       setSubmitting(false);
@@ -1870,7 +1878,7 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
 
         {formError && (
           <div className="mx-auto w-full max-w-6xl px-4">
-            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 text-red-700 p-3 flex items-start justify-between">
+            <div data-testid="checkout-error" role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 text-red-700 p-3 flex items-start justify-between">
               <div className="text-sm">⚠️ {formError}</div>
               <button
                 onClick={() => setFormError("")}
@@ -1936,13 +1944,47 @@ export default function CheckoutForm({ onCancel, onSuccess }: Props) {
                 </div>
               )}
 
-              <div className="text-3xl mb-2">📲</div>
-              <h3 className="text-lg font-bold mb-2">Pedido casi listo</h3>
-              <p className="text-sm text-gray-700 mb-4">
-                No olvides <strong>enviar el mensaje por WhatsApp</strong> para que podamos
-                <strong> confirmar tu pedido</strong>.
-              </p>
-              <p className="text-xs text-gray-500">Te estamos redirigiendo…</p>
+              {noWhatsAppNotice ? (
+                <>
+                  <h3 className="text-lg font-bold mb-2">Pedido registrado</h3>
+                  <p className="text-sm text-gray-700 mb-3">
+                    El local no tiene un número de WhatsApp configurado.{" "}
+                    {noWhatsAppNotice.copied
+                      ? "Copiamos el detalle de tu pedido al portapapeles."
+                      : "Copiá este detalle de tu pedido:"}
+                  </p>
+                  {!noWhatsAppNotice.copied && (
+                    <textarea
+                      readOnly
+                      rows={6}
+                      value={noWhatsAppNotice.text}
+                      aria-label="Detalle del pedido"
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="mb-3 w-full rounded-md border border-gray-300 p-2 text-left text-xs"
+                    />
+                  )}
+                  <Button
+                    className="w-full"
+                    onClick={() => {
+                      setNoWhatsAppNotice(null);
+                      setShowWhatsAppModal(false);
+                      noWhatsAppNotice.onClose();
+                    }}
+                  >
+                    Entendido
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <div className="text-3xl mb-2">📲</div>
+                  <h3 className="text-lg font-bold mb-2">Pedido casi listo</h3>
+                  <p className="text-sm text-gray-700 mb-4">
+                    No olvides <strong>enviar el mensaje por WhatsApp</strong> para que podamos
+                    <strong> confirmar tu pedido</strong>.
+                  </p>
+                  <p className="text-xs text-gray-500">Te estamos redirigiendo…</p>
+                </>
+              )}
             </div>
           </div>
         )}

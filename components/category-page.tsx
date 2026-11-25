@@ -191,7 +191,7 @@ export default function CategoryPageClient({
     return Array.from(map.values()).sort((a, b) =>
       String(a.header.title).localeCompare(String(b.header.title), "es")
     );
-  }, [products]);
+  }, [products, runtime]);
 
   const handleCartClick = () => router.push("/carrito");
 

@@ -95,6 +95,8 @@ export function TableOrderProvider({
     } finally {
       setLoading(false);
     }
+    // La ruta se mira solo la primera vez: agregarla volvería a validar la mesa en cada navegación.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTableMode]);
 
   const requestBill = useCallback(async () => {

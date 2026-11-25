@@ -238,7 +238,7 @@ export default function CartPage() {
                                       </p>
                                     )}
                                     {ci.comment?.trim() && (
-                                      <p className="text-xs text-gray-400 italic">"{ci.comment}"</p>
+                                      <p className="text-xs text-gray-400 italic">&quot;{ci.comment}&quot;</p>
                                     )}
                                   </div>
                                 );

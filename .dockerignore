@@ -1,0 +1,8 @@
+# Lo que NO debe entrar al contexto de build: el dockerfile instala sus propias dependencias y construye desde cero.
+# Los `.env*` NO se excluyen acá porque el `dockerfile` por cliente (modo single) los usa; `dockerfile.shared` los borra antes de compilar.
+node_modules
+.next
+.next-*
+.git
+npm-debug.log*
+*.log

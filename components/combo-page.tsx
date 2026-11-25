@@ -335,6 +335,8 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
     const overrideMap = new Map((combo?.modifierOverrides ?? []).map((ov) => [Number(ov.modifierOptionId), ov]));
     setSlotSelections(slots.map((s) => buildEmptySlotSelection(s, overrideMap)));
     setSlotGroupErrors(new Set());
+    // Solo al cambiar de combo: `slots` y los overrides se recalculan en cada render y borrarían lo que se está eligiendo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [combo?.id, hasSlotModifiers]);
 
   // Cotizar subtotal en tiempo real mientras el usuario elige opciones en el stepper
@@ -354,6 +356,8 @@ export default function ComboDetailPage({ combo: initialCombo, mainProduct: init
       })
       .catch(() => {});
     return () => ctrl.abort();
+    // `allSlotInputs` se recrea en cada render: agregarla cotizaría sin parar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasSlotModifiers, combo?.id, slotSelections, inclusionSelectionsForQuote]);
 
   const toggleSlotOption = (groupId: number, optionId: number, maxSelections: number) => {

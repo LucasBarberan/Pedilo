@@ -47,6 +47,8 @@ export function useBusinessStatusSmart() {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
     };
+    // Solo se reprograma cuando cambia el próximo horario, no en cada respuesta.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.web.nextChange?.at]);
 
   return { data, error, isLoading: !data && !error, refresh };

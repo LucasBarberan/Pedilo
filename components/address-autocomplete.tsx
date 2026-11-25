@@ -188,7 +188,7 @@ export function AddressAutocomplete({
         // — el placeId nunca llega, la cotización server-side lo va a rechazar.
       }
     },
-    [onChange, onPlaceSelect]
+    [onChange, onPlaceSelect, API_KEY]
   );
 
   return (
